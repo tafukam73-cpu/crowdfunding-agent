@@ -1,0 +1,52 @@
+# Claude Code 実装指示書
+
+## 前提
+
+このプロジェクトは、海外クラウドファンディング案件を自動収集し、日本クラファン向きの商品をAIで評価・管理するローカルWebアプリです。
+
+詳細要件は `requirements.md` を必ず参照してください。
+
+## 開発方針
+
+- まずMVPを完成させる
+- 一度に全機能を作らない
+- 各ステップごとに動作確認できる状態にする
+- 自宅PCでDocker Compose起動できる構成にする
+- UIは日本語
+- 利用者は1人
+- 外部公開はしない
+- メールは自動送信せず、下書き生成まで
+- スクレイピング処理はサイト別に分離する
+- AI評価処理は後から改善しやすい構造にする
+
+---
+
+## 推奨ディレクトリ構成
+
+```text
+crowdfunding-agent/
+├─ backend/
+│  ├─ app/
+│  │  ├─ main.py
+│  │  ├─ models/
+│  │  ├─ schemas/
+│  │  ├─ routers/
+│  │  ├─ services/
+│  │  ├─ scrapers/
+│  │  ├─ ai/
+│  │  └─ db/
+│  ├─ alembic/
+│  ├─ requirements.txt
+│  └─ Dockerfile
+│
+├─ frontend/
+│  ├─ app/
+│  ├─ components/
+│  ├─ lib/
+│  ├─ package.json
+│  └─ Dockerfile
+│
+├─ docker-compose.yml
+├─ .env.example
+├─ requirements.md
+└─ claude_tasks.md

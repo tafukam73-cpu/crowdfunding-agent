@@ -1,0 +1,70 @@
+{
+  "projects": [
+    {
+      "id": 1001,
+      "name": "NovaCharge: 折りたたみGaN急速充電器",
+      "blurb": "世界最小クラスの100W GaN充電器。4ポート同時充電に対応。",
+      "goal": 20000.0,
+      "pledged": 184320.5,
+      "usd_pledged": 184320.5,
+      "currency": "USD",
+      "backers_count": 2143,
+      "country": "US",
+      "launched_at": 1714521600,
+      "deadline": 1717200000,
+      "slug": "novacharge",
+      "category": { "id": 52, "name": "Gadgets", "slug": "technology/gadgets" },
+      "creator": {
+        "name": "Nova Labs",
+        "urls": { "web": { "user": "https://www.kickstarter.com/profile/novalabs" } }
+      },
+      "photo": {
+        "full": "https://ksr-ugc.imgix.net/assets/novacharge_full.jpg",
+        "1024x576": "https://ksr-ugc.imgix.net/assets/novacharge_1024.jpg"
+      },
+      "urls": {
+        "web": { "project": "https://www.kickstarter.com/projects/novalabs/novacharge" }
+      }
+    },
+    {
+      "id": 1002,
+      "name": "AeroDesk: 立ち作業対応スマートデスク",
+      "blurb": "アプリ連動で高さと姿勢を記録する電動昇降デスク。",
+      "goal": 50000.0,
+      "pledged": 31250.0,
+      "usd_pledged": 31250.0,
+      "currency": "USD",
+      "backers_count": 410,
+      "country": "US",
+      "launched_at": 1715731200,
+      "deadline": 1718323200,
+      "slug": "aerodesk",
+      "category": { "id": 337, "name": "Design", "slug": "design" },
+      "creator": {
+        "name": "Aero Works",
+        "urls": { "web": { "user": "https://www.kickstarter.com/profile/aeroworks" } }
+      },
+      "photo": { "full": "https://ksr-ugc.imgix.net/assets/aerodesk_full.jpg" },
+      "urls": {
+        "web": { "project": "https://www.kickstarter.com/projects/aeroworks/aerodesk" }
+      }
+    },
+    {
+      "id": 1003,
+      "name": "MiniTrack 位置トラッカー",
+      "blurb": null,
+      "goal": 8000.0,
+      "pledged": 0.0,
+      "currency": "GBP",
+      "backers_count": 0,
+      "country": "GB",
+      "launched_at": null,
+      "deadline": 1719000000,
+      "slug": "minitrack",
+      "urls": {
+        "web": { "project": "https://www.kickstarter.com/projects/tinyco/minitrack" }
+      }
+    }
+  ],
+  "total_hits": 3
+}
