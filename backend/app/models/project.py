@@ -80,6 +80,14 @@ class Project(Base):
     # CRM のメーカー（営業先企業）への紐づけ。未リンクなら null。
     maker_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
+    # --- 日本未上陸判定キャッシュ（最新判定。一覧表示用） ---
+    latest_availability: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )
+    latest_availability_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # --- 営業ステータス ---
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ProjectStatus.new.value, index=True

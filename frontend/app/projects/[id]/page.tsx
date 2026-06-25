@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import AvailabilityPanel from "@/components/AvailabilityPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
@@ -255,6 +256,9 @@ export default function ProjectDetail() {
             )}
           </div>
         </div>
+
+        {/* 日本未上陸判定 */}
+        <AvailabilityPanel projectId={id} />
 
         {/* 類似する日本の成功事例 */}
         <SimilarSuccessPanel projectId={id} />

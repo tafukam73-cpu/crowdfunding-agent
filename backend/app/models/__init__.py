@@ -1,3 +1,9 @@
+from app.models.availability import (
+    AvailabilityCheck,
+    AvailabilityHit,
+    AvailabilitySite,
+    AvailabilityVerdict,
+)
 from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivity
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.evaluation import AiEvaluation, Recommendation
@@ -27,5 +33,9 @@ __all__ = [
     "SalesActivity",
     "CrmStatus",
     "ActivityKind",
+    "AvailabilityCheck",
+    "AvailabilityHit",
+    "AvailabilitySite",
+    "AvailabilityVerdict",
     "UsageLog",
 ]

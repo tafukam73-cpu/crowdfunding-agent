@@ -11,6 +11,8 @@ import ScrapePanel from "@/components/ScrapePanel";
 import SourceBadge from "@/components/SourceBadge";
 import StatusBadge from "@/components/StatusBadge";
 import {
+  AVAILABILITY_COLORS,
+  AVAILABILITY_LABELS,
   evaluateRun,
   fetchEvaluateEstimate,
   fetchProjects,
@@ -243,6 +245,7 @@ export default function Home() {
                 <th className="px-4 py-2">サイト</th>
                 <th className="px-4 py-2">スコア</th>
                 <th className="px-4 py-2">推奨度</th>
+                <th className="px-4 py-2">日本判定</th>
                 <th className="px-4 py-2">調達額</th>
                 <th className="px-4 py-2">達成率</th>
                 <th className="px-4 py-2">支援者</th>
@@ -280,6 +283,17 @@ export default function Home() {
                       <RecBadge recommendation={p.latest_recommendation} />
                     </td>
                     <td className="px-4 py-3">
+                      {p.latest_availability ? (
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-medium ${AVAILABILITY_COLORS[p.latest_availability]}`}
+                        >
+                          {AVAILABILITY_LABELS[p.latest_availability]}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       {formatMoney(p.raised_amount, p.currency)}
                     </td>
                     <td className="px-4 py-3">{rate != null ? `${rate}%` : "—"}</td>
@@ -297,7 +311,7 @@ export default function Home() {
               })}
               {!loading && data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
                     該当する案件がありません
                   </td>
                 </tr>

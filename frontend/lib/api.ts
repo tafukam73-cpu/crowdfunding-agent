@@ -41,8 +41,45 @@ export type Project = {
   latest_score: number | null;
   latest_recommendation: Recommendation | null;
   maker_id: number | null;
+  latest_availability: AvailabilityVerdict | null;
+  latest_availability_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AvailabilityVerdict = "not_landed" | "possible" | "sold";
+
+export const AVAILABILITY_LABELS: Record<AvailabilityVerdict, string> = {
+  not_landed: "未上陸",
+  possible: "可能性あり",
+  sold: "日本販売済み",
+};
+
+export const AVAILABILITY_COLORS: Record<AvailabilityVerdict, string> = {
+  not_landed: "bg-green-100 text-green-700",
+  possible: "bg-amber-100 text-amber-700",
+  sold: "bg-red-100 text-red-700",
+};
+
+export type AvailabilityHit = {
+  id: number;
+  site: string;
+  title: string | null;
+  url: string | null;
+  match_score: number;
+  created_at: string;
+};
+
+export type AvailabilityCheck = {
+  id: number;
+  project_id: number;
+  verdict: AvailabilityVerdict;
+  score: number;
+  query: string | null;
+  summary: string | null;
+  engine: string;
+  created_at: string;
+  hits: AvailabilityHit[];
 };
 
 export type Evaluation = {
@@ -716,6 +753,27 @@ export async function deleteActivity(id: number): Promise<void> {
 export async function fetchReminders(withinDays?: number): Promise<Reminder[]> {
   const qs = withinDays != null ? `?within_days=${withinDays}` : "";
   const res = await fetch(`${API_BASE}/crm/reminders${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// ===== 日本未上陸判定 =====
+export async function runAvailabilityCheck(
+  projectId: number
+): Promise<AvailabilityCheck> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/availability-check`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAvailabilityChecks(
+  projectId: number
+): Promise<AvailabilityCheck[]> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/availability-checks`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
