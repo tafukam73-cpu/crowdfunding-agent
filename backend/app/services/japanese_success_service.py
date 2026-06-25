@@ -9,16 +9,21 @@
 """
 from __future__ import annotations
 
+import logging
 import re
+from datetime import datetime, timezone
 
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import Project
+from app.models.scrape_run import ScrapeRun, ScrapeStatus
 from app.scrapers.greenfunding import GreenFundingScraper
 from app.scrapers.makuake import MakuakeScraper
 from app.schemas.japanese_success import CollectResult, JapaneseSuccessCreate
+
+logger = logging.getLogger("japanese_success")
 
 # 収集対象の日本クラファンプラットフォーム（platform 未指定時はこの全件を収集）
 JAPANESE_PLATFORMS: list[str] = [
@@ -69,13 +74,57 @@ def upsert_by_source_url(
     return existing, False
 
 
+def _collect_one(db: Session, platform: str, limit: int) -> tuple[int, int, int]:
+    """1 プラットフォームを収集し scrape_runs に記録する。
+
+    実行結果（成功/エラー・件数）を scrape_runs に残す（要件）。
+    収集失敗時も例外を送出せず、この回の件数 0 を返して他サイトの収集を続ける。
+    Returns: (fetched, created, updated)
+    """
+    run = ScrapeRun(site=platform, status=ScrapeStatus.running.value)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    fetched = created = updated = 0
+    try:
+        scraper = _SCRAPERS[platform](limit=limit)
+        items = scraper.scrape()
+        fetched = len(items)
+        for item in items:
+            _, was_created = upsert_by_source_url(db, item)
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+        run.fetched_count = fetched
+        run.created_count = created
+        run.updated_count = updated
+        run.status = ScrapeStatus.success.value
+    except Exception as exc:  # noqa: BLE001  失敗は scrape_runs に記録し継続
+        db.rollback()
+        run.status = ScrapeStatus.error.value
+        run.error = str(exc)[:2000]
+        fetched = created = updated = 0
+        logger.warning("japanese-success collect failed (%s): %s", platform, exc)
+    finally:
+        run.finished_at = datetime.now(timezone.utc)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+    return fetched, created, updated
+
+
 def collect(
-    db: Session, platform: str | None = None, limit: int = 50
+    db: Session, platform: str | None = None, limit: int = 20
 ) -> CollectResult:
-    """日本クラファンの成功案件を収集して保存する（現状モック）。
+    """日本クラファンの成功案件を収集して保存する（実スクレイピング・Playwright）。
 
     platform 指定あり：そのプラットフォームのみ収集。
     platform 指定なし：Makuake + GreenFunding を一括収集。
+    各プラットフォームの実行結果は scrape_runs に記録する。
+    重複は source_url をキーに upsert して防止する。
     """
     if platform is not None and platform not in _SCRAPERS:
         raise ValueError(f"未対応のプラットフォームです: {platform}")
@@ -84,16 +133,10 @@ def collect(
 
     fetched = created = updated = 0
     for p in platforms:
-        scraper = _SCRAPERS[p](limit=limit)
-        items = scraper.scrape()
-        fetched += len(items)
-        for item in items:
-            _, was_created = upsert_by_source_url(db, item)
-            if was_created:
-                created += 1
-            else:
-                updated += 1
-    db.commit()
+        f, c, u = _collect_one(db, p, limit)
+        fetched += f
+        created += c
+        updated += u
     return CollectResult(fetched=fetched, created=created, updated=updated)
 
 

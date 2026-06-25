@@ -1,126 +1,114 @@
-"""GreenFunding 成功案件スクレイパー。
+"""GreenFunding 成功案件スクレイパー（実スクレイピング・Playwright）。
 
-日本クラファン（GreenFunding）の応援購入成功案件を収集し、JapaneseSuccessCreate
-のリストを返す。Makuake スクレイパーと同じインターフェース（`scrape()`）で、
-比較用の日本成功事例データを蓄える。
+トップ（discover）から公開中プロジェクト（/lab/projects/<id>）を集め、各詳細
+ページを開いて JapaneseSuccessCreate へ正規化する。
 
-現状はモック実装（実サイトへはアクセスしない）。後から Playwright 等による実
-スクレイパーへ差し替えやすい構造にしている（差し替えフローは makuake.py 参照）。
+GreenFunding は Makuake と構造が異なる：
+  - og:meta が無い → タイトルは <title>、画像は assets の画像URLから
+  - 金額は「目標¥ X」「支援総額 ¥ Y」（¥ 前置）
+  - 支援人数は「支援人数 N人」
+  - カテゴリは category_id 付きリンクのテキスト先頭
+  - 掲載終了日は明示が無く「残り時間 N 日」表示 → 今日+N日で近似（取得不可なら null）
+  - 動画は YouTube/Vimeo 埋め込み（無ければ null）
+取得できない項目は null。
 """
 from __future__ import annotations
 
-from datetime import date
-from decimal import Decimal
+import re
+from datetime import date, timedelta
+from html import unescape
 
-from app.models.japanese_success import MIN_SUCCESS_JPY
+from app.scrapers.jp_success_base import (
+    JpSuccessScraper,
+    find_amount_yen,
+    find_count,
+    find_video,
+    jsonld_blocks,
+)
 from app.schemas.japanese_success import JapaneseSuccessCreate
 
 PLATFORM = "greenfunding"
-
-# GreenFunding の成功案件モックデータ。
-# カテゴリは海外案件側（projects）と揃え、類似事例マッチングが効くようにしている。
-_MOCK: list[dict] = [
-    dict(
-        title="耳をふさがない骨伝導オープンイヤホン「OPEN-BONE」",
-        category="オーディオ",
-        description="運転・ランニング中も周囲の音を聞きながら使える骨伝導イヤホン。",
-        image_url="https://picsum.photos/seed/gf-bone/640/360",
-        video_url="https://greenfunding.jp/project/open-bone/",
-        goal_amount=Decimal("1000000.00"),
-        raised_amount=Decimal("42300000.00"),
-        backers_count=5210,
-        start_date=date(2025, 6, 1),
-        end_date=date(2025, 7, 31),
-        maker_name="オープンボーン株式会社",
-        maker_url="https://example.co.jp/openbone",
-        slug="open-bone",
-    ),
-    dict(
-        title="充電不要・ソーラー駆動の屋外センサーライト「SUN-LIGHT」",
-        category="ガジェット",
-        description="日中の太陽光で充電し夜間自動点灯。配線不要の防水センサーライト。",
-        image_url="https://picsum.photos/seed/gf-light/640/360",
-        video_url=None,
-        goal_amount=Decimal("500000.00"),
-        raised_amount=Decimal("9800000.00"),
-        backers_count=2360,
-        start_date=date(2025, 9, 10),
-        end_date=date(2025, 10, 20),
-        maker_name="サンライト合同会社",
-        maker_url="https://example.co.jp/sunlight",
-        slug="sun-light",
-    ),
-    dict(
-        title="一台でキャンプ調理が完結する折りたたみ焚き火台「FIRE-FOLD」",
-        category="アウトドア",
-        description="薄さ3cmに折りたためる、調理対応の高耐久ステンレス焚き火台。",
-        image_url="https://picsum.photos/seed/gf-fire/640/360",
-        video_url="https://greenfunding.jp/project/fire-fold/",
-        goal_amount=Decimal("800000.00"),
-        raised_amount=Decimal("31500000.00"),
-        backers_count=7180,
-        start_date=date(2025, 4, 1),
-        end_date=date(2025, 5, 15),
-        maker_name="ファイアフォールド株式会社",
-        maker_url="https://example.co.jp/firefold",
-        slug="fire-fold",
-    ),
-    dict(
-        title="空気を読んで自動調光する間接照明「MOOD-LAMP」",
-        category="インテリア",
-        description="室内の明るさと時間帯に応じて自動で色温度を調整するスマート照明。",
-        image_url="https://picsum.photos/seed/gf-lamp/640/360",
-        video_url=None,
-        goal_amount=Decimal("600000.00"),
-        raised_amount=Decimal("8700000.00"),
-        backers_count=1640,
-        start_date=date(2025, 10, 5),
-        end_date=date(2025, 11, 18),
-        maker_name="ムードラボ株式会社",
-        maker_url="https://example.co.jp/moodlab",
-        slug="mood-lamp",
-    ),
-    dict(
-        title="洗えてたためる超軽量シリコン保存容器「FLEX-BOX」",
-        category="ホーム",
-        description="使わない時はぺたんこに。電子レンジ・食洗機対応の密閉シリコン容器。",
-        image_url="https://picsum.photos/seed/gf-box/640/360",
-        video_url="https://greenfunding.jp/project/flex-box/",
-        goal_amount=Decimal("300000.00"),
-        raised_amount=Decimal("14200000.00"),
-        backers_count=6920,
-        start_date=date(2025, 11, 1),
-        end_date=date(2025, 12, 10),
-        maker_name="フレックスボックス株式会社",
-        maker_url="https://example.co.jp/flexbox",
-        slug="flex-box",
-    ),
-]
+BASE = "https://greenfunding.jp"
+DISCOVER_URL = f"{BASE}/"
 
 
-class GreenFundingScraper:
-    """GreenFunding 成功案件スクレイパー（現状モック）。"""
+def _title(html: str) -> str | None:
+    m = re.search(r"<title>(.*?)</title>", html, re.S)
+    if not m:
+        return None
+    t = re.sub(r"\s+", " ", m.group(1)).replace("| GREENFUNDING", "")
+    return unescape(t).strip() or None
 
+
+def _category(html: str) -> str | None:
+    """最初の category_id 付きリンクのテキストをカテゴリとして採用。"""
+    for m in re.finditer(
+        r'/lab/projects/search\?category_id=\d+["\'][^>]*>(.*?)</a>', html, re.S
+    ):
+        txt = re.sub(r"<[^>]+>", "", m.group(1)).replace("#", "").strip()
+        if txt:
+            return txt
+    return None
+
+
+def _image(html: str) -> str | None:
+    """プロジェクト画像（svg アイコンは除外し、写真系拡張子を優先）。"""
+    for m in re.finditer(
+        r'https://assets\.greenfunding\.jp/[^"\']+\.(?:jpg|jpeg|png|webp)', html
+    ):
+        return m.group(0)
+    return None
+
+
+def _end_date(inner_text: str) -> date | None:
+    """「残り時間 N 日」から掲載終了日を近似（明示が無いため）。"""
+    m = re.search(r"残り時間\s*(\d+)\s*日", inner_text)
+    if not m:
+        return None
+    return date.today() + timedelta(days=int(m.group(1)))
+
+
+class GreenFundingScraper(JpSuccessScraper):
     platform = PLATFORM
 
-    def __init__(self, limit: int = 50) -> None:
-        # 1 回の収集で取得する最大件数
-        self.limit = limit
+    def discover_urls(self) -> list[str]:
+        html = self._client.get_text(DISCOVER_URL)
+        ids = re.findall(r"/lab/projects/(\d+)", html)
+        seen: list[str] = []
+        for i in ids:
+            if i not in seen:
+                seen.append(i)
+        return [f"{BASE}/lab/projects/{i}" for i in seen]
 
-    def scrape(self) -> list[JapaneseSuccessCreate]:
-        items: list[JapaneseSuccessCreate] = []
-        for row in _MOCK[: self.limit]:
-            raised = row["raised_amount"]
-            # 成功案件（応援購入総額が下限以上）のみ採用
-            if raised is None or raised < MIN_SUCCESS_JPY:
-                continue
-            data = {k: v for k, v in row.items() if k != "slug"}
-            items.append(
-                JapaneseSuccessCreate(
-                    platform=self.platform,
-                    source_url=f"https://greenfunding.jp/project/{row['slug']}/",
-                    currency="JPY",
-                    **data,
-                )
-            )
-        return items
+    def parse_detail(
+        self, url: str, inner_text: str, html: str
+    ) -> JapaneseSuccessCreate | None:
+        title = _title(html)
+        if not title:
+            return None
+
+        # 説明は JSON-LD(Product) があれば採用（無ければ null）
+        product = next(
+            (b for b in jsonld_blocks(html) if b.get("@type") == "Product"), {}
+        )
+        description = product.get("description")
+        description = unescape(description) if description else None
+        image_url = product.get("image") or _image(html)
+
+        return JapaneseSuccessCreate(
+            platform=self.platform,
+            title=title[:500],
+            source_url=url,
+            category=_category(html),
+            description=description,
+            image_url=image_url,
+            video_url=find_video(html),
+            currency="JPY",
+            goal_amount=find_amount_yen(inner_text, "目標"),
+            raised_amount=find_amount_yen(inner_text, "支援総額"),
+            backers_count=find_count(inner_text, "支援人数", "人"),
+            start_date=None,  # ページに明示が無い
+            end_date=_end_date(inner_text),
+            maker_name=None,  # 詳細ページで安定取得できないため null
+            maker_url=None,
+        )

@@ -1,148 +1,112 @@
-"""Makuake 成功案件スクレイパー。
+"""Makuake 成功案件スクレイパー（実スクレイピング・Playwright）。
 
-日本クラファン（Makuake）の応援購入成功案件を収集し、JapaneseSuccessCreate の
-リストを返す。海外案件の収集（projects）とは別系統で、営業時の「日本での類似成功
-事例」比較に使う比較用データを蓄える。
+discover ページから公開中プロジェクトを集め、各詳細ページを開いて
+JapaneseSuccessCreate へ正規化する。応援購入総額が下限以上の案件を
+「成功事例」として比較用に蓄える。
 
-現状はモック実装（実サイトへはアクセスしない）。BaseScraper と同じく
-`scrape()` で正規化済みデータを返すインターフェースに揃えてあるため、後から
-Playwright 等による実スクレイパーへ差し替えやすい。
-
-差し替え時の想定フロー：
-  1. 一覧（カテゴリ別ランキング等）を取得
-  2. 各案件詳細をパース
-  3. 応援購入総額が MIN_SUCCESS_JPY 以上のものだけ成功案件として採用
-  4. JapaneseSuccessCreate へ正規化
+取得方針：
+  - タイトル/説明/画像：JSON-LD(Product) と og:meta から
+  - カテゴリ：プロジェクトページのタグ（#ガジェット 等）の先頭
+  - 応援購入総額/目標金額/サポーター数/終了日：本文テキストから
+  - 動画：YouTube/Vimeo 埋め込み or og:video（無ければ null）
+  - 開始日/メーカー公式URL：ページに安定して存在しないため基本 null
+取得できない項目は null。
 """
 from __future__ import annotations
 
-from datetime import date
-from decimal import Decimal
+import re
+from html import unescape
 
-from app.models.japanese_success import MIN_SUCCESS_JPY
+from app.scrapers.jp_success_base import (
+    JpSuccessScraper,
+    find_amount,
+    find_count,
+    find_date_after,
+    find_video,
+    jsonld_blocks,
+    meta_content,
+)
 from app.schemas.japanese_success import JapaneseSuccessCreate
 
 PLATFORM = "makuake"
-
-# Makuake の成功案件モックデータ。
-# カテゴリは海外案件側（projects）と揃えてあり、類似事例マッチングが効くようにしている。
-_MOCK: list[dict] = [
-    dict(
-        title="どこでも充電できる折りたたみソーラーパネル「SOLA-FOLD」",
-        category="ガジェット",
-        description="アウトドアや防災に。軽量で持ち運べる高効率ソーラーパネル。",
-        image_url="https://picsum.photos/seed/jp-solar/640/360",
-        video_url="https://www.makuake.com/project/sola-fold/",
-        goal_amount=Decimal("1000000.00"),
-        raised_amount=Decimal("38500000.00"),
-        backers_count=2980,
-        start_date=date(2025, 9, 1),
-        end_date=date(2025, 10, 31),
-        maker_name="ソラフォールド株式会社",
-        maker_url="https://example.co.jp/solafold",
-        slug="sola-fold",
-    ),
-    dict(
-        title="AIが空間を解析する全自動ノイキャンイヤホン「QUIET-AI」",
-        category="オーディオ",
-        description="周囲の騒音をAIがリアルタイム解析し最適なノイズキャンセリングを実現。",
-        image_url="https://picsum.photos/seed/jp-earbuds/640/360",
-        video_url="https://www.makuake.com/project/quiet-ai/",
-        goal_amount=Decimal("2000000.00"),
-        raised_amount=Decimal("96200000.00"),
-        backers_count=11240,
-        start_date=date(2025, 7, 10),
-        end_date=date(2025, 8, 31),
-        maker_name="クワイエット株式会社",
-        maker_url="https://example.co.jp/quiet",
-        slug="quiet-ai",
-    ),
-    dict(
-        title="財布に入る18機能チタンマルチツール「TITAN-CARD」",
-        category="アウトドア",
-        description="厚さ2mm。カードサイズに必要な機能を凝縮したEDCツール。",
-        image_url="https://picsum.photos/seed/jp-titanium/640/360",
-        video_url=None,
-        goal_amount=Decimal("500000.00"),
-        raised_amount=Decimal("21800000.00"),
-        backers_count=6730,
-        start_date=date(2025, 10, 1),
-        end_date=date(2025, 11, 20),
-        maker_name="エッジワークス合同会社",
-        maker_url="https://example.co.jp/edgeworks",
-        slug="titan-card",
-    ),
-    dict(
-        title="アプリで全自動管理する卓上水耕栽培キット「GROW-BOX」",
-        category="ホーム",
-        description="水やり・照明・温度をアプリで自動管理。初心者でも野菜が育つ。",
-        image_url="https://picsum.photos/seed/jp-garden/640/360",
-        video_url="https://www.makuake.com/project/grow-box/",
-        goal_amount=Decimal("1500000.00"),
-        raised_amount=Decimal("28900000.00"),
-        backers_count=3410,
-        start_date=date(2025, 5, 1),
-        end_date=date(2025, 6, 30),
-        maker_name="グリーンラボ株式会社",
-        maker_url="https://example.co.jp/greenlab",
-        slug="grow-box",
-    ),
-    dict(
-        title="磁力で宙に浮く回転式デザイン時計「LEVI-CLOCK」",
-        category="インテリア",
-        description="磁気浮上で静かに回転。近未来的なデザインの卓上時計。",
-        image_url="https://picsum.photos/seed/jp-clock/640/360",
-        video_url=None,
-        goal_amount=Decimal("800000.00"),
-        raised_amount=Decimal("12400000.00"),
-        backers_count=1520,
-        start_date=date(2025, 8, 15),
-        end_date=date(2025, 9, 30),
-        maker_name="レビデザイン株式会社",
-        maker_url="https://example.co.jp/levidesign",
-        slug="levi-clock",
-    ),
-    dict(
-        title="3秒で乾く超吸水マイクロファイバータオル「DRY-FAST」",
-        category="ホーム",
-        description="独自繊維で吸水・速乾を両立。旅行やジムに最適な軽量タオル。",
-        image_url="https://picsum.photos/seed/jp-towel/640/360",
-        video_url="https://www.makuake.com/project/dry-fast/",
-        goal_amount=Decimal("300000.00"),
-        raised_amount=Decimal("7600000.00"),
-        backers_count=4120,
-        start_date=date(2025, 11, 1),
-        end_date=date(2025, 12, 15),
-        maker_name="ドライファスト株式会社",
-        maker_url="https://example.co.jp/dryfast",
-        slug="dry-fast",
-    ),
-]
+BASE = "https://www.makuake.com"
+DISCOVER_URL = f"{BASE}/discover/"
 
 
-class MakuakeScraper:
-    """Makuake 成功案件スクレイパー（現状モック）。"""
+def _clean_title(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    # og:title は "Makuake｜<本題>｜Makuake（マクアケ）" 形式
+    t = raw.replace("｜Makuake（マクアケ）", "").replace("Makuake｜", "")
+    return t.strip() or None
 
+
+def _first_tag_category(html: str) -> str | None:
+    """最初の #タグ をカテゴリとして採用（海外案件のカテゴリと整合しやすい）。"""
+    for m in re.finditer(r'/discover/tags/\d+/[^"\']*["\'][^>]*>(.*?)</a>', html, re.S):
+        txt = re.sub(r"<[^>]+>", "", m.group(1))
+        txt = txt.replace("#", "").strip()
+        if txt:
+            return txt
+    return None
+
+
+def _maker_name(inner_text: str) -> str | None:
+    """「実行者」付近の名称を best-effort で取得（取れなければ null）。"""
+    m = re.search(r"実行者\s*[:：]?\s*\n?\s*([^\n]{2,40})", inner_text)
+    if not m:
+        return None
+    cand = m.group(1).strip()
+    # UI ラベルや誘導文を除外
+    if not cand or "お問い合わせ" in cand or "フォロー" in cand:
+        return None
+    return cand
+
+
+class MakuakeScraper(JpSuccessScraper):
     platform = PLATFORM
 
-    def __init__(self, limit: int = 50) -> None:
-        # 1 回の収集で取得する最大件数
-        self.limit = limit
+    def discover_urls(self) -> list[str]:
+        html = self._client.get_text(DISCOVER_URL)
+        slugs = re.findall(
+            r'href=["\'](?:https://www\.makuake\.com)?/project/([^"\'/?#]+)', html
+        )
+        seen: list[str] = []
+        for s in slugs:
+            if s not in seen:
+                seen.append(s)
+        return [f"{BASE}/project/{s}/" for s in seen]
 
-    def scrape(self) -> list[JapaneseSuccessCreate]:
-        items: list[JapaneseSuccessCreate] = []
-        for row in _MOCK[: self.limit]:
-            raised = row["raised_amount"]
-            # 成功案件（応援購入総額が下限以上）のみ採用
-            if raised is None or raised < MIN_SUCCESS_JPY:
-                continue
-            data = {k: v for k, v in row.items() if k != "slug"}
-            items.append(
-                JapaneseSuccessCreate(
-                    platform=self.platform,
-                    source_url=f"https://www.makuake.com/project/{row['slug']}/",
-                    currency="JPY",
-                    **data,
-                )
-            )
-        return items
+    def parse_detail(
+        self, url: str, inner_text: str, html: str
+    ) -> JapaneseSuccessCreate | None:
+        ld = next(
+            (b for b in jsonld_blocks(html) if b.get("@type") == "Product"), {}
+        )
+
+        title = ld.get("name") or _clean_title(meta_content(html, "og:title"))
+        if not title:
+            return None
+        title = unescape(title)
+
+        description = meta_content(html, "og:description") or ld.get("description")
+        description = unescape(description) if description else None
+        image_url = ld.get("image") or meta_content(html, "og:image")
+
+        return JapaneseSuccessCreate(
+            platform=self.platform,
+            title=title[:500],
+            source_url=url,
+            category=_first_tag_category(html),
+            description=description,
+            image_url=image_url,
+            video_url=find_video(html),
+            currency="JPY",
+            goal_amount=find_amount(inner_text, "目標金額"),
+            raised_amount=find_amount(inner_text, "応援購入総額"),
+            backers_count=find_count(inner_text, "サポーター", "人"),
+            start_date=None,  # ページに安定して存在しない
+            end_date=find_date_after(inner_text, "終了日"),
+            maker_name=_maker_name(inner_text),
+            maker_url=None,
+        )

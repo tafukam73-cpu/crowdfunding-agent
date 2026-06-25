@@ -22,17 +22,16 @@ from app.routers import (
     usage,
 )
 from app.seed import seed_if_empty
-from app.services import japanese_success_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 開発用：空ならモックデータを投入（テーブルは Alembic で作成済み前提）
+    # 日本クラファン成功事例は実スクレイピングのため起動時には収集せず、
+    # 画面/API（POST /japanese-success/collect）から明示的に収集する。
     db = SessionLocal()
     try:
         seed_if_empty(db)
-        # 比較用の日本クラファン成功事例も空なら投入
-        japanese_success_service.seed_if_empty(db)
     except Exception:  # noqa: BLE001  マイグレーション未適用などでも起動は止めない
         db.rollback()
     finally:

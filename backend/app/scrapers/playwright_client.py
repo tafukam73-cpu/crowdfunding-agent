@@ -80,6 +80,15 @@ class PlaywrightClient:
         _, html = self._open(url)
         return html
 
+    def get_content(self, url: str) -> tuple[str, str]:
+        """URL を開き (body innerText, full HTML) を返す。
+
+        レンダリング後のテキスト（金額・支援者数など、タグ間に分かれて HTML 上は
+        連続しない値）と、構造化データ（JSON-LD / og:meta）の両方が必要な
+        スクレイパー向け。
+        """
+        return self._open(url)
+
     def get_json(self, url: str, *, params: dict | None = None) -> dict:
         full = url + ("?" + urlencode(params) if params else "")
         inner, _ = self._open(full)
