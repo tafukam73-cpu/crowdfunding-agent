@@ -10,6 +10,7 @@ import Header from "@/components/Header";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
 import {
+  createMakerFromProject,
   evaluateProject,
   fetchEvaluations,
   fetchProject,
@@ -53,6 +54,19 @@ export default function ProjectDetail() {
       setError(String(e));
     } finally {
       setEvaluating(false);
+    }
+  }
+
+  const [linking, setLinking] = useState(false);
+
+  async function onLinkMaker() {
+    setLinking(true);
+    try {
+      const maker = await createMakerFromProject(id);
+      window.location.href = `/crm/makers/${maker.id}`;
+    } catch (e) {
+      setError(String(e));
+      setLinking(false);
     }
   }
 
@@ -173,6 +187,27 @@ export default function ProjectDetail() {
             >
               動画 ↗
             </a>
+          )}
+        </div>
+
+        {/* CRM 連携 */}
+        <div className="mt-6 flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          <span className="font-semibold text-slate-700">営業管理（CRM）</span>
+          {project.maker_id ? (
+            <Link
+              href={`/crm/makers/${project.maker_id}`}
+              className="text-blue-700 hover:underline"
+            >
+              メーカーを開く →
+            </Link>
+          ) : (
+            <button
+              onClick={onLinkMaker}
+              disabled={linking}
+              className="rounded border border-slate-300 px-3 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {linking ? "登録中…" : "CRMにメーカー登録"}
+            </button>
           )}
         </div>
 

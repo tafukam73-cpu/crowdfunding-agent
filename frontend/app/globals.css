@@ -5,3 +5,8 @@
 body {
   @apply bg-slate-50 text-slate-900;
 }
+
+/* CRM などのフォーム入力共通スタイル */
+.input {
+  @apply w-full rounded border border-slate-300 px-2 py-1 text-sm text-slate-900;
+}

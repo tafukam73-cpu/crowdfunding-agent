@@ -36,6 +36,23 @@
   - **サイト単位の結果**：`scrape_runs`（`job_run_id` でジョブに紐づく）
   - ダッシュボードに最新ジョブ・次回予定・サイト別の最終実行とエラー内容を表示
 
+- **CRM（営業管理）**
+  - メーカー（企業）管理：交渉ステータス（リード/連絡済み/交渉中/成約/見送り）・次回アクション・リマインダー
+  - 担当者管理（複数）、営業履歴（メール/電話/打合せ/メモ）の記録
+  - 海外案件（projects）からワンクリックでメーカー登録・紐づけ（`maker_id`）
+  - 次回アクション日に基づくリマインダー（期限切れ表示）
+
+### CRM の主な API
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| GET/POST | `/crm/makers` | メーカー一覧（status/検索）／作成 |
+| GET/PATCH/DELETE | `/crm/makers/{id}` | メーカー詳細（担当者・履歴・紐づく案件）／更新／削除 |
+| POST | `/crm/makers/from-project/{project_id}` | 海外案件からメーカー作成・紐づけ |
+| POST/PATCH/DELETE | `/crm/makers/{id}/contacts`・`/crm/contacts/{id}` | 担当者の追加／更新／削除 |
+| GET/POST | `/crm/makers/{id}/activities` | 営業履歴の参照／追加 |
+| GET | `/crm/reminders` | 次回アクション日のリマインダー（期限切れ判定） |
+
 ### スケジューラの主な API
 
 | メソッド | パス | 説明 |

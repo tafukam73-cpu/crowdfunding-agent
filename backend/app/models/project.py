@@ -77,6 +77,9 @@ class Project(Base):
     maker_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # CRM のメーカー（営業先企業）への紐づけ。未リンクなら null。
+    maker_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
     # --- 営業ステータス ---
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ProjectStatus.new.value, index=True

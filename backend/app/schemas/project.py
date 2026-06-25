@@ -64,6 +64,7 @@ class ProjectOut(ProjectBase):
     status: ProjectStatus
     latest_score: int | None = None
     latest_recommendation: Recommendation | None = None
+    maker_id: int | None = None
     created_at: datetime
     updated_at: datetime
 

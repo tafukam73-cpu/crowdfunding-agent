@@ -1,3 +1,4 @@
+from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivity
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.evaluation import AiEvaluation, Recommendation
 from app.models.japanese_success import JapaneseSuccessProject
@@ -21,5 +22,10 @@ __all__ = [
     "JobLock",
     "JobStatus",
     "JobTrigger",
+    "Maker",
+    "Contact",
+    "SalesActivity",
+    "CrmStatus",
+    "ActivityKind",
     "UsageLog",
 ]

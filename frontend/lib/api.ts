@@ -40,6 +40,7 @@ export type Project = {
   status: ProjectStatus;
   latest_score: number | null;
   latest_recommendation: Recommendation | null;
+  maker_id: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -481,6 +482,201 @@ export async function collectJapaneseSuccess(platform?: string): Promise<{
   const res = await fetch(`${API_BASE}/japanese-success/collect${qs}`, {
     method: "POST",
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// ===== CRM（営業管理） =====
+export type CrmStatus = "lead" | "contacted" | "negotiating" | "won" | "lost";
+export type ActivityKind = "email" | "call" | "meeting" | "note" | "other";
+
+export const CRM_STATUS_LABELS: Record<CrmStatus, string> = {
+  lead: "リード",
+  contacted: "連絡済み",
+  negotiating: "交渉中",
+  won: "成約",
+  lost: "見送り",
+};
+
+export const CRM_STATUS_COLORS: Record<CrmStatus, string> = {
+  lead: "bg-slate-100 text-slate-700",
+  contacted: "bg-amber-100 text-amber-700",
+  negotiating: "bg-purple-100 text-purple-700",
+  won: "bg-green-100 text-green-700",
+  lost: "bg-red-100 text-red-700",
+};
+
+export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {
+  email: "メール",
+  call: "電話",
+  meeting: "打ち合わせ",
+  note: "メモ",
+  other: "その他",
+};
+
+export type Maker = {
+  id: number;
+  name: string;
+  website_url: string | null;
+  country: string | null;
+  status: CrmStatus;
+  next_action: string | null;
+  next_action_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Contact = {
+  id: number;
+  maker_id: number;
+  name: string;
+  role: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Activity = {
+  id: number;
+  maker_id: number;
+  contact_id: number | null;
+  project_id: number | null;
+  kind: ActivityKind;
+  summary: string;
+  occurred_at: string;
+  created_at: string;
+};
+
+export type MakerDetail = Maker & {
+  contacts: Contact[];
+  activities: Activity[];
+  project_ids: number[];
+};
+
+export type MakerList = {
+  items: Maker[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type Reminder = {
+  maker_id: number;
+  maker_name: string;
+  status: CrmStatus;
+  next_action: string | null;
+  next_action_date: string;
+  overdue: boolean;
+};
+
+export type MakerParams = {
+  status?: CrmStatus | "";
+  q?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
+};
+
+export async function fetchMakers(params: MakerParams = {}): Promise<MakerList> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) qs.set("sort", params.sort);
+  if (params.order) qs.set("order", params.order);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("page_size", String(params.page_size ?? 20));
+  const res = await fetch(`${API_BASE}/crm/makers?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchMaker(id: number): Promise<MakerDetail> {
+  const res = await fetch(`${API_BASE}/crm/makers/${id}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function createMaker(data: Partial<Maker>): Promise<Maker> {
+  const res = await fetch(`${API_BASE}/crm/makers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function createMakerFromProject(projectId: number): Promise<Maker> {
+  const res = await fetch(`${API_BASE}/crm/makers/from-project/${projectId}`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateMaker(
+  id: number,
+  data: Partial<Maker>
+): Promise<Maker> {
+  const res = await fetch(`${API_BASE}/crm/makers/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteMaker(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/crm/makers/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+}
+
+export async function addContact(
+  makerId: number,
+  data: Partial<Contact>
+): Promise<Contact> {
+  const res = await fetch(`${API_BASE}/crm/makers/${makerId}/contacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteContact(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/crm/contacts/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+}
+
+export async function addActivity(
+  makerId: number,
+  data: { kind: ActivityKind; summary: string; contact_id?: number | null; project_id?: number | null }
+): Promise<Activity> {
+  const res = await fetch(`${API_BASE}/crm/makers/${makerId}/activities`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteActivity(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/crm/activities/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+}
+
+export async function fetchReminders(withinDays?: number): Promise<Reminder[]> {
+  const qs = withinDays != null ? `?within_days=${withinDays}` : "";
+  const res = await fetch(`${API_BASE}/crm/reminders${qs}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

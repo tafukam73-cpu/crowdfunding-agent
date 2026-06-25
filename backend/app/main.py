@@ -13,6 +13,7 @@ from app.config import settings
 from app.db.session import SessionLocal
 from app.models import Project  # noqa: F401  （メタデータ登録のため）
 from app.routers import (
+    crm,
     email_drafts,
     evaluate,
     health,
@@ -66,6 +67,7 @@ app.include_router(scrape.router)
 app.include_router(evaluate.router)
 app.include_router(email_drafts.router)
 app.include_router(japanese_success.router)
+app.include_router(crm.router)
 app.include_router(usage.router)
 
 
