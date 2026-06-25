@@ -407,13 +407,15 @@ export async function fetchJapaneseSuccess(
   return res.json();
 }
 
-// Makuake から成功案件を収集（同期・現状モック）。
-export async function collectJapaneseSuccess(): Promise<{
+// 日本クラファン成功案件を収集（同期・現状モック）。
+// platform 指定なしで Makuake + GreenFunding を一括収集。
+export async function collectJapaneseSuccess(platform?: string): Promise<{
   fetched: number;
   created: number;
   updated: number;
 }> {
-  const res = await fetch(`${API_BASE}/japanese-success/collect`, {
+  const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+  const res = await fetch(`${API_BASE}/japanese-success/collect${qs}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);

@@ -15,6 +15,9 @@ import {
 
 const PAGE_SIZE = 20;
 
+// 収集・絞り込み対象の日本クラファンプラットフォーム
+const JP_PLATFORMS = ["makuake", "greenfunding"] as const;
+
 function rate(s: JapaneseSuccess): number | null {
   if (!s.goal_amount || !s.raised_amount) return null;
   return Math.round((s.raised_amount / s.goal_amount) * 100);
@@ -30,6 +33,7 @@ export default function JapaneseSuccessPage() {
   const [loading, setLoading] = useState(false);
   const [collecting, setCollecting] = useState(false);
 
+  const [platform, setPlatform] = useState<string>("");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("raised_amount");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
@@ -37,14 +41,14 @@ export default function JapaneseSuccessPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    fetchJapaneseSuccess({ q, sort, order, page, page_size: PAGE_SIZE })
+    fetchJapaneseSuccess({ platform, q, sort, order, page, page_size: PAGE_SIZE })
       .then((d) => {
         setData(d);
         setError(null);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [q, sort, order, page]);
+  }, [platform, q, sort, order, page]);
 
   useEffect(() => {
     load();
@@ -54,7 +58,8 @@ export default function JapaneseSuccessPage() {
     setCollecting(true);
     setError(null);
     try {
-      const res = await collectJapaneseSuccess();
+      // 絞り込み中のプラットフォームのみ収集。未選択なら全て一括収集。
+      const res = await collectJapaneseSuccess(platform || undefined);
       window.alert(
         `収集完了：取得 ${res.fetched} 件（新規 ${res.created} / 更新 ${res.updated}）`
       );
@@ -66,6 +71,12 @@ export default function JapaneseSuccessPage() {
       setCollecting(false);
     }
   }
+
+  const collectLabel = collecting
+    ? "収集中…"
+    : platform
+    ? `${platformLabel(platform)}を収集`
+    : "全て収集";
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
@@ -85,12 +96,31 @@ export default function JapaneseSuccessPage() {
             disabled={collecting}
             className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
-            {collecting ? "収集中…" : "成功事例を収集"}
+            {collectLabel}
           </button>
         </div>
 
         {/* フィルタ */}
         <div className="mt-6 flex flex-wrap items-end gap-3">
+          <label className="flex flex-col text-xs text-slate-500">
+            プラットフォーム
+            <select
+              className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
+              value={platform}
+              onChange={(e) => {
+                setPage(1);
+                setPlatform(e.target.value);
+              }}
+            >
+              <option value="">すべて</option>
+              {JP_PLATFORMS.map((p) => (
+                <option key={p} value={p}>
+                  {platformLabel(p)}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="flex flex-col text-xs text-slate-500">
             並び替え
             <select

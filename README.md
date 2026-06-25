@@ -22,19 +22,27 @@
 - スクレイピング（Kickstarter / Indiegogo は実装、他はダミー配線）
 - AI 評価・営業メール下書き生成・AI 利用コスト集計
 - **日本クラファン成功事例（`japanese_success_projects`）**
-  - Makuake スクレイパー（現状モック。実スクレイパーへ差し替え可能な構造）
-  - 成功事例の収集・一覧 API
+  - Makuake / GreenFunding スクレイパー（現状モック。実スクレイパーへ差し替え可能な構造）
+  - 成功事例の収集・一覧 API（プラットフォーム絞り込み対応）
   - 海外案件への類似事例提示 API（カテゴリ一致・達成率・共通キーワードで類似度算出）
-- Next.js 案件一覧・詳細画面、日本成功事例一覧画面
+- Next.js 案件一覧・詳細画面、日本成功事例一覧画面（プラットフォーム絞り込み・収集）
 - 起動時にモックデータを自動投入（DB が空のときのみ）
 
 ### 日本成功事例の主な API
 
 | メソッド | パス | 説明 |
 | --- | --- | --- |
-| GET | `/japanese-success` | 成功事例一覧（フィルタ・ソート・ページング） |
-| POST | `/japanese-success/collect` | Makuake から成功事例を収集（同期・現状モック） |
+| GET | `/japanese-success` | 成功事例一覧（`platform`・カテゴリ・検索・ソート・ページング） |
+| POST | `/japanese-success/collect` | 成功事例を収集（`platform` 指定で個別、未指定で Makuake + GreenFunding 一括／同期・現状モック） |
 | GET | `/projects/{id}/similar-japanese` | 海外案件に類似する日本の成功事例 |
+
+収集の例：
+
+```bash
+curl -X POST "http://localhost:8000/japanese-success/collect?platform=makuake"
+curl -X POST "http://localhost:8000/japanese-success/collect?platform=greenfunding"
+curl -X POST "http://localhost:8000/japanese-success/collect"   # 両方一括
+```
 
 ### マイグレーション
 

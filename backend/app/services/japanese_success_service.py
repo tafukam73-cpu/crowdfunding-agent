@@ -16,8 +16,21 @@ from sqlalchemy.orm import Session
 
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import Project
+from app.scrapers.greenfunding import GreenFundingScraper
 from app.scrapers.makuake import MakuakeScraper
 from app.schemas.japanese_success import CollectResult, JapaneseSuccessCreate
+
+# 収集対象の日本クラファンプラットフォーム（platform 未指定時はこの全件を収集）
+JAPANESE_PLATFORMS: list[str] = [
+    MakuakeScraper.platform,
+    GreenFundingScraper.platform,
+]
+
+# platform → スクレイパークラス
+_SCRAPERS = {
+    MakuakeScraper.platform: MakuakeScraper,
+    GreenFundingScraper.platform: GreenFundingScraper,
+}
 
 # 並び替えに使えるカラム
 SORTABLE = {
@@ -56,19 +69,32 @@ def upsert_by_source_url(
     return existing, False
 
 
-def collect(db: Session, limit: int = 50) -> CollectResult:
-    """Makuake から成功案件を収集して保存する（現状モック）。"""
-    scraper = MakuakeScraper(limit=limit)
-    items = scraper.scrape()
-    created = updated = 0
-    for item in items:
-        _, was_created = upsert_by_source_url(db, item)
-        if was_created:
-            created += 1
-        else:
-            updated += 1
+def collect(
+    db: Session, platform: str | None = None, limit: int = 50
+) -> CollectResult:
+    """日本クラファンの成功案件を収集して保存する（現状モック）。
+
+    platform 指定あり：そのプラットフォームのみ収集。
+    platform 指定なし：Makuake + GreenFunding を一括収集。
+    """
+    if platform is not None and platform not in _SCRAPERS:
+        raise ValueError(f"未対応のプラットフォームです: {platform}")
+
+    platforms = [platform] if platform else list(JAPANESE_PLATFORMS)
+
+    fetched = created = updated = 0
+    for p in platforms:
+        scraper = _SCRAPERS[p](limit=limit)
+        items = scraper.scrape()
+        fetched += len(items)
+        for item in items:
+            _, was_created = upsert_by_source_url(db, item)
+            if was_created:
+                created += 1
+            else:
+                updated += 1
     db.commit()
-    return CollectResult(fetched=len(items), created=created, updated=updated)
+    return CollectResult(fetched=fetched, created=created, updated=updated)
 
 
 def seed_if_empty(db: Session) -> int:

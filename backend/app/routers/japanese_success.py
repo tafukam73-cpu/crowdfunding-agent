@@ -53,9 +53,26 @@ def list_japanese_success(
 
 
 @router.post("/japanese-success/collect", response_model=CollectResult)
-def collect_japanese_success(db: Session = Depends(get_db)) -> CollectResult:
-    """Makuake から成功案件を収集して保存する（同期・現状モック）。"""
-    return japanese_success_service.collect(db)
+def collect_japanese_success(
+    db: Session = Depends(get_db),
+    platform: str | None = Query(
+        None, description="収集対象。未指定で Makuake + GreenFunding を一括収集"
+    ),
+) -> CollectResult:
+    """日本クラファンの成功案件を収集して保存する（同期・現状モック）。
+
+    - platform 指定あり：指定プラットフォームのみ収集
+    - platform 指定なし：Makuake + GreenFunding を一括収集
+    """
+    if platform is not None and platform not in japanese_success_service.JAPANESE_PLATFORMS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "未対応のプラットフォームです。"
+                f"指定可能: {', '.join(japanese_success_service.JAPANESE_PLATFORMS)}"
+            ),
+        )
+    return japanese_success_service.collect(db, platform=platform)
 
 
 @router.get(
