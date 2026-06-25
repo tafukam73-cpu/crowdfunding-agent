@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     sender_name: str = "Taro Yamada"
     sender_company: str = "Your Company"
 
+    # --- メール下書きプロバイダー（Gmail 等。未設定なら mock） ---
+    # Gmail API（OAuth2 リフレッシュトークン方式）。3 つ揃うと Gmail を使用。
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_refresh_token: str = ""
+    # 下書きを作成する Gmail ユーザー（通常 "me"）と From 表示（省略可）
+    gmail_user: str = "me"
+    gmail_sender: str = ""
+
     # --- 日次自動収集スケジューラ ---
     # 有効化フラグ（false で起動時にスケジューラを開始しない）
     scrape_schedule_enabled: bool = True

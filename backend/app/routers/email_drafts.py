@@ -13,12 +13,60 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.email_draft import EmailDraftOut
-from app.services import email_service, project_service
+from app.email import active_provider_name, is_gmail_configured
+from app.email.providers.base import EmailProviderError
+from app.schemas.email_draft import (
+    EmailDraftOut,
+    EmailProviderInfo,
+    ProviderDraftRequest,
+    ProviderDraftResult,
+)
+from app.services import email_delivery_service, email_service, project_service
 
 logger = logging.getLogger("router.email_drafts")
 
 router = APIRouter(tags=["email-drafts"])
+
+
+@router.get("/email/provider", response_model=EmailProviderInfo)
+def email_provider_info() -> EmailProviderInfo:
+    """現在有効なメール下書きプロバイダー（gmail / mock）を返す。"""
+    return EmailProviderInfo(
+        provider=active_provider_name(), gmail_configured=is_gmail_configured()
+    )
+
+
+@router.post(
+    "/email-drafts/{draft_id}/provider-draft", response_model=ProviderDraftResult
+)
+def create_provider_draft(
+    draft_id: int,
+    payload: ProviderDraftRequest | None = None,
+    db: Session = Depends(get_db),
+) -> ProviderDraftResult:
+    """生成済み下書きを、設定中のプロバイダー（Gmail 等。未設定なら mock）に
+    「下書き」として作成する。送信は行わない。"""
+    draft = email_delivery_service.get_draft(db, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="下書きが見つかりません")
+
+    to = payload.to if payload else None
+    try:
+        result, recipient = email_delivery_service.create_provider_draft(db, draft, to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except EmailProviderError as exc:
+        logger.warning("provider draft failed (draft=%s): %s", draft_id, exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return ProviderDraftResult(
+        provider=result.provider,
+        draft_id=result.draft_id,
+        status=result.status,
+        to=recipient,
+        web_link=result.web_link,
+        detail=result.detail,
+    )
 
 
 @router.post(

@@ -11,3 +11,6 @@ playwright==1.49.1
 selectolax==0.3.27
 anthropic>=0.69.0
 APScheduler==3.10.4
+# Gmail 下書き連携（遅延 import。mock 運用時は未使用でも可）
+google-api-python-client==2.149.0
+google-auth==2.35.0

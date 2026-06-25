@@ -68,7 +68,23 @@ export type EmailDraft = {
   body: string;
   language: string;
   model: string;
+  provider: string | null;
+  provider_draft_id: string | null;
   created_at: string;
+};
+
+export type EmailProviderInfo = {
+  provider: string;
+  gmail_configured: boolean;
+};
+
+export type ProviderDraftResult = {
+  provider: string;
+  draft_id: string | null;
+  status: string;
+  to: string;
+  web_link: string | null;
+  detail: string | null;
 };
 
 export const EMAIL_TYPE_LABELS: Record<EmailType, string> = {
@@ -426,6 +442,29 @@ export async function fetchEmailDrafts(id: number): Promise<EmailDraft[]> {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEmailProvider(): Promise<EmailProviderInfo> {
+  const res = await fetch(`${API_BASE}/email/provider`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 生成済み下書きを、設定中プロバイダー（Gmail/mock）に下書き作成。送信はしない。
+export async function createProviderDraft(
+  draftId: number,
+  to?: string
+): Promise<ProviderDraftResult> {
+  const res = await fetch(`${API_BASE}/email-drafts/${draftId}/provider-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to: to || null }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

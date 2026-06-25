@@ -38,6 +38,10 @@ class EmailDraft(Base):
     # 生成に使ったエンジン/モデル（mock-email-v1 / claude-...）
     model: Mapped[str] = mapped_column(String(60), nullable=False)
 
+    # メールプロバイダーに下書きを作成した場合の記録（未作成なら null）
+    provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    provider_draft_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

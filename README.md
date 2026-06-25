@@ -42,6 +42,19 @@
   - 海外案件（projects）からワンクリックでメーカー登録・紐づけ（`maker_id`）
   - 次回アクション日に基づくリマインダー（期限切れ表示）
 
+- **メール下書きプロバイダー連携（Gmail 等・差し替え可能）**
+  - `app/email/providers/`（`base` / `gmail` / `mock`）。未設定なら mock、Gmail 認証情報が揃えば Gmail
+  - 生成済みの営業メール下書きを **Gmail の「下書き」** として作成（送信はせず、利用者が Gmail 上で最終確認して送信）
+  - 宛先は明示指定、なければメーカー担当者メール / 案件の連絡先から自動解決
+  - 将来 Outlook 等は `providers/outlook.py` を追加してファクトリで分岐するだけで拡張可能
+
+### メール下書きプロバイダー API
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| GET | `/email/provider` | 現在有効なプロバイダー（gmail / mock） |
+| POST | `/email-drafts/{draft_id}/provider-draft` | 下書きをプロバイダーに作成（送信なし）。`{ "to": "..." }` 省略可 |
+
 ### CRM の主な API
 
 | メソッド | パス | 説明 |
