@@ -185,11 +185,47 @@ export type SiteLastRun = {
   last_run: ScrapeRun | null;
 };
 
+export type JobTrigger = "schedule" | "manual";
+export type JobStatus = "running" | "success" | "partial" | "error" | "skipped";
+
+export type JobRun = {
+  id: number;
+  trigger: JobTrigger;
+  status: JobStatus;
+  sites_succeeded: number;
+  sites_failed: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export const JOB_TRIGGER_LABELS: Record<JobTrigger, string> = {
+  schedule: "日次自動",
+  manual: "手動",
+};
+
+export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  running: "実行中",
+  success: "成功",
+  partial: "一部失敗",
+  error: "失敗",
+  skipped: "スキップ",
+};
+
+export const JOB_STATUS_COLORS: Record<JobStatus, string> = {
+  running: "bg-blue-100 text-blue-700",
+  success: "bg-green-100 text-green-700",
+  partial: "bg-amber-100 text-amber-700",
+  error: "bg-red-100 text-red-700",
+  skipped: "bg-slate-100 text-slate-600",
+};
+
 export type ScheduleStatus = {
   enabled: boolean;
   cron: string;
   timezone: string;
   next_run_time: string | null;
+  last_job: JobRun | null;
   sites: SiteLastRun[];
 };
 

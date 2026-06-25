@@ -74,14 +74,18 @@ def upsert_by_source_url(
     return existing, False
 
 
-def _collect_one(db: Session, platform: str, limit: int) -> tuple[int, int, int]:
+def _collect_one(
+    db: Session, platform: str, limit: int, job_run_id: int | None = None
+) -> tuple[int, int, int]:
     """1 プラットフォームを収集し scrape_runs に記録する。
 
     実行結果（成功/エラー・件数）を scrape_runs に残す（要件）。
     収集失敗時も例外を送出せず、この回の件数 0 を返して他サイトの収集を続ける。
     Returns: (fetched, created, updated)
     """
-    run = ScrapeRun(site=platform, status=ScrapeStatus.running.value)
+    run = ScrapeRun(
+        site=platform, status=ScrapeStatus.running.value, job_run_id=job_run_id
+    )
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -117,13 +121,16 @@ def _collect_one(db: Session, platform: str, limit: int) -> tuple[int, int, int]
 
 
 def collect(
-    db: Session, platform: str | None = None, limit: int = 20
+    db: Session,
+    platform: str | None = None,
+    limit: int = 20,
+    job_run_id: int | None = None,
 ) -> CollectResult:
     """日本クラファンの成功案件を収集して保存する（実スクレイピング・Playwright）。
 
     platform 指定あり：そのプラットフォームのみ収集。
     platform 指定なし：Makuake + GreenFunding を一括収集。
-    各プラットフォームの実行結果は scrape_runs に記録する。
+    各プラットフォームの実行結果は scrape_runs に記録する（job_run_id でジョブに紐づく）。
     重複は source_url をキーに upsert して防止する。
     """
     if platform is not None and platform not in _SCRAPERS:
@@ -133,7 +140,7 @@ def collect(
 
     fetched = created = updated = 0
     for p in platforms:
-        f, c, u = _collect_one(db, p, limit)
+        f, c, u = _collect_one(db, p, limit, job_run_id=job_run_id)
         fetched += f
         created += c
         updated += u

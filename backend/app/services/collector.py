@@ -23,9 +23,16 @@ from app.services import project_service
 logger = logging.getLogger("collector")
 
 
-def create_pending_runs(db: Session, sites: list[SourceSite]) -> list[ScrapeRun]:
+def create_pending_runs(
+    db: Session, sites: list[SourceSite], job_run_id: int | None = None
+) -> list[ScrapeRun]:
     """running 状態の ScrapeRun を作成して返す（即レスポンス用）。"""
-    runs = [ScrapeRun(site=s.value, status=ScrapeStatus.running.value) for s in sites]
+    runs = [
+        ScrapeRun(
+            site=s.value, status=ScrapeStatus.running.value, job_run_id=job_run_id
+        )
+        for s in sites
+    ]
     db.add_all(runs)
     db.commit()
     for r in runs:
@@ -78,14 +85,19 @@ def run_pending(run_ids: list[int], limit: int = 20) -> None:
         db.close()
 
 
-# --- 同期実行（テスト・CLI 用の後方互換） ---
-def run_site(db: Session, site: SourceSite, limit: int = 20) -> ScrapeRun:
-    run = create_pending_runs(db, [site])[0]
+# --- 同期実行（テスト・CLI・ジョブ用） ---
+def run_site(
+    db: Session, site: SourceSite, limit: int = 20, job_run_id: int | None = None
+) -> ScrapeRun:
+    run = create_pending_runs(db, [site], job_run_id=job_run_id)[0]
     return execute_run(db, run, limit=limit)
 
 
 def run_sites(
-    db: Session, sites: list[SourceSite] | None = None, limit: int = 20
+    db: Session,
+    sites: list[SourceSite] | None = None,
+    limit: int = 20,
+    job_run_id: int | None = None,
 ) -> list[ScrapeRun]:
     targets = sites if sites else SUPPORTED_SITES
-    return [run_site(db, site, limit=limit) for site in targets]
+    return [run_site(db, site, limit=limit, job_run_id=job_run_id) for site in targets]

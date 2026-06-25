@@ -29,6 +29,9 @@ class ScrapeRun(Base):
         String(20), nullable=False, default=ScrapeStatus.running.value, index=True
     )
 
+    # どの収集ジョブ（job_runs）の一部か。手動/日次の親ジョブに紐づく（単発実行は null）
+    job_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
     # 取得・反映件数
     fetched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

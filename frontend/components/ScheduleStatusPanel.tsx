@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import {
   fetchScheduleStatus,
   formatDateTime,
+  JOB_STATUS_COLORS,
+  JOB_STATUS_LABELS,
+  JOB_TRIGGER_LABELS,
   runAllScrape,
   SCRAPE_STATUS_COLORS,
   SCRAPE_STATUS_LABELS,
@@ -75,32 +78,66 @@ export default function ScheduleStatusPanel({
         </p>
       )}
 
+      {status?.last_job && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <span className="font-medium text-slate-700">最新ジョブ</span>
+          <span className="rounded bg-white px-2 py-0.5">
+            {JOB_TRIGGER_LABELS[status.last_job.trigger]}
+          </span>
+          <span
+            className={`rounded px-2 py-0.5 font-medium ${JOB_STATUS_COLORS[status.last_job.status]}`}
+          >
+            {JOB_STATUS_LABELS[status.last_job.status]}
+          </span>
+          <span>
+            成功{status.last_job.sites_succeeded}/失敗{status.last_job.sites_failed}
+          </span>
+          <span>
+            {formatDateTime(
+              status.last_job.finished_at ?? status.last_job.started_at
+            )}
+          </span>
+          {status.last_job.error && (
+            <span className="text-red-600">⚠ {status.last_job.error}</span>
+          )}
+        </div>
+      )}
+
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {status?.sites.map(({ site, last_run }) => (
           <div
             key={site}
-            className="flex items-center justify-between rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
+            className="rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
           >
-            <span className="font-medium text-slate-700">{SITE_LABELS[site]}</span>
-            <span className="flex items-center gap-2 text-xs text-slate-500">
-              {last_run ? (
-                <>
-                  <span
-                    className={`rounded px-2 py-0.5 font-medium ${SCRAPE_STATUS_COLORS[last_run.status]}`}
-                  >
-                    {SCRAPE_STATUS_LABELS[last_run.status]}
-                  </span>
-                  {last_run.status === "success" && (
-                    <span>
-                      新{last_run.created_count}/更{last_run.updated_count}
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-700">{SITE_LABELS[site]}</span>
+              <span className="flex items-center gap-2 text-xs text-slate-500">
+                {last_run ? (
+                  <>
+                    <span
+                      className={`rounded px-2 py-0.5 font-medium ${SCRAPE_STATUS_COLORS[last_run.status]}`}
+                    >
+                      {SCRAPE_STATUS_LABELS[last_run.status]}
                     </span>
-                  )}
-                  <span>{formatDateTime(last_run.finished_at ?? last_run.started_at)}</span>
-                </>
-              ) : (
-                <span className="text-slate-400">未実行</span>
-              )}
-            </span>
+                    {last_run.status === "success" && (
+                      <span>
+                        新{last_run.created_count}/更{last_run.updated_count}
+                      </span>
+                    )}
+                    <span>
+                      {formatDateTime(last_run.finished_at ?? last_run.started_at)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-400">未実行</span>
+                )}
+              </span>
+            </div>
+            {last_run?.status === "error" && last_run.error && (
+              <p className="mt-1 truncate text-xs text-red-600" title={last_run.error}>
+                ⚠ {last_run.error}
+              </p>
+            )}
           </div>
         ))}
       </div>

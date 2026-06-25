@@ -1,14 +1,14 @@
 """日次自動収集スケジューラ（APScheduler・スレッド型）。
 
-毎日決まった時刻に 4 サイトを収集する：
-  - 海外案件（projects）：Kickstarter / Indiegogo … collector 経由
-  - 日本案件（japanese_success）：Makuake / GreenFunding … japanese_success_service 経由
+毎日決まった時刻に収集ジョブ（collection_job.run_collection）を起動する。
+収集本体・二重実行防止・履歴記録は collection_job が担うため、ここは
+「定時に手動と同じジョブを呼ぶ」役割のみを持つ。
 
 Playwright（同期 API）は asyncio ループ上で動かせないため、BackgroundScheduler
-（専用スレッド）で実行する。各サイトの結果は既存の scrape_runs に記録される。
+（専用スレッド）で実行する。
 
-注意：uvicorn を複数ワーカーで起動すると各ワーカーでスケジューラが動き多重実行に
-なる。単一ワーカー運用（既定の docker compose 構成）を前提とする。
+注意：uvicorn を複数ワーカーで起動した場合、各ワーカーでスケジューラが動くが、
+collection_job 側の DB ロックにより実際の収集は 1 ワーカーのみが実行する。
 """
 from __future__ import annotations
 
@@ -19,44 +19,19 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.db.session import SessionLocal
-from app.models.project import SourceSite
-from app.services import collector, japanese_success_service
+from app.models.job_run import JobTrigger
+from app.services import collection_job
 
 logger = logging.getLogger("scheduler")
 
 JOB_ID = "daily_collection"
 
-# 海外案件として収集するサイト（projects テーブル）
-OVERSEAS_SITES = [SourceSite.kickstarter, SourceSite.indiegogo]
-
 _scheduler: BackgroundScheduler | None = None
 
 
-def run_daily_collection(limit: int | None = None) -> None:
-    """4 サイトを順に収集する（スケジュール／手動の共通処理）。
-
-    1 系統が失敗しても他系統は継続する。サイト単位の成否・件数は
-    各収集処理が scrape_runs に記録する。
-    """
-    limit = limit or settings.scrape_daily_limit
-    logger.info("daily collection start (limit=%s)", limit)
-    db = SessionLocal()
-    try:
-        # 海外案件（Kickstarter / Indiegogo）
-        try:
-            collector.run_sites(db, OVERSEAS_SITES, limit=limit)
-        except Exception as exc:  # noqa: BLE001  ジョブ全体は止めない
-            logger.exception("overseas collection failed: %s", exc)
-
-        # 日本案件（Makuake / GreenFunding）
-        try:
-            japanese_success_service.collect(db, platform=None, limit=limit)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("japanese collection failed: %s", exc)
-    finally:
-        db.close()
-    logger.info("daily collection done")
+def run_daily_collection() -> None:
+    """スケジュール起動の入口（手動実行と同じジョブを trigger=schedule で呼ぶ）。"""
+    collection_job.run_collection(trigger=JobTrigger.schedule.value)
 
 
 def start() -> None:
@@ -72,7 +47,7 @@ def start() -> None:
         run_daily_collection,
         trigger=trigger,
         id=JOB_ID,
-        max_instances=1,      # 多重起動を防止
+        max_instances=1,      # 同一プロセス内の多重起動を防止
         coalesce=True,        # 取りこぼしは 1 回にまとめる
         misfire_grace_time=3600,
         replace_existing=True,

@@ -12,16 +12,18 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
+from app.models.job_run import JobRun
 from app.models.project import SourceSite
 from app.models.scrape_run import ScrapeRun
 from app.scrapers.registry import SUPPORTED_SITES
 from app.schemas.scrape import (
+    JobRunOut,
     ScheduleStatusOut,
     ScrapeRunOut,
     ScrapeRunRequest,
     SiteLastRun,
 )
-from app.services import collector, scheduler
+from app.services import collection_job, collector, scheduler
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -58,32 +60,48 @@ def run_scrape(
 def run_all(background_tasks: BackgroundTasks) -> dict:
     """4 サイト（KS / Indiegogo / Makuake / GreenFunding）を一括でバックグラウンド収集。
 
-    日次スケジューラと同じ処理を手動起動する。各サイトの結果は scrape_runs に記録。
+    日次スケジューラと同一のジョブ（collection_job）を手動起動する。二重実行は
+    ロックで防止され、結果は job_runs / scrape_runs に記録される。
     """
-    background_tasks.add_task(scheduler.run_daily_collection)
+    background_tasks.add_task(collection_job.run_collection, "manual")
     return {"status": "started"}
 
 
 @router.get("/last", response_model=ScheduleStatusOut)
 def schedule_status(db: Session = Depends(get_db)) -> ScheduleStatusOut:
-    """日次スケジューラの状態と、サイト別の最終実行結果を返す。"""
+    """スケジューラ状態・最新ジョブ・サイト別の最終実行結果を返す。"""
     sites: list[SiteLastRun] = []
     for site in DASHBOARD_SITES:
         last = db.scalar(
             select(ScrapeRun)
             .where(ScrapeRun.site == site.value)
-            .order_by(desc(ScrapeRun.started_at))
+            .order_by(desc(ScrapeRun.started_at), desc(ScrapeRun.id))
             .limit(1)
         )
         sites.append(SiteLastRun(site=site, last_run=last))
+
+    last_job = db.scalar(
+        select(JobRun).order_by(desc(JobRun.started_at), desc(JobRun.id)).limit(1)
+    )
 
     return ScheduleStatusOut(
         enabled=settings.scrape_schedule_enabled,
         cron=settings.scrape_schedule_cron,
         timezone=settings.scrape_timezone,
         next_run_time=scheduler.next_run_time(),
+        last_job=last_job,
         sites=sites,
     )
+
+
+@router.get("/jobs", response_model=list[JobRunOut])
+def list_jobs(
+    db: Session = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[JobRun]:
+    """収集ジョブの実行履歴（新しい順）。"""
+    stmt = select(JobRun).order_by(desc(JobRun.started_at), desc(JobRun.id)).limit(limit)
+    return list(db.scalars(stmt))
 
 
 @router.get("/runs", response_model=list[ScrapeRunOut])

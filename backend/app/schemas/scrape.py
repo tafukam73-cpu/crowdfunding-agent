@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.job_run import JobStatus, JobTrigger
 from app.models.project import SourceSite
 from app.models.scrape_run import ScrapeStatus
 
@@ -40,11 +41,27 @@ class SiteLastRun(BaseModel):
     last_run: ScrapeRunOut | None = None
 
 
+class JobRunOut(BaseModel):
+    """収集ジョブ（手動/日次）1 回分の実行履歴。"""
+
+    id: int
+    trigger: JobTrigger
+    status: JobStatus
+    sites_succeeded: int
+    sites_failed: int
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ScheduleStatusOut(BaseModel):
-    """日次スケジューラの状態とサイト別の最終実行結果。"""
+    """日次スケジューラの状態・最新ジョブ・サイト別の最終実行結果。"""
 
     enabled: bool
     cron: str
     timezone: str
     next_run_time: datetime | None
+    last_job: JobRunOut | None
     sites: list[SiteLastRun]
