@@ -180,6 +180,19 @@ export type ScrapeRun = {
   finished_at: string | null;
 };
 
+export type SiteLastRun = {
+  site: SourceSite;
+  last_run: ScrapeRun | null;
+};
+
+export type ScheduleStatus = {
+  enabled: boolean;
+  cron: string;
+  timezone: string;
+  next_run_time: string | null;
+  sites: SiteLastRun[];
+};
+
 export const SCRAPE_STATUS_LABELS: Record<ScrapeStatus, string> = {
   running: "実行中",
   success: "成功",
@@ -286,6 +299,20 @@ export async function fetchScrapeRuns(limit = 10): Promise<ScrapeRun[]> {
   const res = await fetch(`${API_BASE}/scrape/runs?limit=${limit}`, {
     cache: "no-store",
   });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 日次スケジューラの状態とサイト別の最終実行結果。
+export async function fetchScheduleStatus(): Promise<ScheduleStatus> {
+  const res = await fetch(`${API_BASE}/scrape/last`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 4サイト一括収集をバックグラウンド起動（日次ジョブの手動トリガ）。
+export async function runAllScrape(): Promise<{ status: string }> {
+  const res = await fetch(`${API_BASE}/scrape/run-all`, { method: "POST" });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

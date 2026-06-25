@@ -31,3 +31,20 @@ class ScrapeRunOut(BaseModel):
     finished_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SiteLastRun(BaseModel):
+    """サイトごとの最新実行結果（未実行なら last_run=None）。"""
+
+    site: SourceSite
+    last_run: ScrapeRunOut | None = None
+
+
+class ScheduleStatusOut(BaseModel):
+    """日次スケジューラの状態とサイト別の最終実行結果。"""
+
+    enabled: bool
+    cron: str
+    timezone: str
+    next_run_time: datetime | None
+    sites: list[SiteLastRun]

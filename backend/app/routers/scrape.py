@@ -10,13 +10,28 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.session import get_db
+from app.models.project import SourceSite
 from app.models.scrape_run import ScrapeRun
 from app.scrapers.registry import SUPPORTED_SITES
-from app.schemas.scrape import ScrapeRunOut, ScrapeRunRequest
-from app.services import collector
+from app.schemas.scrape import (
+    ScheduleStatusOut,
+    ScrapeRunOut,
+    ScrapeRunRequest,
+    SiteLastRun,
+)
+from app.services import collector, scheduler
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
+
+# ダッシュボードに最終実行結果を表示する対象サイト（日次収集の対象）
+DASHBOARD_SITES = [
+    SourceSite.kickstarter,
+    SourceSite.indiegogo,
+    SourceSite.makuake,
+    SourceSite.greenfunding,
+]
 
 
 @router.post("/run", response_model=list[ScrapeRunOut], status_code=status.HTTP_202_ACCEPTED)
@@ -37,6 +52,38 @@ def run_scrape(
     run_ids = [r.id for r in runs]
     background_tasks.add_task(collector.run_pending, run_ids, payload.limit)
     return runs
+
+
+@router.post("/run-all", status_code=status.HTTP_202_ACCEPTED)
+def run_all(background_tasks: BackgroundTasks) -> dict:
+    """4 サイト（KS / Indiegogo / Makuake / GreenFunding）を一括でバックグラウンド収集。
+
+    日次スケジューラと同じ処理を手動起動する。各サイトの結果は scrape_runs に記録。
+    """
+    background_tasks.add_task(scheduler.run_daily_collection)
+    return {"status": "started"}
+
+
+@router.get("/last", response_model=ScheduleStatusOut)
+def schedule_status(db: Session = Depends(get_db)) -> ScheduleStatusOut:
+    """日次スケジューラの状態と、サイト別の最終実行結果を返す。"""
+    sites: list[SiteLastRun] = []
+    for site in DASHBOARD_SITES:
+        last = db.scalar(
+            select(ScrapeRun)
+            .where(ScrapeRun.site == site.value)
+            .order_by(desc(ScrapeRun.started_at))
+            .limit(1)
+        )
+        sites.append(SiteLastRun(site=site, last_run=last))
+
+    return ScheduleStatusOut(
+        enabled=settings.scrape_schedule_enabled,
+        cron=settings.scrape_schedule_cron,
+        timezone=settings.scrape_timezone,
+        next_run_time=scheduler.next_run_time(),
+        sites=sites,
+    )
 
 
 @router.get("/runs", response_model=list[ScrapeRunOut])

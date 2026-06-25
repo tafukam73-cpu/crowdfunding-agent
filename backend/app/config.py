@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     sender_name: str = "Taro Yamada"
     sender_company: str = "Your Company"
 
+    # --- 日次自動収集スケジューラ ---
+    # 有効化フラグ（false で起動時にスケジューラを開始しない）
+    scrape_schedule_enabled: bool = True
+    # 実行スケジュール（cron 式）。既定は毎日 03:00。
+    scrape_schedule_cron: str = "0 3 * * *"
+    # スケジュールのタイムゾーン
+    scrape_timezone: str = "Asia/Tokyo"
+    # 自動収集の 1 サイトあたり取得上限
+    scrape_daily_limit: int = 20
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

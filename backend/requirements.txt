@@ -10,3 +10,4 @@ httpx==0.28.1
 playwright==1.49.1
 selectolax==0.3.27
 anthropic>=0.69.0
+APScheduler==3.10.4

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import CostPanel from "@/components/CostPanel";
 import Header from "@/components/Header";
 import RecBadge from "@/components/RecBadge";
+import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
 import SourceBadge from "@/components/SourceBadge";
 import StatusBadge from "@/components/StatusBadge";
@@ -108,6 +109,11 @@ export default function Home() {
       <main className="mx-auto max-w-5xl px-6 py-8">
         {/* 収集コントロール */}
         <ScrapePanel onCompleted={() => setReloadKey((k) => k + 1)} />
+
+        {/* 自動収集（日次スケジューラ）の状況 */}
+        <div className="mt-6">
+          <ScheduleStatusPanel onCompleted={() => setReloadKey((k) => k + 1)} />
+        </div>
 
         {/* AI 利用コスト */}
         <CostPanel reloadKey={costKey} />

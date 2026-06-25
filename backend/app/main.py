@@ -22,6 +22,7 @@ from app.routers import (
     usage,
 )
 from app.seed import seed_if_empty
+from app.services import scheduler
 
 
 @asynccontextmanager
@@ -36,7 +37,17 @@ async def lifespan(app: FastAPI):
         db.rollback()
     finally:
         db.close()
+
+    # 日次自動収集スケジューラ（有効時のみ起動）
+    if settings.scrape_schedule_enabled:
+        try:
+            scheduler.start()
+        except Exception:  # noqa: BLE001  スケジューラ失敗でもアプリは起動させる
+            pass
+
     yield
+
+    scheduler.shutdown()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
