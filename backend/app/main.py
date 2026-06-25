@@ -12,8 +12,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db.session import SessionLocal
 from app.models import Project  # noqa: F401  （メタデータ登録のため）
-from app.routers import email_drafts, evaluate, health, projects, scrape, usage
+from app.routers import (
+    email_drafts,
+    evaluate,
+    health,
+    japanese_success,
+    projects,
+    scrape,
+    usage,
+)
 from app.seed import seed_if_empty
+from app.services import japanese_success_service
 
 
 @asynccontextmanager
@@ -22,6 +31,8 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_if_empty(db)
+        # 比較用の日本クラファン成功事例も空なら投入
+        japanese_success_service.seed_if_empty(db)
     except Exception:  # noqa: BLE001  マイグレーション未適用などでも起動は止めない
         db.rollback()
     finally:
@@ -44,9 +55,10 @@ app.include_router(projects.router)
 app.include_router(scrape.router)
 app.include_router(evaluate.router)
 app.include_router(email_drafts.router)
+app.include_router(japanese_success.router)
 app.include_router(usage.router)
 
 
 @app.get("/")
 def root() -> dict:
-    return {"app": settings.app_name, "step": 4}
+    return {"app": settings.app_name, "step": 5}

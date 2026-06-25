@@ -10,15 +10,31 @@
 - **db** … PostgreSQL 16
 - すべて Docker Compose で起動
 
-## Step 2（現状）
+## 現状（Step 5：Makuake 連携まで）
 
-案件データモデルと CRUD、案件一覧／詳細画面まで。スクレイピング・AI 評価・メール生成は未実装。
+海外案件の収集・AI 評価・営業メール下書き・コスト管理に加え、日本クラファン
+（Makuake）の成功事例を比較用に蓄積し、海外案件ごとに「類似する日本の成功事例」を
+自動提示する。
 
 - 要件定義の取得項目に対応した `projects` テーブル
 - Alembic マイグレーション管理
 - 案件 CRUD API（一覧フィルタ・ソート・ページング／詳細／作成・更新／ステータス更新）
-- Next.js 案件一覧・詳細画面
+- スクレイピング（Kickstarter / Indiegogo は実装、他はダミー配線）
+- AI 評価・営業メール下書き生成・AI 利用コスト集計
+- **日本クラファン成功事例（`japanese_success_projects`）**
+  - Makuake スクレイパー（現状モック。実スクレイパーへ差し替え可能な構造）
+  - 成功事例の収集・一覧 API
+  - 海外案件への類似事例提示 API（カテゴリ一致・達成率・共通キーワードで類似度算出）
+- Next.js 案件一覧・詳細画面、日本成功事例一覧画面
 - 起動時にモックデータを自動投入（DB が空のときのみ）
+
+### 日本成功事例の主な API
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| GET | `/japanese-success` | 成功事例一覧（フィルタ・ソート・ページング） |
+| POST | `/japanese-success/collect` | Makuake から成功事例を収集（同期・現状モック） |
+| GET | `/projects/{id}/similar-japanese` | 海外案件に類似する日本の成功事例 |
 
 ### マイグレーション
 
@@ -54,7 +70,8 @@ docker compose up --build
 | 画面 | URL |
 | --- | --- |
 | 案件一覧（フィルタ・ソート・ページング） | http://localhost:3000/ |
-| 案件詳細（ステータス変更） | http://localhost:3000/projects/1 |
+| 案件詳細（ステータス変更・AI評価・類似日本成功事例・メール下書き） | http://localhost:3000/projects/1 |
+| 日本の成功事例一覧 | http://localhost:3000/japanese-success |
 
 ## 動作確認
 

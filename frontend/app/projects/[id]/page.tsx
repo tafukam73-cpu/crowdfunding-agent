@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
+import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
 import {
   evaluateProject,
@@ -219,6 +220,9 @@ export default function ProjectDetail() {
             )}
           </div>
         </div>
+
+        {/* 類似する日本の成功事例 */}
+        <SimilarSuccessPanel projectId={id} />
 
         {/* 営業メール下書き */}
         <EmailDraftPanel projectId={id} />

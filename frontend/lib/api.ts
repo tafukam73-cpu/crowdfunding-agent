@@ -101,6 +101,41 @@ export type ProjectList = {
   page_size: number;
 };
 
+// 日本クラファン（Makuake 等）の成功案件。海外案件との比較用。
+export type JapaneseSuccess = {
+  id: number;
+  platform: string;
+  title: string;
+  source_url: string | null;
+  category: string | null;
+  description: string | null;
+  image_url: string | null;
+  video_url: string | null;
+  currency: string;
+  goal_amount: number | null;
+  raised_amount: number | null;
+  backers_count: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  maker_name: string | null;
+  maker_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 海外案件に対する類似成功事例（類似度・理由付き）。
+export type SimilarSuccess = JapaneseSuccess & {
+  match_score: number;
+  match_reasons: string[];
+};
+
+export type JapaneseSuccessList = {
+  items: JapaneseSuccess[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
 export type ListParams = {
   site?: SourceSite | "";
   status?: ProjectStatus | "";
@@ -325,6 +360,61 @@ export async function generateEmailDrafts(id: number): Promise<EmailDraft[]> {
 export async function fetchEmailDrafts(id: number): Promise<EmailDraft[]> {
   const res = await fetch(`${API_BASE}/projects/${id}/email-drafts`, {
     cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 海外案件に類似する日本の成功事例を取得。
+export async function fetchSimilarJapanese(
+  id: number,
+  limit = 3
+): Promise<SimilarSuccess[]> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/similar-japanese?limit=${limit}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export type JapaneseSuccessParams = {
+  platform?: string;
+  category?: string;
+  q?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+  page?: number;
+  page_size?: number;
+};
+
+export async function fetchJapaneseSuccess(
+  params: JapaneseSuccessParams = {}
+): Promise<JapaneseSuccessList> {
+  const qs = new URLSearchParams();
+  if (params.platform) qs.set("platform", params.platform);
+  if (params.category) qs.set("category", params.category);
+  if (params.q) qs.set("q", params.q);
+  if (params.sort) qs.set("sort", params.sort);
+  if (params.order) qs.set("order", params.order);
+  qs.set("page", String(params.page ?? 1));
+  qs.set("page_size", String(params.page_size ?? 20));
+
+  const res = await fetch(`${API_BASE}/japanese-success?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// Makuake から成功案件を収集（同期・現状モック）。
+export async function collectJapaneseSuccess(): Promise<{
+  fetched: number;
+  created: number;
+  updated: number;
+}> {
+  const res = await fetch(`${API_BASE}/japanese-success/collect`, {
+    method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
