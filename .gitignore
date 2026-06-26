@@ -10,3 +10,5 @@ node_modules/
 .next/
 out/
 *.log
+
+frontend/tsconfig.tsbuildinfo
