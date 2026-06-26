@@ -21,7 +21,12 @@ services:
     build: ./backend
     container_name: cfagent-backend
     restart: unless-stopped
+    # .env 全体をコンテナへ注入（ANTHROPIC_API_KEY / SLACK_WEBHOOK_URL /
+    # APP_BASE_URL / GMAIL_* / SCRAPE_* 等を backend が読めるようにする）。
+    env_file:
+      - .env
     environment:
+      # env_file より優先。db はコンテナ名を指すため明示する。
       DATABASE_URL: ${DATABASE_URL}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
     ports:
