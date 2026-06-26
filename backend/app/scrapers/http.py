@@ -1,8 +1,10 @@
 """スクレイパー共通 HTTP クライアント。
 
 - レート制限（リクエスト間隔の確保）
-- リトライ（指数バックオフ）：ネットワークエラー・429・5xx のみ
-- 403/404 などの恒久的エラーは即時送出（collector がエラー記録）
+- リトライ（指数バックオフ）：ネットワークエラー・429・5xx・403
+- 403 はボット対策の可能性があるため UA をローテーションして再試行する
+- 404 などの恒久的エラーは即時送出（collector がエラー記録）
+- 直近の試行回数・最終 HTTP ステータスを保持（詳細ログ用）
 """
 from __future__ import annotations
 
@@ -11,15 +13,22 @@ import time
 
 import httpx
 
+from app.scrapers.useragents import ua_for_attempt
+
 logger = logging.getLogger("scraper.http")
 
-DEFAULT_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
+# リトライ対象（一時的エラー）。403 は UA ローテーションで再試行する。
+RETRYABLE_STATUS = {403, 429, 500, 502, 503, 504}
 
-# リトライ対象（一時的エラー）
-RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+DEFAULT_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+    "application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 
 class HttpClient:
@@ -27,18 +36,18 @@ class HttpClient:
         self,
         *,
         rate_limit_seconds: float = 2.0,
-        timeout: float = 20.0,
+        timeout: float = 30.0,
         retries: int = 2,
-        user_agent: str = DEFAULT_UA,
     ) -> None:
         self.rate_limit_seconds = rate_limit_seconds
         self.retries = retries
         self._last_request_at: float | None = None
         self._client = httpx.Client(
-            timeout=timeout,
-            follow_redirects=True,
-            headers={"User-Agent": user_agent, "Accept-Language": "en-US,en;q=0.9"},
+            timeout=timeout, follow_redirects=True, headers=DEFAULT_HEADERS
         )
+        # 詳細ログ用
+        self.last_attempts: int = 0
+        self.last_status: int | None = None
 
     def _respect_rate_limit(self) -> None:
         if self._last_request_at is not None:
@@ -48,24 +57,33 @@ class HttpClient:
                 time.sleep(wait)
         self._last_request_at = time.monotonic()
 
-    def get(self, url: str, *, params: dict | None = None, headers: dict | None = None) -> httpx.Response:
+    def get(
+        self, url: str, *, params: dict | None = None, headers: dict | None = None
+    ) -> httpx.Response:
         last_exc: Exception | None = None
+        self.last_attempts = 0
+        self.last_status = None
+
         for attempt in range(self.retries + 1):
+            self.last_attempts = attempt + 1
             self._respect_rate_limit()
+            # 試行ごとに UA を変える（403/ボット対策）
+            req_headers = {"User-Agent": ua_for_attempt(attempt)}
+            if headers:
+                req_headers.update(headers)
             try:
-                resp = self._client.get(url, params=params, headers=headers)
+                resp = self._client.get(url, params=params, headers=req_headers)
             except httpx.HTTPError as exc:  # 接続/タイムアウト等
                 last_exc = exc
                 logger.warning("HTTP error (attempt %d): %s", attempt + 1, exc)
                 self._backoff(attempt)
                 continue
 
+            self.last_status = resp.status_code
             if resp.status_code in RETRYABLE_STATUS:
                 logger.warning(
                     "retryable status %d (attempt %d) for %s",
-                    resp.status_code,
-                    attempt + 1,
-                    url,
+                    resp.status_code, attempt + 1, url,
                 )
                 last_exc = httpx.HTTPStatusError(
                     f"{resp.status_code} for {url}", request=resp.request, response=resp
@@ -73,7 +91,7 @@ class HttpClient:
                 self._backoff(attempt)
                 continue
 
-            resp.raise_for_status()  # 403/404 等はここで送出（リトライしない）
+            resp.raise_for_status()  # 404 等はここで送出（リトライしない）
             return resp
 
         assert last_exc is not None

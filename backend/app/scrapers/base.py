@@ -12,6 +12,14 @@ from app.models.project import SourceSite
 from app.schemas.project import ProjectCreate
 
 
+class ScraperStructureError(Exception):
+    """サイト構造の変化等で、期待した要素・データが取得できなかった。
+
+    （取得は成功したが 0 件/必須キー欠落など）通常のネットワークエラーと区別し、
+    収集側でエラーとして記録・可視化するために使う。
+    """
+
+
 class BaseScraper(ABC):
     """全スクレイパーの基底クラス。"""
 

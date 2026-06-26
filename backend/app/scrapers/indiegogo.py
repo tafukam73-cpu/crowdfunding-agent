@@ -19,7 +19,7 @@ from selectolax.parser import HTMLParser
 
 from app.models.project import SourceSite
 from app.schemas.project import ProjectCreate
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import BaseScraper, ScraperStructureError
 from app.scrapers.fetcher import Fetcher, get_fetcher
 
 logger = logging.getLogger("scraper.indiegogo")
@@ -163,6 +163,8 @@ class IndiegogoScraper(BaseScraper):
         explore_url: str = EXPLORE_URL,
         category_label: str = CATEGORY_LABEL,
         rate_limit_seconds: float = 2.0,
+        timeout: float = 30.0,
+        retries: int = 2,
         fetch_method: str = "playwright",
         fetcher: Fetcher | None = None,
     ) -> None:
@@ -170,22 +172,42 @@ class IndiegogoScraper(BaseScraper):
         self.explore_url = explore_url
         self.category_label = category_label
         self._client: Fetcher = fetcher or get_fetcher(
-            fetch_method, rate_limit_seconds=rate_limit_seconds
+            fetch_method,
+            rate_limit_seconds=rate_limit_seconds,
+            timeout=timeout,
+            retries=retries,
         )
         self._owns_client = fetcher is None
 
     def scrape(self) -> list[ProjectCreate]:
-        html = self._client.get_text(self.explore_url)
-        cards = parse_cards(html)[: self.limit]
+        try:
+            html = self._client.get_text(self.explore_url)
+            cards = parse_cards(html)
 
-        results: list[ProjectCreate] = []
-        for d in cards:
-            try:
-                results.append(normalize_card(d, self.category_label))
-            except Exception as exc:  # noqa: BLE001  1件失敗は握りつぶし継続
-                logger.warning("normalize failed, skip: %s", exc)
-                continue
+            # --- 構造変化検知 ---
+            # SSR HTML から `div.gfu-project-card` が 1 枚も取れない＝セレクタ/
+            # マークアップの変化、またはブロックページ。ネットワークエラーと区別する。
+            if not cards:
+                raise ScraperStructureError(
+                    "Indiegogo：project カードを 1 枚も抽出できませんでした"
+                    "（構造変化またはブロックの可能性）"
+                )
+            # カードは取れたが title・href が全件欠落＝カード内部構造の変化。
+            if all(not c.get("title") and not c.get("href") for c in cards):
+                raise ScraperStructureError(
+                    "Indiegogo：カードから title/href を抽出できませんでした"
+                    "（構造変化の可能性）"
+                )
 
-        if self._owns_client:
-            self._client.close()
-        return results
+            results: list[ProjectCreate] = []
+            for d in cards[: self.limit]:
+                try:
+                    results.append(normalize_card(d, self.category_label))
+                except Exception as exc:  # noqa: BLE001  1件失敗は握りつぶし継続
+                    logger.warning("normalize failed, skip: %s", exc)
+                    continue
+
+            return results
+        finally:
+            if self._owns_client:
+                self._client.close()

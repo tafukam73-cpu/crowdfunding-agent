@@ -12,15 +12,31 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.project import SourceSite
-from app.models.scrape_run import ScrapeRun, ScrapeStatus
+from app.models.scrape_run import ErrorKind, ScrapeRun, ScrapeStatus
+from app.scrapers.base import ScraperStructureError
 from app.scrapers.registry import SUPPORTED_SITES, get_scraper
 from app.services import project_service
 
 logger = logging.getLogger("collector")
+
+
+def classify_error(exc: Exception) -> ErrorKind:
+    """例外を監視用のエラー種別へ分類する。
+
+    - 構造変化（ScraperStructureError）→ structure
+    - 取得系（httpx / タイムアウト / 接続）→ network
+    - それ以外 → unknown
+    """
+    if isinstance(exc, ScraperStructureError):
+        return ErrorKind.structure
+    if isinstance(exc, (httpx.HTTPError, TimeoutError, ConnectionError)):
+        return ErrorKind.network
+    return ErrorKind.unknown
 
 
 def create_pending_runs(
@@ -61,9 +77,12 @@ def execute_run(db: Session, run: ScrapeRun, limit: int = 20) -> ScrapeRun:
         run.status = ScrapeStatus.success.value
     except Exception as exc:  # noqa: BLE001  例外は scrape_runs に記録
         db.rollback()
+        kind = classify_error(exc)
         run.status = ScrapeStatus.error.value
         run.error = str(exc)[:2000]
-        logger.warning("scrape failed (site=%s): %s", run.site, exc)
+        run.error_kind = kind.value
+        log = logger.error if kind is ErrorKind.structure else logger.warning
+        log("scrape failed (site=%s kind=%s): %s", run.site, kind.value, exc)
     finally:
         run.finished_at = datetime.now(timezone.utc)
         db.add(run)

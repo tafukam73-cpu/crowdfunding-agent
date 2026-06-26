@@ -26,6 +26,7 @@ def get_fetcher(
     *,
     rate_limit_seconds: float = 2.0,
     timeout: float = 30.0,
+    retries: int = 2,
 ) -> Fetcher:
     """取得方法に応じた Fetcher を返す。"""
     if method == "playwright":
@@ -33,6 +34,8 @@ def get_fetcher(
         from app.scrapers.playwright_client import PlaywrightClient
 
         return PlaywrightClient(
-            rate_limit_seconds=rate_limit_seconds, timeout=timeout
+            rate_limit_seconds=rate_limit_seconds, timeout=timeout, retries=retries
         )
-    return HttpClient(rate_limit_seconds=rate_limit_seconds, timeout=timeout)
+    return HttpClient(
+        rate_limit_seconds=rate_limit_seconds, timeout=timeout, retries=retries
+    )

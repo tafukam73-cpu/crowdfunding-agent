@@ -18,7 +18,7 @@ from decimal import Decimal, InvalidOperation
 
 from app.models.project import SourceSite
 from app.schemas.project import ProjectCreate
-from app.scrapers.base import BaseScraper
+from app.scrapers.base import BaseScraper, ScraperStructureError
 from app.scrapers.fetcher import Fetcher, get_fetcher
 
 logger = logging.getLogger("scraper.kickstarter")
@@ -120,6 +120,8 @@ class KickstarterScraper(BaseScraper):
         category_id: int = CATEGORY_TECHNOLOGY,
         fetch_detail: bool = True,
         rate_limit_seconds: float = 2.0,
+        timeout: float = 30.0,
+        retries: int = 2,
         fetch_method: str = "httpx",
         fetcher: Fetcher | None = None,
     ) -> None:
@@ -128,7 +130,10 @@ class KickstarterScraper(BaseScraper):
         self.fetch_detail = fetch_detail
         # 取得方法は httpx / playwright を切り替え可能（fetcher 直接注入も可）
         self._client: Fetcher = fetcher or get_fetcher(
-            fetch_method, rate_limit_seconds=rate_limit_seconds
+            fetch_method,
+            rate_limit_seconds=rate_limit_seconds,
+            timeout=timeout,
+            retries=retries,
         )
         self._owns_client = fetcher is None
 
@@ -139,26 +144,43 @@ class KickstarterScraper(BaseScraper):
             "format": "json",
             "page": 1,
         }
-        data = self._client.get_json(DISCOVER_URL, params=params)
-        raw_projects = (data or {}).get("projects", []) or []
-        raw_projects = raw_projects[: self.limit]
+        try:
+            data = self._client.get_json(DISCOVER_URL, params=params)
 
-        results: list[ProjectCreate] = []
-        for raw in raw_projects:
-            try:
-                item = normalize_project(raw)
-            except Exception as exc:  # noqa: BLE001  1件失敗は握りつぶし継続
-                logger.warning("normalize failed, skip: %s", exc)
-                continue
+            # --- 構造変化検知 ---
+            # discover JSON は必ず "projects" キーを持つ。欠落＝API レスポンス構造の
+            # 変化（仕様変更/ブロックページ）とみなし、ネットワークエラーと区別する。
+            if not isinstance(data, dict) or "projects" not in data:
+                raise ScraperStructureError(
+                    "Kickstarter discover JSON に 'projects' キーがありません"
+                    "（構造変化またはブロックの可能性）"
+                )
+            raw_projects = (data.get("projects") or [])[: self.limit]
 
-            if self.fetch_detail and item.source_url:
-                self._enrich_video(item)
+            results: list[ProjectCreate] = []
+            for raw in raw_projects:
+                try:
+                    item = normalize_project(raw)
+                except Exception as exc:  # noqa: BLE001  1件失敗は握りつぶし継続
+                    logger.warning("normalize failed, skip: %s", exc)
+                    continue
 
-            results.append(item)
+                if self.fetch_detail and item.source_url:
+                    self._enrich_video(item)
 
-        if self._owns_client:
-            self._client.close()
-        return results
+                results.append(item)
+
+            # 取得成功なのに 1 件も正規化できない＝カードのキー構成が変わった疑い。
+            if not results:
+                raise ScraperStructureError(
+                    "Kickstarter：案件を 1 件も取得できませんでした"
+                    "（構造変化またはブロックの可能性）"
+                )
+
+            return results
+        finally:
+            if self._owns_client:
+                self._client.close()
 
     def _enrich_video(self, item: ProjectCreate) -> None:
         """案件ページから動画URLを best-effort 補完。失敗時は null のまま。"""

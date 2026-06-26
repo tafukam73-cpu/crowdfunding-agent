@@ -19,6 +19,19 @@ class ScrapeStatus(str, enum.Enum):
     error = "error"       # エラー終了
 
 
+class ErrorKind(str, enum.Enum):
+    """エラーの種別（取得成功率監視・構造変化検知用）。
+
+    - network   … 接続失敗・タイムアウト・403/429/5xx 等の一時的/取得系エラー
+    - structure … 取得は成功したが期待する要素・キーが無い（構造変化の疑い）
+    - unknown   … 上記に分類できないその他の例外
+    """
+
+    network = "network"
+    structure = "structure"
+    unknown = "unknown"
+
+
 class ScrapeRun(Base):
     __tablename__ = "scrape_runs"
 
@@ -38,6 +51,8 @@ class ScrapeRun(Base):
     updated_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # エラー種別（ErrorKind）。success 時は null。構造変化と一時障害の切り分けに使う。
+    error_kind: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

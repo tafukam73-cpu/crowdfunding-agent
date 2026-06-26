@@ -21,9 +21,11 @@ from app.schemas.scrape import (
     ScheduleStatusOut,
     ScrapeRunOut,
     ScrapeRunRequest,
+    ScrapeStatsOut,
     SiteLastRun,
+    SiteStatsOut,
 )
-from app.services import collection_job, collector, scheduler
+from app.services import collection_job, collector, scheduler, scrape_monitor
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -91,6 +93,44 @@ def schedule_status(db: Session = Depends(get_db)) -> ScheduleStatusOut:
         next_run_time=scheduler.next_run_time(),
         last_job=last_job,
         sites=sites,
+    )
+
+
+@router.get("/stats", response_model=ScrapeStatsOut)
+def scrape_stats(
+    db: Session = Depends(get_db),
+    window: int = Query(20, ge=1, le=200),
+) -> ScrapeStatsOut:
+    """サイト別の取得成功率・エラー種別内訳（直近 window 件）を返す。
+
+    構造変化検知（error_kind=structure）があれば structure_change_suspected が
+    true になり、セレクタ/API 仕様の見直しが必要なサインとして使える。
+    """
+    rep = scrape_monitor.report(db, window=window)
+    return ScrapeStatsOut(
+        window=rep.window,
+        threshold=rep.threshold,
+        structure_change_suspected=rep.structure_change_suspected,
+        degraded=rep.degraded,
+        sites=[
+            SiteStatsOut(
+                site=s.site,
+                window=s.window,
+                total=s.total,
+                success=s.success,
+                errors=s.errors,
+                network_errors=s.network_errors,
+                structure_errors=s.structure_errors,
+                unknown_errors=s.unknown_errors,
+                success_rate=s.success_rate,
+                last_status=s.last_status,
+                last_run_at=s.last_run_at,
+                structure_change_suspected=s.structure_change_suspected,
+                last_structure_error_at=s.last_structure_error_at,
+                degraded=s.degraded,
+            )
+            for s in rep.sites
+        ],
     )
 
 

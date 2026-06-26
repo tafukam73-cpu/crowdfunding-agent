@@ -28,6 +28,7 @@ class ScrapeRunOut(BaseModel):
     created_count: int
     updated_count: int
     error: str | None
+    error_kind: str | None = None
     started_at: datetime
     finished_at: datetime | None
 
@@ -65,3 +66,36 @@ class ScheduleStatusOut(BaseModel):
     next_run_time: datetime | None
     last_job: JobRunOut | None
     sites: list[SiteLastRun]
+
+
+class SiteStatsOut(BaseModel):
+    """サイト別の取得成功率・エラー種別内訳（直近 window 件）。"""
+
+    site: SourceSite
+    window: int
+    total: int
+    success: int
+    errors: int
+    network_errors: int
+    structure_errors: int
+    unknown_errors: int
+    success_rate: float | None
+    last_status: str | None
+    last_run_at: datetime | None
+    structure_change_suspected: bool
+    last_structure_error_at: datetime | None
+    degraded: bool
+
+
+class ScrapeStatsOut(BaseModel):
+    """取得監視レポート（全サイト集計）。
+
+    - structure_change_suspected: いずれかのサイトで構造変化を検知（要対応）
+    - degraded: いずれかのサイトで成功率がしきい値を割っている
+    """
+
+    window: int
+    threshold: float
+    structure_change_suspected: bool
+    degraded: bool
+    sites: list[SiteStatsOut]

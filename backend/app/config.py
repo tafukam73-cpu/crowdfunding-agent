@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     scrape_fetcher: str = "playwright"
     # リクエスト間隔（秒）。レート制限への配慮
     scrape_rate_limit_seconds: float = 2.0
+    # 取得タイムアウト（秒）
+    scrape_timeout_seconds: float = 30.0
+    # リトライ回数（403/タイムアウト/5xx 時。UA をローテーションして再試行）
+    scrape_retries: int = 2
 
     # AI 評価：未設定ならモック評価器が使われる
     anthropic_api_key: str = ""
