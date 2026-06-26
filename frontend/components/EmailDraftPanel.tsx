@@ -13,6 +13,7 @@ import {
   type EmailDraft,
   type EmailProviderInfo,
   type EmailType,
+  type ProviderDraftResult,
 } from "@/lib/api";
 
 function DraftCard({
@@ -28,8 +29,8 @@ function DraftCard({
 }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [link, setLink] = useState<string | null>(null);
+  const [result, setResult] = useState<ProviderDraftResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function copy() {
     const text = `Subject: ${draft.subject}\n\n${draft.body}`;
@@ -43,20 +44,22 @@ function DraftCard({
   }
 
   async function makeDraft() {
+    if (busy) return; // 二重クリック防止
     setBusy(true);
-    setMsg(null);
-    setLink(null);
+    setResult(null);
+    setError(null);
     try {
       const r = await createProviderDraft(draft.id, to || undefined);
-      setMsg(`${r.provider} に下書きを作成しました（宛先: ${r.to}）`);
-      setLink(r.web_link);
+      setResult(r);
       onCreated();
     } catch (e) {
-      setMsg(String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
+
+  const isGmail = result?.provider === "gmail";
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -87,22 +90,41 @@ function DraftCard({
         {draft.body}
       </pre>
 
-      {msg && (
-        <p className="mt-2 text-xs text-slate-600">
-          {msg}
-          {link && (
+      {result && (
+        <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-800">
+          <p className="font-semibold">
+            {isGmail
+              ? "Gmailの下書きを作成しました。"
+              : "モック下書きを作成しました。Gmailには保存されず、この画面上で確認できます。"}
+          </p>
+          <p className="mt-1 text-green-700">宛先: {result.to}</p>
+          {isGmail && result.web_link && (
             <a
-              href={link}
+              href={result.web_link}
               target="_blank"
               rel="noreferrer"
-              className="ml-2 text-blue-700 hover:underline"
+              className="mt-1 inline-block font-medium text-blue-700 hover:underline"
             >
-              開く ↗
+              Gmailで開く ↗
             </a>
           )}
-        </p>
+          {!isGmail && (
+            <button
+              onClick={copy}
+              className="mt-2 rounded border border-green-300 bg-white px-2 py-1 font-medium text-green-700 hover:bg-green-100"
+            >
+              {copied ? "コピーしました" : "Subject / Body をコピー"}
+            </button>
+          )}
+        </div>
       )}
-      {draft.provider_draft_id && !msg && (
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <p className="font-semibold">下書きの作成に失敗しました。</p>
+          <p className="mt-1 break-all">{error}</p>
+        </div>
+      )}
+      {draft.provider_draft_id && !result && !error && (
         <p className="mt-2 text-xs text-slate-400">
           {draft.provider} 下書き作成済み（id: {draft.provider_draft_id}）
         </p>
