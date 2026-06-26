@@ -16,6 +16,7 @@ from app.routers import (
     availability,
     crm,
     email_drafts,
+    email_settings,
     evaluate,
     health,
     japanese_success,
@@ -67,6 +68,7 @@ app.include_router(projects.router)
 app.include_router(scrape.router)
 app.include_router(evaluate.router)
 app.include_router(email_drafts.router)
+app.include_router(email_settings.router)
 app.include_router(japanese_success.router)
 app.include_router(crm.router)
 app.include_router(availability.router)

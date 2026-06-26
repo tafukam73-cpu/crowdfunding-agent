@@ -543,6 +543,58 @@ export async function createProviderDraft(
   return res.json();
 }
 
+// ===== メール設定（差出人・会社情報・署名） =====
+export type EmailSettings = {
+  id: number;
+  company_name: string | null;
+  sender_name: string | null;
+  sender_title: string | null;
+  sender_department: string | null;
+  sender_email: string | null;
+  phone: string | null;
+  website_url: string | null;
+  company_profile: string | null;
+  signature_template: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 保存・編集フォーム用の入力型（全項目任意）。
+export type EmailSettingsInput = {
+  company_name?: string | null;
+  sender_name?: string | null;
+  sender_title?: string | null;
+  sender_department?: string | null;
+  sender_email?: string | null;
+  phone?: string | null;
+  website_url?: string | null;
+  company_profile?: string | null;
+  signature_template?: string | null;
+};
+
+// 保存済みのメール設定を取得。未登録なら null。
+export async function fetchEmailSettings(): Promise<EmailSettings | null> {
+  const res = await fetch(`${API_BASE}/email-settings`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// メール設定を作成/更新（1 件運用）。
+export async function updateEmailSettings(
+  data: EmailSettingsInput
+): Promise<EmailSettings> {
+  const res = await fetch(`${API_BASE}/email-settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // 海外案件に類似する日本の成功事例を取得。
 export async function fetchSimilarJapanese(
   id: number,

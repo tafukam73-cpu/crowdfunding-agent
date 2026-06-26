@@ -21,6 +21,12 @@ export default function Header() {
             <Link href="/crm" className="text-slate-600 hover:text-slate-900">
               営業管理
             </Link>
+            <Link
+              href="/email-settings"
+              className="text-slate-600 hover:text-slate-900"
+            >
+              メール設定
+            </Link>
           </nav>
         </div>
         <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-500">

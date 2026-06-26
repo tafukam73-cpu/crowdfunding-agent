@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
+from app.ai.prompts import SenderContext
 from app.models.email_draft import EmailType
 from app.models.project import Project
 
@@ -42,6 +43,12 @@ class EmailGenerator(ABC):
     last_usage: dict | None = None
 
     @abstractmethod
-    def generate(self, project: Project) -> list[EmailDraftResult]:
-        """案件に対し 3 種別の下書きを生成して返す。"""
+    def generate(
+        self, project: Project, ctx: SenderContext | None = None
+    ) -> list[EmailDraftResult]:
+        """案件に対し 3 種別の下書きを生成して返す。
+
+        ctx は差出人/会社情報（メール設定）。None の場合は .env フォールバックを
+        使い、設定未登録でも生成が動くようにする。本文末尾には署名を連結する。
+        """
         raise NotImplementedError

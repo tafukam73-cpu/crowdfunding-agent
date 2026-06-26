@@ -18,18 +18,16 @@ from app.ai.email_generator import (
     EmailDraftResult,
     EmailGenerator,
 )
-from app.config import settings
+from app.ai.prompts import (
+    SYSTEM_PROMPT,
+    SenderContext,
+    append_signature,
+    build_email_prompt,
+)
 from app.models.email_draft import EmailType
 from app.models.project import Project
 
 logger = logging.getLogger("ai.claude_email_generator")
-
-SYSTEM_PROMPT = (
-    "You are a Japanese crowdfunding distributor (Makuake / GreenFunding) "
-    "reaching out to overseas product makers. Write concise, professional sales "
-    "emails in English. Never invent facts about the product. Output must follow "
-    "the given JSON schema exactly."
-)
 
 EMAIL_SCHEMA = {
     "type": "object",
@@ -39,22 +37,6 @@ EMAIL_SCHEMA = {
     },
     "required": ["subject", "body"],
     "additionalProperties": False,
-}
-
-# 種別ごとの狙い（プロンプトに含める）
-_TYPE_INTENT: dict[EmailType, str] = {
-    EmailType.initial_outreach: (
-        "First-contact outreach: introduce yourself, express genuine interest in "
-        "the product, and propose a short call about a Japan launch."
-    ),
-    EmailType.exclusive_rights: (
-        "Propose an exclusive Japan distribution partnership, briefly noting the "
-        "marketing/operational commitment exclusivity enables."
-    ),
-    EmailType.followup: (
-        "Polite, brief follow-up to a previous unanswered message; lower the bar "
-        "to a quick reply."
-    ),
 }
 
 
@@ -68,51 +50,41 @@ class ClaudeEmailGenerator(EmailGenerator):
         self.name = model
         self._client = Anthropic(api_key=api_key)
 
-    def _build_prompt(self, project: Project, email_type: EmailType) -> str:
-        label = EMAIL_TYPE_LABELS[email_type]
-        intent = _TYPE_INTENT[email_type]
-        return (
-            f"Write a sales email of type '{label}'. Goal: {intent}\n"
-            f"Sign the email as {settings.sender_name} from {settings.sender_company}.\n"
-            f"Return JSON with keys: subject, body.\n\n"
-            f"# Product\n"
-            f"Title: {project.title}\n"
-            f"Maker: {project.maker_name}\n"
-            f"Category: {project.category}\n"
-            f"Source platform: {project.source_site}\n"
-            f"Description: {project.description}\n"
-        )
-
     def _generate_one(
-        self, project: Project, email_type: EmailType
+        self, project: Project, email_type: EmailType, ctx: SenderContext
     ) -> tuple[EmailDraftResult, object]:
+        prompt = build_email_prompt(
+            project, email_type, ctx, EMAIL_TYPE_LABELS[email_type]
+        )
         resp = self._client.messages.create(
             model=self.model,
             max_tokens=1200,
             system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": self._build_prompt(project, email_type)}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             output_config={"format": {"type": "json_schema", "schema": EMAIL_SCHEMA}},
         )
         text = next((b.text for b in resp.content if b.type == "text"), None)
         if not text:
             raise ValueError("Claude 応答に JSON テキストが含まれていません")
         data = json.loads(text)
+        # 署名は AI に生成させず、保存済みテンプレートを末尾へ固定連結する
         result = EmailDraftResult(
             email_type=email_type,
             subject=data["subject"],
-            body=data["body"],
+            body=append_signature(data["body"], ctx),
             language="en",
             model=self.name,
         )
         return result, resp.usage
 
-    def generate(self, project: Project) -> list[EmailDraftResult]:
+    def generate(
+        self, project: Project, ctx: SenderContext | None = None
+    ) -> list[EmailDraftResult]:
+        ctx = ctx or SenderContext.fallback()
         results: list[EmailDraftResult] = []
         in_tokens = out_tokens = 0
         for t in EMAIL_TYPES:
-            result, usage = self._generate_one(project, t)
+            result, usage = self._generate_one(project, t, ctx)
             in_tokens += usage.input_tokens
             out_tokens += usage.output_tokens
             results.append(result)

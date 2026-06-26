@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.ai import get_email_generator
 from app.ai.email_generator import EmailGenerator
+from app.ai.prompts import SenderContext
 from app.models.email_draft import EmailDraft
 from app.models.project import Project
-from app.services import usage_service
+from app.services import email_settings_service, usage_service
 
 
 def generate_drafts(
@@ -20,7 +21,10 @@ def generate_drafts(
 ) -> list[EmailDraft]:
     """3 種別の下書きを生成・保存して返す（生成のたびに履歴を追加）。"""
     generator = generator or get_email_generator()
-    results = generator.generate(project)
+    # 保存済みメール設定を会社情報・署名コンテキストとして渡す（未登録なら
+    # .env フォールバック。設定未登録でも生成は動く）。
+    ctx = SenderContext.from_settings(email_settings_service.get_settings(db))
+    results = generator.generate(project, ctx)
 
     drafts: list[EmailDraft] = []
     for r in results:
