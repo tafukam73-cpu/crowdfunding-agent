@@ -39,7 +39,8 @@
 - **スクレイパー安定化（Kickstarter / Indiegogo）**
   - **403/429/5xx・タイムアウト対策**：指数バックオフでリトライ（`SCRAPE_RETRIES`）。試行ごとに User-Agent をローテーション。Playwright 経路は Cloudflare チャレンジを検知して再試行
   - **構造変化検知**：取得は成功したのに想定キー欠落／カード 0 件などを `ScraperStructureError` として通常のネットワークエラーと区別（セレクタ・API 仕様変更のサイン）
-  - **取得成功率監視**：失敗を `error_kind`（network / structure / unknown）で分類記録し、サイト別の直近成功率・構造変化の疑いを集計（`GET /scrape/stats`）
+  - **取得成功率監視**：失敗を `error_kind`（network / structure / unknown）で分類記録し、サイト別の直近成功率・構造変化の疑いを集計（`GET /scrape/stats`）。ダッシュボードに成功率・最終成功/失敗日時・403発生・構造エラー時刻を表示し、異常サイトをバッジで強調
+  - **構造変化アラート通知**：日次/手動ジョブ完了後に構造変化（`structure_change_suspected`）を検知したら、異常サイトをまとめて Slack（Incoming Webhook）へ通知。通知本文にサイト名・エラー種別・直近エラー時刻・成功率・管理画面 URL を含む。通知先（`SLACK_WEBHOOK_URL`）未設定なら何もしない。プロバイダー抽象（`app/notifications`）でメール等を後から追加可能。疎通確認は `POST /scrape/alert-test`
 
 - **CRM（営業管理）**
   - メーカー（企業）管理：交渉ステータス（リード/連絡済み/交渉中/成約/見送り）・次回アクション・リマインダー
@@ -90,6 +91,7 @@
 | --- | --- | --- |
 | GET | `/scrape/last` | スケジューラ状態（有効/cron/次回予定）＋最新ジョブ＋サイト別の最終実行 |
 | GET | `/scrape/stats` | サイト別の取得成功率・エラー種別内訳・構造変化の疑い（直近 `window` 件） |
+| POST | `/scrape/alert-test` | 設定済み通知先（Slack 等）へテストアラートを送信（疎通確認） |
 | GET | `/scrape/jobs` | 収集ジョブの実行履歴（新しい順） |
 | POST | `/scrape/run-all` | 4 サイトを一括バックグラウンド収集（日次ジョブの手動トリガ） |
 

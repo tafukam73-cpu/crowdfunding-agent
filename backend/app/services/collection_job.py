@@ -26,7 +26,7 @@ from app.db.session import SessionLocal
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
 from app.models.project import SourceSite
 from app.models.scrape_run import ScrapeRun, ScrapeStatus
-from app.services import collector, japanese_success_service
+from app.services import alert_service, collector, japanese_success_service
 
 logger = logging.getLogger("collection_job")
 
@@ -147,6 +147,14 @@ def run_collection(trigger: str = JobTrigger.manual.value, limit: int | None = N
             "collection job done (id=%s status=%s ok=%s ng=%s)",
             job.id, job.status, job.sites_succeeded, job.sites_failed,
         )
+
+        # ジョブ完了後に取得モニタリングを評価し、構造変化があれば通知する。
+        # 通知の失敗・未設定はジョブ結果に影響させない。
+        try:
+            alert_service.notify_if_needed(db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("alert notification failed: %s", exc)
+
         return {
             "job_id": job.id,
             "status": job.status,

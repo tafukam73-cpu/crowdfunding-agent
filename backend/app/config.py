@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     # 自動収集の 1 サイトあたり取得上限
     scrape_daily_limit: int = 20
 
+    # --- 取得アラート通知（構造変化・成功率低下） ---
+    # Slack Incoming Webhook URL。設定時のみ Slack 通知を行う（未設定なら何もしない）。
+    slack_webhook_url: str = ""
+    # 管理画面のベース URL（通知本文のリンク用）。未設定なら frontend_origin を使う。
+    app_base_url: str = ""
+    # 監視集計の対象にする直近 run 件数（通知判定にも使う）
+    alert_window: int = 20
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

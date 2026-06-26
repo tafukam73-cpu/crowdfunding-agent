@@ -25,6 +25,15 @@ MONITORED_SITES: list[SourceSite] = [
     SourceSite.greenfunding,
 ]
 
+# サイト識別子 → 表示名（通知・ログ用）
+SITE_LABELS: dict[str, str] = {
+    SourceSite.kickstarter.value: "Kickstarter",
+    SourceSite.indiegogo.value: "Indiegogo",
+    SourceSite.wadiz.value: "Wadiz",
+    SourceSite.makuake.value: "Makuake",
+    SourceSite.greenfunding.value: "GreenFunding",
+}
+
 # 成功率がこれを下回ると要注意（アラート判定）
 DEGRADED_THRESHOLD = 0.5
 

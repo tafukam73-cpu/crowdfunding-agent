@@ -176,6 +176,84 @@ def test_success_rate_monitor() -> None:
     check("未実行サイトは total=0/rate=None", mk.total == 0 and mk.success_rate is None)
 
 
+def test_alert_build_and_slack_payload() -> None:
+    from app.services import alert_service
+    from app.services.scrape_monitor import MonitorReport, SiteStats
+    from app.notifications.slack import SlackNotifier
+
+    def stats(site, *, structure=False, degraded=False, rate=1.0):
+        return SiteStats(
+            site=site,
+            window=20,
+            total=10,
+            success=int(rate * 10),
+            network_errors=1 if degraded else 0,
+            structure_errors=1 if structure else 0,
+            http_403_count=2 if degraded else 0,
+            success_rate=rate,
+            last_status="error" if (structure or degraded) else "success",
+            structure_change_suspected=structure,
+            degraded=degraded,
+        )
+
+    # 構造変化なし → アラート無し
+    ok = MonitorReport(window=20, threshold=0.5, sites=[stats(SourceSite.kickstarter)])
+    check("構造変化なしでアラート無し", alert_service.build_alert(ok) is None)
+
+    # 構造変化あり → 異常サイトのみ含む
+    rep = MonitorReport(
+        window=20,
+        threshold=0.5,
+        sites=[
+            stats(SourceSite.kickstarter, structure=True, rate=0.7),
+            stats(SourceSite.indiegogo, degraded=True, rate=0.2),
+            stats(SourceSite.makuake),  # 正常 → 含めない
+        ],
+    )
+    alert = alert_service.build_alert(rep)
+    check("構造変化でアラート生成", alert is not None)
+    check("異常サイトのみ2件", alert is not None and len(alert.sites) == 2)
+    labels = {s.site_label for s in alert.sites}
+    check("Kickstarter/Indiegogo を含む", labels == {"Kickstarter", "Indiegogo"})
+    ks_alert = next(s for s in alert.sites if s.site_label == "Kickstarter")
+    check("構造変化サイトの issue", "構造変化検知" in ks_alert.issues)
+
+    # Slack ペイロード（ネットワーク無しで生成のみ確認）
+    payload = SlackNotifier("https://hooks.example/x")._build_payload(alert)
+    check("Slack payload に blocks", isinstance(payload.get("blocks"), list) and payload["blocks"])
+    check("Slack fallback text にサイト名", "Kickstarter" in payload.get("text", ""))
+
+
+def test_notify_if_needed_no_notifier() -> None:
+    # SLACK_WEBHOOK_URL 等が未設定なら何もしない（通知先未設定）
+    from app.config import settings
+    from app.services import alert_service
+    from app.services.scrape_monitor import MonitorReport, SiteStats
+
+    settings.slack_webhook_url = ""  # 明示的に未設定
+
+    rep = MonitorReport(
+        window=20,
+        threshold=0.5,
+        sites=[
+            SiteStats(
+                site=SourceSite.kickstarter,
+                window=20,
+                total=5,
+                success=3,
+                structure_errors=1,
+                structure_change_suspected=True,
+                success_rate=0.6,
+            )
+        ],
+    )
+    # build_alert は通知対象を返すが、通知先未設定なら notified=False
+    alert = alert_service.build_alert(rep)
+    check("検知はする", alert is not None)
+    notifiers = __import__("app.notifications", fromlist=["get_notifiers"]).get_notifiers()
+    check("通知先未設定なら notifier 0 件", notifiers == [])
+
+
 def _raises(fn, exc_type) -> bool:
     try:
         fn()
@@ -191,6 +269,8 @@ def main() -> int:
     test_indiegogo_structure_detection()
     test_classify_error()
     test_success_rate_monitor()
+    test_alert_build_and_slack_payload()
+    test_notify_if_needed_no_notifier()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

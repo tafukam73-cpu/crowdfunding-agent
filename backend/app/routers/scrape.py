@@ -25,7 +25,13 @@ from app.schemas.scrape import (
     SiteLastRun,
     SiteStatsOut,
 )
-from app.services import collection_job, collector, scheduler, scrape_monitor
+from app.services import (
+    alert_service,
+    collection_job,
+    collector,
+    scheduler,
+    scrape_monitor,
+)
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -135,6 +141,15 @@ def scrape_stats(
             for s in rep.sites
         ],
     )
+
+
+@router.post("/alert-test")
+def alert_test() -> dict:
+    """設定済みの通知先（Slack 等）へテストアラートを送る（疎通確認用）。
+
+    通知先未設定なら {"notified": false, "reason": "no notifier configured"} を返す。
+    """
+    return alert_service.send_test()
 
 
 @router.get("/jobs", response_model=list[JobRunOut])
