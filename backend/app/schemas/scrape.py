@@ -79,9 +79,12 @@ class SiteStatsOut(BaseModel):
     network_errors: int
     structure_errors: int
     unknown_errors: int
+    http_403_count: int
     success_rate: float | None
     last_status: str | None
     last_run_at: datetime | None
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
     structure_change_suspected: bool
     last_structure_error_at: datetime | None
     degraded: bool

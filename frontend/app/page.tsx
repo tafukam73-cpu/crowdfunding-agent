@@ -8,6 +8,7 @@ import Header from "@/components/Header";
 import RecBadge from "@/components/RecBadge";
 import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
+import ScrapeStatsPanel from "@/components/ScrapeStatsPanel";
 import SourceBadge from "@/components/SourceBadge";
 import StatusBadge from "@/components/StatusBadge";
 import {
@@ -115,6 +116,11 @@ export default function Home() {
         {/* 自動収集（日次スケジューラ）の状況 */}
         <div className="mt-6">
           <ScheduleStatusPanel onCompleted={() => setReloadKey((k) => k + 1)} />
+        </div>
+
+        {/* 取得モニタリング（成功率・構造変化・403 等） */}
+        <div className="mt-6">
+          <ScrapeStatsPanel />
         </div>
 
         {/* AI 利用コスト */}

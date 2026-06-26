@@ -131,22 +131,25 @@ def test_success_rate_monitor() -> None:
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
 
-    def add(site, status, kind=None):
+    def add(site, status, kind=None, error=None):
         db.add(
             ScrapeRun(
                 site=site.value,
                 status=status.value,
                 error_kind=kind.value if kind else None,
+                error=error,
             )
         )
         db.commit()
 
-    # KS: success x3, network x1, structure x1, running x1（running は集計外）
+    # KS: success x3, network(403) x1, structure x1, running x1（running は集計外）
     add(SourceSite.kickstarter, ScrapeStatus.success)
     add(SourceSite.kickstarter, ScrapeStatus.success)
     add(SourceSite.kickstarter, ScrapeStatus.success)
-    add(SourceSite.kickstarter, ScrapeStatus.error, ErrorKind.network)
-    add(SourceSite.kickstarter, ScrapeStatus.error, ErrorKind.structure)
+    add(SourceSite.kickstarter, ScrapeStatus.error, ErrorKind.network,
+        error="403 for https://www.kickstarter.com/discover/advanced")
+    add(SourceSite.kickstarter, ScrapeStatus.error, ErrorKind.structure,
+        error="Kickstarter discover JSON に 'projects' キーがありません")
     db.add(ScrapeRun(site=SourceSite.kickstarter.value, status=ScrapeStatus.running.value))
     db.commit()
 
@@ -155,6 +158,9 @@ def test_success_rate_monitor() -> None:
     check("monitor success_rate=0.6", ks.success_rate == 0.6)
     check("monitor structure_change_suspected", ks.structure_change_suspected is True)
     check("monitor last_structure_error_at", ks.last_structure_error_at is not None)
+    check("monitor http_403_count=1", ks.http_403_count == 1)
+    check("monitor last_success_at 設定", ks.last_success_at is not None)
+    check("monitor last_failure_at 設定", ks.last_failure_at is not None)
     check("monitor window 制限", scrape_monitor.site_stats(db, SourceSite.kickstarter, window=2).total == 2)
 
     # IG: 全 network エラー → degraded・構造変化なし

@@ -38,9 +38,13 @@ class SiteStats:
     network_errors: int = 0
     structure_errors: int = 0
     unknown_errors: int = 0
+    # 403（ボット対策/レート制限の代表的サイン）の発生件数。network エラーの内数。
+    http_403_count: int = 0
     success_rate: float | None = None  # success / total（total=0 なら None）
     last_status: str | None = None
     last_run_at: datetime | None = None
+    last_success_at: datetime | None = None   # 最終成功日時
+    last_failure_at: datetime | None = None   # 最終失敗日時
     # 構造変化の疑い：window 内に structure エラーがあれば True（要対応シグナル）
     structure_change_suspected: bool = False
     last_structure_error_at: datetime | None = None
@@ -50,6 +54,10 @@ class SiteStats:
     @property
     def errors(self) -> int:
         return self.network_errors + self.structure_errors + self.unknown_errors
+
+
+def _run_time(run: ScrapeRun) -> datetime:
+    return run.finished_at or run.started_at
 
 
 def site_stats(db: Session, site: SourceSite, window: int = 20) -> SiteStats:
@@ -70,21 +78,32 @@ def site_stats(db: Session, site: SourceSite, window: int = 20) -> SiteStats:
     if runs:
         latest = runs[0]
         stats.last_status = latest.status
-        stats.last_run_at = latest.finished_at or latest.started_at
+        stats.last_run_at = _run_time(latest)
 
+    # runs は新しい順。各「最終◯◯日時」は最初に見つかったものを採用する。
     for run in runs:
         stats.total += 1
         if run.status == ScrapeStatus.success.value:
             stats.success += 1
+            if stats.last_success_at is None:
+                stats.last_success_at = _run_time(run)
             continue
-        # エラー run：種別で内訳。古いデータ（error_kind=null）は unknown 扱い。
+
+        # --- エラー run ---
+        if stats.last_failure_at is None:
+            stats.last_failure_at = _run_time(run)
+        # 403 はエラー本文から検出（network エラーの内数として別カウント）
+        if run.error and "403" in run.error:
+            stats.http_403_count += 1
+
+        # 種別で内訳。古いデータ（error_kind=null）は unknown 扱い。
         kind = run.error_kind or ErrorKind.unknown.value
         if kind == ErrorKind.network.value:
             stats.network_errors += 1
         elif kind == ErrorKind.structure.value:
             stats.structure_errors += 1
             if stats.last_structure_error_at is None:
-                stats.last_structure_error_at = run.finished_at or run.started_at
+                stats.last_structure_error_at = _run_time(run)
         else:
             stats.unknown_errors += 1
 

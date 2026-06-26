@@ -289,6 +289,44 @@ export const SCRAPE_STATUS_LABELS: Record<ScrapeStatus, string> = {
   error: "失敗",
 };
 
+// ===== 取得監視（/scrape/stats） =====
+export type SiteStats = {
+  site: SourceSite;
+  window: number;
+  total: number;
+  success: number;
+  errors: number;
+  network_errors: number;
+  structure_errors: number;
+  unknown_errors: number;
+  http_403_count: number;
+  success_rate: number | null; // 0.0〜1.0
+  last_status: ScrapeStatus | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  structure_change_suspected: boolean;
+  last_structure_error_at: string | null;
+  degraded: boolean;
+};
+
+export type ScrapeStats = {
+  window: number;
+  threshold: number; // degraded 判定のしきい値（成功率）
+  structure_change_suspected: boolean;
+  degraded: boolean;
+  sites: SiteStats[];
+};
+
+// サイト別の取得成功率・エラー種別内訳・構造変化の疑い（直近 window 件）。
+export async function fetchScrapeStats(window = 20): Promise<ScrapeStats> {
+  const res = await fetch(`${API_BASE}/scrape/stats?window=${window}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export const SCRAPE_STATUS_COLORS: Record<ScrapeStatus, string> = {
   running: "bg-blue-100 text-blue-700",
   success: "bg-green-100 text-green-700",
