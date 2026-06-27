@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import AvailabilityPanel from "@/components/AvailabilityPanel";
 import CompanyResearchPanel from "@/components/CompanyResearchPanel";
+import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
@@ -37,6 +38,8 @@ export default function ProjectDetail() {
   const [evaluating, setEvaluating] = useState(false);
   // 企業リサーチ実行後にメール下書きパネルの「反映済み」表示を更新するための signal
   const [researchVersion, setResearchVersion] = useState(0);
+  // 連絡先探索の更新を宛先候補へ反映するための signal
+  const [discoveryVersion, setDiscoveryVersion] = useState(0);
 
   useEffect(() => {
     fetchProject(id)
@@ -272,8 +275,18 @@ export default function ProjectDetail() {
           onResearched={() => setResearchVersion((v) => v + 1)}
         />
 
+        {/* 営業先連絡先探索 */}
+        <ContactDiscoveryPanel
+          projectId={id}
+          onChanged={() => setDiscoveryVersion((v) => v + 1)}
+        />
+
         {/* 営業メール下書き */}
-        <EmailDraftPanel projectId={id} researchVersion={researchVersion} />
+        <EmailDraftPanel
+          projectId={id}
+          researchVersion={researchVersion}
+          discoveryVersion={discoveryVersion}
+        />
       </main>
     </>
   );

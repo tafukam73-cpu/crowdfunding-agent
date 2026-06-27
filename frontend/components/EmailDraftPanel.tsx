@@ -9,6 +9,7 @@ import {
   EMAIL_TYPE_LABELS,
   EMAIL_TYPE_ORDER,
   fetchCompanyResearch,
+  fetchContactDiscovery,
   fetchEmailDrafts,
   fetchEmailProvider,
   formatDateTime,
@@ -277,9 +278,11 @@ function DraftCard({
 export default function EmailDraftPanel({
   projectId,
   researchVersion = 0,
+  discoveryVersion = 0,
 }: {
   projectId: number;
   researchVersion?: number;
+  discoveryVersion?: number;
 }) {
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [busy, setBusy] = useState(false);
@@ -289,6 +292,10 @@ export default function EmailDraftPanel({
   const [tone, setTone] = useState<EmailTone>("professional");
   // 企業リサーチが反映可能か（completed が存在するか）
   const [researchApplied, setResearchApplied] = useState(false);
+  // 連絡先探索で見つかった宛先候補
+  const [primaryEmail, setPrimaryEmail] = useState<string | null>(null);
+  // ユーザーが宛先を手で編集したら自動プリフィルしない
+  const [toEdited, setToEdited] = useState(false);
 
   function reload() {
     fetchEmailDrafts(projectId)
@@ -310,6 +317,18 @@ export default function EmailDraftPanel({
       .then((r) => setResearchApplied(r?.research_status === "completed"))
       .catch(() => setResearchApplied(false));
   }, [projectId, researchVersion]);
+
+  // 連絡先探索の primary_email を宛先候補として取得し、未編集なら自動入力
+  useEffect(() => {
+    fetchContactDiscovery(projectId)
+      .then((d) => {
+        const email = d?.primary_email ?? null;
+        setPrimaryEmail(email);
+        if (email && !toEdited) setTo(email);
+      })
+      .catch(() => setPrimaryEmail(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, discoveryVersion]);
 
   async function onGenerate() {
     setBusy(true);
@@ -385,7 +404,10 @@ export default function EmailDraftPanel({
             className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
             placeholder="maker@example.com"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={(e) => {
+              setToEdited(true);
+              setTo(e.target.value);
+            }}
           />
         </label>
         {provider && (
@@ -394,6 +416,21 @@ export default function EmailDraftPanel({
           </span>
         )}
       </div>
+      {primaryEmail && (
+        <p className="mt-1 text-xs text-slate-500">
+          連絡先探索の宛先候補:{" "}
+          <button
+            onClick={() => {
+              setToEdited(true);
+              setTo(primaryEmail);
+            }}
+            className="font-medium text-blue-700 hover:underline"
+          >
+            {primaryEmail}
+          </button>{" "}
+          {to === primaryEmail ? "（適用中・編集可）" : "（クリックで宛先に設定）"}
+        </p>
+      )}
 
       <div className="mt-3 space-y-3">
         {!hasAny && (

@@ -645,6 +645,89 @@ export async function runCompanyResearch(id: number): Promise<CompanyResearch> {
   return res.json();
 }
 
+// ===== 営業先連絡先探索 =====
+export type DiscoveryStatus = "pending" | "completed" | "failed";
+
+export type DiscoveredEmail = {
+  email: string;
+  score: number;
+  tier: string;
+  sources: string[];
+};
+
+export type ContactDiscovery = {
+  id: number;
+  project_id: number;
+  maker_id: number | null;
+  status: DiscoveryStatus;
+  primary_email: string | null;
+  primary_contact_form_url: string | null;
+  official_site_url: string | null;
+  instagram_url: string | null;
+  facebook_url: string | null;
+  twitter_url: string | null;
+  linkedin_url: string | null;
+  youtube_url: string | null;
+  discovered_emails: DiscoveredEmail[] | null;
+  discovered_forms: string[] | null;
+  discovered_socials: Record<string, string> | null;
+  searched_urls: string[] | null;
+  confidence_score: number | null;
+  notes: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApplyToCrmResult = {
+  maker_id: number;
+  contact_id: number;
+  email: string;
+};
+
+// 最新の連絡先探索を取得（未実行なら 204 → null）。
+export async function fetchContactDiscovery(
+  id: number
+): Promise<ContactDiscovery | null> {
+  const res = await fetch(`${API_BASE}/projects/${id}/contact-discovery`, {
+    cache: "no-store",
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 連絡先探索を実行（同期）。失敗時も failed として 200 で返る。
+export async function runContactDiscovery(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(`${API_BASE}/projects/${id}/contact-discovery`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 発見したメールを CRM に反映（自動上書きせず担当者として追加）。
+export async function applyDiscoveryToCrm(
+  id: number,
+  email?: string
+): Promise<ApplyToCrmResult> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/apply-to-crm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email || null }),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // 生成済み下書きを、設定中プロバイダー（Gmail/mock）に下書き作成。送信はしない。
 export async function createProviderDraft(
   draftId: number,
