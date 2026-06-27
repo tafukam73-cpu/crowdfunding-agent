@@ -28,6 +28,17 @@ def evaluate_project(
     evaluator = evaluator or get_evaluator()
     result = evaluator.evaluate(project)
 
+    # Ulule 案件は 6 つの追加スコアと理由を両エンジン共通で付与する（総合スコアは不変）。
+    from app.ai import ulule as ulule_eval
+
+    if ulule_eval.is_ulule(project):
+        result.axis_scores = {
+            **result.axis_scores,
+            **ulule_eval.ulule_axis_scores(project),
+        }
+        reason = ulule_eval.reason_text(project)
+        result.reasons = (result.reasons + "\n・" + reason) if result.reasons else reason
+
     ev = AiEvaluation(
         project_id=project.id,
         total_score=result.total_score,

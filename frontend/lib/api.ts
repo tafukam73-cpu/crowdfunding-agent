@@ -178,6 +178,16 @@ export const EMAIL_TYPE_ORDER: EmailType[] = [
   "followup",
 ];
 
+// Ulule 案件で AI 評価に付与される追加スコア軸（英語キー → 表示名）
+export const ULULE_AXIS_LABELS: Record<string, string> = {
+  europe_design_score: "Europe Design",
+  sustainability_score: "Sustainability",
+  craftsmanship_score: "Craftsmanship",
+  gift_potential_score: "Gift Potential",
+  japan_lifestyle_fit_score: "Japan Lifestyle Fit",
+  premium_brand_potential_score: "Premium Brand Potential",
+};
+
 export const REC_LABELS: Record<Recommendation, string> = {
   high: "高",
   mid: "中",

@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 
 from app.ai.evaluator import AXES, EvaluationResult, Evaluator, score_to_recommendation
-from app.ai.ulule import reason_line as ulule_reason_line
 from app.ai.ulule import signals as ulule_signals
 from app.models.project import Project
 
@@ -61,8 +60,8 @@ class MockEvaluator(Evaluator):
         axis["営業すべきか"] = _jitter(seed, 8, 40, 95)
 
         # --- Ulule 案件は優先商材（サステナブル/デザイン/ライフスタイル）を加点 ---
+        # 6 軸の追加スコア・理由文は evaluation_service で両エンジン共通に付与する。
         sig = ulule_signals(project)
-        ulule_extra_reason = ""
         if sig["is_ulule"]:
             hi = len(sig["high_hits"])
             bonus = min(20, 6 * hi)  # 高評価キーワードに応じて加点
@@ -79,7 +78,6 @@ class MockEvaluator(Evaluator):
                 # 映画/音楽/寄付など営業対象外寄りは減点
                 axis["営業すべきか"] = _clamp(axis["営業すべきか"] - 15)
                 axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] - 10)
-            ulule_extra_reason = "\n・" + ulule_reason_line(sig)
 
         # AXES の順序を保証
         axis_scores = {k: int(axis[k]) for k in AXES}
@@ -94,7 +92,7 @@ class MockEvaluator(Evaluator):
                 f"{'ガジェット系で動画映えしやすい' if is_gadget else 'カテゴリは要検討だが訴求は可能'}",
                 f"支援者数 {backers:,} 人で関心度は{'高い' if backers >= 500 else '標準的'}",
             ]
-        ) + ulule_extra_reason
+        )
         concerns = "・" + "\n・".join(
             [
                 "日本国内での競合・既出の有無を要確認",

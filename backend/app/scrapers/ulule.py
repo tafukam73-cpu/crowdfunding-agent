@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -39,6 +39,24 @@ BASE = "https://www.ulule.com"
 # 実在を確認済みの一覧 URL（server-render でアンカーが出る）
 DISCOVER_URL = "https://www.ulule.com/discover/"
 CATEGORY_LABEL = "Lifestyle & Design"
+
+# --- 公式 API（SPA が叩く検索 API。終了済み/成功案件を構造化 JSON で取得できる） ---
+API_URL = "https://api.ulule.com/v1/search/projects"
+API_EXTRA_FIELDS = "main_image,main_tag,owner,partnerships"
+# 狙いたいジャンル × 人気/成功で組み立てたクエリ群（順に試して重複排除しながら蓄積）
+# 有効な status: currently/all/visible/success、sort: amount/ending-soon/new/popular
+DEFAULT_QUERIES = [
+    "design sort:popular status:success",
+    "sustainable sort:popular status:success",
+    "eco sort:popular status:success",
+    "kitchen sort:popular status:success",
+    "home sort:popular status:success",
+    "interior sort:popular status:success",
+    "fashion sort:popular status:success",
+    "accessories sort:popular status:success",
+    "lifestyle sort:popular status:success",
+    "design sort:amount status:success",
+]
 
 # デバッグ保存先（backend/debug）。.gitignore 済み。
 DEBUG_DIR = Path(__file__).resolve().parents[2] / "debug"
@@ -232,6 +250,178 @@ def _looks_blocked(text: str) -> bool:
     return any(m in low for m in CHALLENGE_MARKERS)
 
 
+# ---------------- API（JSON）パース・正規化 ----------------
+def _api_localized(v) -> str | None:
+    """str か多言語 dict（{'en': '...', 'fr': '...'}）からテキストを取り出す。"""
+    if isinstance(v, str):
+        return v.strip() or None
+    if isinstance(v, dict):
+        for k in ("en", "name_en", "fr", "name_fr", "es", "de", "it"):
+            t = v.get(k)
+            if isinstance(t, str) and t.strip():
+                return t.strip()
+        for t in v.values():
+            if isinstance(t, str) and t.strip():
+                return t.strip()
+    return None
+
+
+def _api_name(it: dict) -> str | None:
+    for k in ("name_en", "name_fr", "name_es", "name_de", "name_it",
+              "name_nl", "name_pt", "name_ca", "name"):
+        v = it.get(k)
+        t = _api_localized(v)
+        if t:
+            return t
+    return None
+
+
+def _api_image(it: dict) -> str | None:
+    img = it.get("image")
+    if isinstance(img, str) and img:
+        return img
+    mi = it.get("main_image")
+    if isinstance(mi, dict) and mi:
+        best, best_w = None, -1
+        for size, url in mi.items():
+            m = re.match(r"(\d+)x", str(size))
+            w = int(m.group(1)) if m else 0
+            if w > best_w:
+                best, best_w = url, w
+        return best
+    if isinstance(mi, str):
+        return mi or None
+    return None
+
+
+def _api_category(it: dict) -> str | None:
+    mt = it.get("main_tag")
+    if isinstance(mt, dict):
+        for k in ("name_en", "label", "name_fr"):
+            v = mt.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return None
+
+
+def _api_maker(it: dict) -> str | None:
+    o = it.get("owner")
+    if isinstance(o, dict):
+        return o.get("name") or o.get("username")
+    return None
+
+
+def _api_decimal(v) -> Decimal | None:
+    if v in (None, ""):
+        return None
+    try:
+        return Decimal(str(v)).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _api_date(s) -> date | None:
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _build_memo(
+    *, country, currency, raised, goal, backers, finished, featured, assessment
+) -> str:
+    """取得結果の判断材料メモ（[Ulule] マーカー付き。AI のキーワード判定からは除外）。"""
+    pct = None
+    if goal and raised:
+        try:
+            pct = int(round(float(raised) / float(goal) * 100))
+        except (ZeroDivisionError, ValueError):
+            pct = None
+    if finished and pct is not None and pct >= 100:
+        status = "Successful"
+    elif pct is not None and pct >= 100:
+        status = "Funded"
+    elif finished:
+        status = "Finished"
+    else:
+        status = "Live"
+
+    parts = []
+    if country:
+        parts.append(f"Country: {country}")
+    parts.append(f"Status: {status}")
+    if pct is not None:
+        parts.append(
+            f"Funded: {pct}% (raised {currency} {int(raised):,} / goal {currency} {int(goal):,})"
+        )
+    if backers:
+        parts.append(f"Backers: {backers}")
+    if featured:
+        parts.append("Featured")
+
+    memo = "[Ulule] " + " · ".join(parts)
+    if assessment:
+        memo += "\nAssessment — " + " · ".join(
+            f"{k}: {'yes' if v else '-'}" for k, v in assessment.items()
+        )
+    return memo
+
+
+def normalize_api(it: dict) -> ProjectCreate:
+    """Ulule 検索 API の 1 件 → ProjectCreate（source_site=ulule）。"""
+    name = _api_name(it) or "(no title)"
+    desc = _api_localized(it.get("description_yourself")) or _api_localized(
+        it.get("description")
+    )
+    currency = (it.get("currency") or "EUR").upper()
+    raised = _api_decimal(it.get("amount_raised"))
+    goal = _api_decimal(it.get("goal"))
+    backers = it.get("supporters_count") or it.get("orders_count") or None
+    category = _api_category(it)
+    country = it.get("country")
+    finished = bool(it.get("finished"))
+    featured = bool(it.get("is_featured"))
+
+    # 判断材料（Europe Design / Sustainability / ... ）。AI 評価の補助メモ。
+    pct = 0
+    try:
+        if goal and raised:
+            pct = float(raised) / float(goal) * 100
+    except (ZeroDivisionError, ValueError):
+        pct = 0
+    from app.ai.ulule import assessment_from_text
+
+    assessment = assessment_from_text(
+        " ".join(filter(None, [name, desc, category])), pct
+    )
+    memo = _build_memo(
+        country=country, currency=currency, raised=raised, goal=goal,
+        backers=backers, finished=finished, featured=featured, assessment=assessment,
+    )
+    description = (desc + "\n\n" + memo) if desc else memo
+
+    return ProjectCreate(
+        title=name[:500],
+        source_site=SourceSite.ulule,
+        source_url=it.get("absolute_url"),
+        category=category,
+        description=description,
+        image_url=_api_image(it),
+        video_url=None,
+        currency=currency,
+        goal_amount=goal,
+        raised_amount=raised,
+        backers_count=int(backers) if backers else None,
+        start_date=_api_date(it.get("date_start")),
+        end_date=_api_date(it.get("date_end")),
+        maker_name=_api_maker(it),
+        maker_url=None,
+        contact_info=None,
+    )
+
+
 # ---------------- Playwright レンダラ ----------------
 class _Renderer:
     """Ulule 用の最小 Playwright セッション（スクロール・スクショ対応）。"""
@@ -316,7 +506,7 @@ class UluleScraper(BaseScraper):
     def __init__(
         self,
         *,
-        limit: int = 10,
+        limit: int = 20,
         explore_url: str = DISCOVER_URL,
         category_label: str | None = CATEGORY_LABEL,
         rate_limit_seconds: float = 2.0,
@@ -325,20 +515,105 @@ class UluleScraper(BaseScraper):
         fetch_method: str = "playwright",
         fetcher=None,
         fetch_details: bool = True,
+        use_api: bool = True,
+        queries: list[str] | None = None,
+        per_query: int = 8,
+        api_get=None,
     ) -> None:
         super().__init__(limit=limit)
         self.explore_url = explore_url
         self.category_label = category_label
+        self.rate_limit_seconds = rate_limit_seconds
         self.timeout = timeout
+        self.retries = retries
         # fetcher を渡すとそれを使う（テスト用：get_text(url)->html）。
         self._fetcher = fetcher
         self.fetch_details = fetch_details
+        self.use_api = use_api
+        self.queries = queries or DEFAULT_QUERIES
+        self.per_query = per_query
+        # api_get(q, limit)->dict を渡すとそれを使う（テスト用。本番は HttpClient）。
+        self._api_get = api_get
 
-    # --- 取得（テストでは fetcher 経由、本番は Playwright） ---
+    # --- 取得：API（優先）→ Playwright（フォールバック）。テストは fetcher/api_get 注入。 ---
     def scrape(self) -> list[ProjectCreate]:
         if self._fetcher is not None:
             return self._scrape_with_fetcher()
+        if self.use_api:
+            try:
+                items = self._scrape_api()
+                if items:
+                    return items
+                logger.info("Ulule API: 0 件のため HTML フォールバックへ")
+            except Exception as exc:  # noqa: BLE001  API 失敗は HTML へフォールバック
+                logger.warning("Ulule API 失敗（%s）。HTML フォールバックへ", exc)
         return self._scrape_with_playwright()
+
+    def _scrape_api(self) -> list[ProjectCreate]:
+        """公式検索 API を複数クエリで叩き、重複排除しつつ limit 件まで集める。"""
+        own = self._api_get is None
+        if own:
+            from app.scrapers.http import HttpClient
+
+            client = HttpClient(
+                rate_limit_seconds=self.rate_limit_seconds,
+                timeout=self.timeout,
+                retries=self.retries,
+            )
+
+            def api_get(q: str, limit: int) -> dict:
+                return client.get_json(
+                    API_URL,
+                    params={
+                        "q": q,
+                        "extra_fields": API_EXTRA_FIELDS,
+                        "lang": "en",
+                        "limit": limit,
+                    },
+                )
+        else:
+            api_get = self._api_get
+            client = None
+
+        collected: dict[str, dict] = {}
+        per_query: dict[str, int] = {}
+        try:
+            for q in self.queries:
+                if len(collected) >= self.limit:
+                    break
+                try:
+                    data = api_get(q, self.per_query)
+                except Exception as exc:  # noqa: BLE001  1 クエリ失敗は継続
+                    logger.warning("Ulule API クエリ失敗 q=%r: %s", q, exc)
+                    per_query[q] = 0
+                    continue
+                items = (data or {}).get("projects") or []
+                n = 0
+                for it in items:
+                    url = it.get("absolute_url")
+                    if not url or url in collected:
+                        continue
+                    collected[url] = it
+                    n += 1
+                    if len(collected) >= self.limit:
+                        break
+                per_query[q] = n
+            # 取得元（クエリ）ごとの件数をログに残す（scrape_runs の logs 相当）
+            logger.info(
+                "Ulule API 取得: 合計 %d 件 / クエリ別 %s",
+                len(collected), per_query,
+            )
+        finally:
+            if client is not None:
+                client.close()
+
+        results: list[ProjectCreate] = []
+        for it in list(collected.values())[: self.limit]:
+            try:
+                results.append(normalize_api(it))
+            except Exception as exc:  # noqa: BLE001  1 件失敗は継続
+                logger.warning("Ulule API normalize 失敗: %s", exc)
+        return results
 
     def _scrape_with_fetcher(self) -> list[ProjectCreate]:
         """テスト/簡易経路：fetcher.get_text(url) で list/detail を取得。"""

@@ -42,9 +42,9 @@ def get_scraper(site: SourceSite, limit: int = 20) -> BaseScraper:
             retries=settings.scrape_retries,
         )
     if site is SourceSite.ulule:
-        # 初回検証の既定：1カテゴリ・最大10件（動的描画のため既定 playwright）
+        # 公式 API（成功/人気案件）優先・最大20件。API 不可時は Playwright で discover
         return UluleScraper(
-            limit=min(limit, 10),
+            limit=min(limit, 20),
             fetch_method=settings.scrape_fetcher,
             rate_limit_seconds=settings.scrape_rate_limit_seconds,
             timeout=settings.scrape_timeout_seconds,
