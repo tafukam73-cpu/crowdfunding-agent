@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import get_db
 from app.models.job_run import JobRun
-from app.models.project import SourceSite
+from app.models.project import JAPANESE_SUCCESS_SITES, SourceSite
 from app.models.scrape_run import ScrapeRun
 from app.scrapers.registry import SUPPORTED_SITES
 from app.schemas.scrape import (
@@ -56,6 +56,14 @@ def run_scrape(
     GET /scrape/runs で確認する（status: running → success / error）。
     """
     payload = payload or ScrapeRunRequest()
+    if payload.site in JAPANESE_SUCCESS_SITES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{payload.site.value} は営業対象外です。日本の成功事例は "
+                "POST /japanese-success/collect で収集してください。"
+            ),
+        )
     sites = [payload.site] if payload.site else list(SUPPORTED_SITES)
 
     runs = collector.create_pending_runs(db, sites)

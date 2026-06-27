@@ -48,7 +48,7 @@ export default function ScrapePanel({ onCompleted }: { onCompleted?: () => void 
     setError(null);
     setBusy(true);
     try {
-      await runScrape(undefined, 10); // 全サイト・各最大10件
+      await runScrape(undefined, 10); // 海外営業対象サイト・各最大10件
       prevRunning.current = true;
       await load();
     } catch (e) {
@@ -60,13 +60,13 @@ export default function ScrapePanel({ onCompleted }: { onCompleted?: () => void 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-700">案件収集</h2>
+        <h2 className="text-sm font-semibold text-slate-700">海外案件収集</h2>
         <button
           onClick={onRun}
           disabled={busy}
           className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
         >
-          {busy ? "収集中…" : "収集実行（全サイト）"}
+          {busy ? "収集中…" : "収集実行（海外サイト）"}
         </button>
       </div>
 

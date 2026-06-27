@@ -6,20 +6,17 @@ Step 3-2 時点：Kickstarter のみ実装。残りはダミー。
 from __future__ import annotations
 
 from app.config import settings
-from app.models.project import SourceSite
+from app.models.project import SALES_TARGET_SITES, SourceSite
 from app.scrapers.base import BaseScraper
 from app.scrapers.dummy import DummyScraper
 from app.scrapers.indiegogo import IndiegogoScraper
 from app.scrapers.kickstarter import KickstarterScraper
 
-# 収集対象サイト（優先順位順）
-SUPPORTED_SITES: list[SourceSite] = [
-    SourceSite.kickstarter,
-    SourceSite.indiegogo,
-    SourceSite.wadiz,
-    SourceSite.makuake,
-    SourceSite.greenfunding,
-]
+# 収集対象サイト（優先順位順）。
+# 海外営業対象（Kickstarter / Indiegogo / Wadiz）のみ。projects テーブルに保存する。
+# Makuake / GreenFunding は日本の成功事例（比較用）であり、この収集パイプライン
+# では扱わない（japanese_success_service が japanese_success_projects へ収集する）。
+SUPPORTED_SITES: list[SourceSite] = list(SALES_TARGET_SITES)
 
 
 def get_scraper(site: SourceSite, limit: int = 20) -> BaseScraper:

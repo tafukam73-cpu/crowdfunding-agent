@@ -20,6 +20,7 @@ import {
   fundingRate,
   formatDateTime,
   formatMoney,
+  SALES_TARGET_SITES,
   SITE_LABELS,
   STATUS_LABELS,
   type ListParams,
@@ -127,7 +128,17 @@ export default function Home() {
         <CostPanel reloadKey={costKey} />
 
         <div className="mt-8 flex items-center justify-between">
-          <h1 className="text-xl font-bold">案件一覧</h1>
+          <div>
+            <h1 className="text-xl font-bold">海外営業対象案件</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Kickstarter / Indiegogo / Wadiz の案件のみ。日本の成功事例（Makuake /
+              GreenFunding）は
+              <Link href="/japanese-success" className="text-blue-700 hover:underline">
+                日本の成功事例
+              </Link>
+              で確認できます。
+            </p>
+          </div>
           <button
             onClick={onEvaluateAll}
             disabled={evaluating}
@@ -150,9 +161,9 @@ export default function Home() {
               }}
             >
               <option value="">すべて</option>
-              {Object.entries(SITE_LABELS).map(([v, label]) => (
+              {SALES_TARGET_SITES.map((v) => (
                 <option key={v} value={v}>
-                  {label}
+                  {SITE_LABELS[v]}
                 </option>
               ))}
             </select>

@@ -211,6 +211,14 @@ export const SITE_LABELS: Record<SourceSite, string> = {
   other: "その他",
 };
 
+// 海外営業対象サイト。案件一覧（projects）のフィルタはこの3サイトのみを扱う。
+// Makuake / GreenFunding は日本の成功事例（比較用）であり営業対象に含めない。
+export const SALES_TARGET_SITES: SourceSite[] = [
+  "kickstarter",
+  "indiegogo",
+  "wadiz",
+];
+
 export const SITE_COLORS: Record<SourceSite, string> = {
   kickstarter: "bg-green-100 text-green-700",
   indiegogo: "bg-pink-100 text-pink-700",

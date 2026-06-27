@@ -4,8 +4,18 @@ from __future__ import annotations
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
-from app.models.project import Project, ProjectStatus, SourceSite
+from app.models.project import (
+    JAPANESE_SUCCESS_SITES,
+    SALES_TARGET_SITES,
+    Project,
+    ProjectStatus,
+    SourceSite,
+)
 from app.schemas.project import ProjectCreate, ProjectUpdate
+
+# 営業対象サイトの値（一覧クエリ用）。Makuake / GreenFunding は除外する。
+_SALES_TARGET_VALUES = [s.value for s in SALES_TARGET_SITES]
+_JAPANESE_SUCCESS_VALUES = {s.value for s in JAPANESE_SUCCESS_SITES}
 
 # 並び替えに使えるカラム
 SORTABLE = {
@@ -41,7 +51,9 @@ def list_projects(
 
     Returns: (items, total)
     """
-    conditions = []
+    # 営業対象（Kickstarter / Indiegogo / Wadiz）のみ。日本の成功事例
+    # （Makuake / GreenFunding）が混入していても一覧には出さない。
+    conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
     if site is not None:
         conditions.append(Project.source_site == site.value)
     if status is not None:
@@ -123,6 +135,14 @@ def upsert_by_source_url(db: Session, data: ProjectCreate) -> tuple[Project, boo
 
     注意：コミットは行わない。呼び出し側（collector）でまとめてコミットする。
     """
+    # 日本の成功事例（Makuake / GreenFunding）は projects には保存しない。
+    # これらは japanese_success_service が japanese_success_projects に収集する。
+    if data.source_site.value in _JAPANESE_SUCCESS_VALUES:
+        raise ValueError(
+            f"{data.source_site.value} は営業対象外のため projects に保存できません"
+            "（japanese_success_projects に保存してください）"
+        )
+
     existing: Project | None = None
     if data.source_url:
         existing = db.scalar(

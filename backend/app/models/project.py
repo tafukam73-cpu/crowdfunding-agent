@@ -35,6 +35,21 @@ class SourceSite(str, enum.Enum):
     other = "other"
 
 
+# 営業対象（海外）サイト。projects テーブルに保存・一覧表示する対象。
+SALES_TARGET_SITES: list[SourceSite] = [
+    SourceSite.kickstarter,
+    SourceSite.indiegogo,
+    SourceSite.wadiz,
+]
+
+# 日本の成功事例（比較用）サイト。営業対象ではなく、japanese_success_projects
+# にのみ保存する。projects には保存しない。
+JAPANESE_SUCCESS_SITES: list[SourceSite] = [
+    SourceSite.makuake,
+    SourceSite.greenfunding,
+]
+
+
 class ProjectStatus(str, enum.Enum):
     """営業進捗ステータス。"""
 
