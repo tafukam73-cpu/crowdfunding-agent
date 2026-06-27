@@ -597,6 +597,54 @@ export async function fetchEmailProvider(): Promise<EmailProviderInfo> {
   return res.json();
 }
 
+// ===== AI 企業リサーチ =====
+export type ResearchStatus = "pending" | "completed" | "failed";
+
+export type CompanyResearch = {
+  id: number;
+  project_id: number;
+  maker_name: string | null;
+  official_site_url: string | null;
+  project_url: string | null;
+  research_status: ResearchStatus;
+  brand_summary: string | null;
+  company_mission: string | null;
+  product_summary: string | null;
+  key_product_features: string[] | null;
+  brand_strengths: string[] | null;
+  differentiation_points: string[] | null;
+  japan_market_fit: string | null;
+  personalized_compliment: string | null;
+  outreach_angles: string[] | null;
+  risks_or_cautions: string[] | null;
+  sources: string[] | null;
+  model: string | null;
+  raw_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 最新の企業リサーチを取得（未実行なら 204 → null）。
+export async function fetchCompanyResearch(
+  id: number
+): Promise<CompanyResearch | null> {
+  const res = await fetch(`${API_BASE}/projects/${id}/company-research`, {
+    cache: "no-store",
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 企業リサーチを実行（同期）。失敗時も failed として 200 で返る。
+export async function runCompanyResearch(id: number): Promise<CompanyResearch> {
+  const res = await fetch(`${API_BASE}/projects/${id}/company-research`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // 生成済み下書きを、設定中プロバイダー（Gmail/mock）に下書き作成。送信はしない。
 export async function createProviderDraft(
   draftId: number,

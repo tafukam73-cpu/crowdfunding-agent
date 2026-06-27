@@ -8,6 +8,7 @@ import {
   EMAIL_TONE_ORDER,
   EMAIL_TYPE_LABELS,
   EMAIL_TYPE_ORDER,
+  fetchCompanyResearch,
   fetchEmailDrafts,
   fetchEmailProvider,
   formatDateTime,
@@ -273,13 +274,21 @@ function DraftCard({
   );
 }
 
-export default function EmailDraftPanel({ projectId }: { projectId: number }) {
+export default function EmailDraftPanel({
+  projectId,
+  researchVersion = 0,
+}: {
+  projectId: number;
+  researchVersion?: number;
+}) {
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [provider, setProvider] = useState<EmailProviderInfo | null>(null);
   const [to, setTo] = useState("");
   const [tone, setTone] = useState<EmailTone>("professional");
+  // 企業リサーチが反映可能か（completed が存在するか）
+  const [researchApplied, setResearchApplied] = useState(false);
 
   function reload() {
     fetchEmailDrafts(projectId)
@@ -294,6 +303,13 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
       .catch(() => setProvider(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // 企業リサーチの有無（completed）を確認してバッジ表示に反映
+  useEffect(() => {
+    fetchCompanyResearch(projectId)
+      .then((r) => setResearchApplied(r?.research_status === "completed"))
+      .catch(() => setResearchApplied(false));
+  }, [projectId, researchVersion]);
 
   async function onGenerate() {
     setBusy(true);
@@ -321,7 +337,14 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
   return (
     <div className="mt-8">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">営業メール下書き</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">営業メール下書き</h2>
+          {researchApplied && (
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+              企業リサーチ反映済み
+            </span>
+          )}
+        </div>
         <div className="flex items-end gap-2">
           <label className="flex flex-col text-xs text-slate-500">
             トーン

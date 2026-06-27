@@ -4,6 +4,7 @@ from app.models.availability import (
     AvailabilitySite,
     AvailabilityVerdict,
 )
+from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivity
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.email_settings import EmailSettings
@@ -39,5 +40,7 @@ __all__ = [
     "AvailabilityHit",
     "AvailabilitySite",
     "AvailabilityVerdict",
+    "CompanyResearch",
+    "ResearchStatus",
     "UsageLog",
 ]

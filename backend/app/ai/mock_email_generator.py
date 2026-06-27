@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from app.ai.email_generator import EmailDraftResult, EmailGenerator
-from app.ai.personalization import build_personalization
+from app.ai.personalization import _dedupe, build_personalization
 from app.ai.prompts import (
     DEFAULT_TONE,
     EmailTone,
@@ -208,6 +208,31 @@ def _japanese_summary(
     )
 
 
+def _apply_research(p: dict, research: dict) -> dict:
+    """企業リサーチ結果を personalization 材料へ上書き・補強する。
+
+    リサーチがある場合、称賛文・日本市場アングルをより具体的なものに差し替え、
+    ブランドの強み・差別化点を注目ポイントへ統合する。
+    """
+    merged = dict(p)
+    if research.get("personalized_compliment"):
+        merged["personalized_compliment"] = research["personalized_compliment"]
+    if research.get("japan_market_fit"):
+        merged["japan_market_angle"] = research["japan_market_fit"]
+
+    strengths = list(research.get("brand_strengths") or [])
+    differentiation = list(research.get("differentiation_points") or [])
+    extra = strengths + differentiation
+    if extra:
+        merged["product_highlights"] = _dedupe(
+            extra + list(p.get("product_highlights") or []), limit=6
+        )
+    if research.get("brand_summary"):
+        merged["maker_appeal"] = research["brand_summary"]
+    merged["research_applied"] = True
+    return merged
+
+
 class MockEmailGenerator(EmailGenerator):
     name = "mock-email-v1"
 
@@ -216,12 +241,16 @@ class MockEmailGenerator(EmailGenerator):
         project: Project,
         ctx: SenderContext | None = None,
         tone: EmailTone = DEFAULT_TONE,
+        research: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         maker = _maker(project)
         title = project.title
         # 商品・メーカーごとの個別化材料を先に作る
         p = build_personalization(project)
+        # 企業リサーチがあれば、より具体的な称賛・強み・日本市場適合性で上書き
+        if research:
+            p = _apply_research(p, research)
 
         drafts: list[EmailDraftResult] = []
         for email_type in (

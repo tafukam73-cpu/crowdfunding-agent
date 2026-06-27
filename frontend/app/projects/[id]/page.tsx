@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import AvailabilityPanel from "@/components/AvailabilityPanel";
+import CompanyResearchPanel from "@/components/CompanyResearchPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
@@ -34,6 +35,8 @@ export default function ProjectDetail() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  // 企業リサーチ実行後にメール下書きパネルの「反映済み」表示を更新するための signal
+  const [researchVersion, setResearchVersion] = useState(0);
 
   useEffect(() => {
     fetchProject(id)
@@ -263,8 +266,14 @@ export default function ProjectDetail() {
         {/* 類似する日本の成功事例 */}
         <SimilarSuccessPanel projectId={id} />
 
+        {/* AI 企業リサーチ */}
+        <CompanyResearchPanel
+          projectId={id}
+          onResearched={() => setResearchVersion((v) => v + 1)}
+        />
+
         {/* 営業メール下書き */}
-        <EmailDraftPanel projectId={id} />
+        <EmailDraftPanel projectId={id} researchVersion={researchVersion} />
       </main>
     </>
   );

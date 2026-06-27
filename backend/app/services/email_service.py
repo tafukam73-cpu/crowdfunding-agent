@@ -13,7 +13,11 @@ from app.ai.email_generator import EmailGenerator
 from app.ai.prompts import DEFAULT_TONE, EmailTone, SenderContext
 from app.models.email_draft import EmailDraft
 from app.models.project import Project
-from app.services import email_settings_service, usage_service
+from app.services import (
+    company_research_service,
+    email_settings_service,
+    usage_service,
+)
 
 
 def generate_drafts(
@@ -26,12 +30,17 @@ def generate_drafts(
 
     tone で文章のトーンを指定（既定 professional）。各下書きは件名候補 3 案と
     日本語要約を保持する。subject には初期選択（候補の先頭）を入れる。
+    最新の completed な企業リサーチがあれば、それを反映してより具体的にする。
     """
     generator = generator or get_email_generator()
     # 保存済みメール設定を会社情報・署名コンテキストとして渡す（未登録なら
     # .env フォールバック。設定未登録でも生成は動く）。
     ctx = SenderContext.from_settings(email_settings_service.get_settings(db))
-    results = generator.generate(project, ctx, tone)
+    # 企業リサーチ（あれば）をメール生成へ渡す。無ければ従来どおり None。
+    research = company_research_service.to_context(
+        company_research_service.get_latest_completed(db, project.id)
+    )
+    results = generator.generate(project, ctx, tone, research=research)
 
     drafts: list[EmailDraft] = []
     for r in results:

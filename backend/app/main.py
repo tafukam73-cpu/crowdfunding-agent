@@ -14,6 +14,7 @@ from app.db.session import SessionLocal
 from app.models import Project  # noqa: F401  （メタデータ登録のため）
 from app.routers import (
     availability,
+    company_research,
     crm,
     email_drafts,
     email_settings,
@@ -72,6 +73,7 @@ app.include_router(email_settings.router)
 app.include_router(japanese_success.router)
 app.include_router(crm.router)
 app.include_router(availability.router)
+app.include_router(company_research.router)
 app.include_router(usage.router)
 
 

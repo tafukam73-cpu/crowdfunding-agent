@@ -68,6 +68,7 @@ class ClaudeEmailGenerator(EmailGenerator):
         ctx: SenderContext,
         tone: EmailTone,
         personalization: dict,
+        research: dict | None,
     ) -> tuple[EmailDraftResult, object]:
         prompt = build_email_prompt(
             project,
@@ -76,6 +77,7 @@ class ClaudeEmailGenerator(EmailGenerator):
             EMAIL_TYPE_LABELS[email_type],
             tone=tone,
             personalization=personalization,
+            research=research,
         )
         resp = self._client.messages.create(
             model=self.model,
@@ -117,14 +119,22 @@ class ClaudeEmailGenerator(EmailGenerator):
         project: Project,
         ctx: SenderContext | None = None,
         tone: EmailTone = DEFAULT_TONE,
+        research: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         # 商品・メーカーごとの個別化材料を先に作る（全種別で共有）
         personalization = build_personalization(project)
+        # 企業リサーチの称賛があれば個別化材料へ反映（保存値にも残る）
+        if research and research.get("personalized_compliment"):
+            personalization["personalized_compliment"] = research[
+                "personalized_compliment"
+            ]
         results: list[EmailDraftResult] = []
         in_tokens = out_tokens = 0
         for t in EMAIL_TYPES:
-            result, usage = self._generate_one(project, t, ctx, tone, personalization)
+            result, usage = self._generate_one(
+                project, t, ctx, tone, personalization, research
+            )
             in_tokens += usage.input_tokens
             out_tokens += usage.output_tokens
             results.append(result)

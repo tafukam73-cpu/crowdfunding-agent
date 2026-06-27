@@ -95,6 +95,32 @@ def emphasis_for(category: str | None) -> str:
                 return phrase
     return DEFAULT_CATEGORY_EMPHASIS
 
+
+def render_research_block(research: dict) -> str:
+    """企業リサーチ結果をプロンプト用テキストに整形する。
+
+    本文をより具体化するための材料。固定文の丸写しは避け、自然に織り込ませる。
+    """
+    def _join(key: str) -> str:
+        v = research.get(key)
+        return "; ".join(str(x) for x in v if x) if isinstance(v, list) else ""
+
+    lines = [
+        "# Company research (verified material — prefer these specifics; do NOT copy "
+        "verbatim, weave naturally)",
+        f"Brand summary: {research.get('brand_summary', '') or ''}",
+        f"Company mission: {research.get('company_mission', '') or ''}",
+        f"Product summary: {research.get('product_summary', '') or ''}",
+        f"Key product features: {_join('key_product_features')}",
+        f"Brand strengths: {_join('brand_strengths')}",
+        f"Differentiation: {_join('differentiation_points')}",
+        f"Japan market fit: {research.get('japan_market_fit', '') or ''}",
+        f"Suggested compliment: {research.get('personalized_compliment', '') or ''}",
+        f"Outreach angles to make: {_join('outreach_angles')}",
+        f"Cautions (avoid these): {_join('risks_or_cautions')}",
+    ]
+    return "\n".join(lines)
+
 # 署名の既定テンプレート（メール設定未登録／未設定時に使用）
 DEFAULT_SIGNATURE_TEMPLATE = (
     "Best regards,\n\n"
@@ -240,11 +266,13 @@ def build_email_prompt(
     type_label: str,
     tone: EmailTone = DEFAULT_TONE,
     personalization: dict | None = None,
+    research: dict | None = None,
 ) -> str:
     """本文生成用のユーザープロンプトを組み立てる。
 
     personalization は personalization.build_personalization() の出力（任意）。
-    渡された場合は個別化材料としてプロンプトに含め、商品ごとに本文を変える。
+    research は企業リサーチ結果（任意）。いずれも渡された場合はプロンプトに含め、
+    商品・企業ごとに本文を具体化する。
     """
     profile = trim_company_profile(ctx.company_profile)
     sender_line = ", ".join(
@@ -280,6 +308,8 @@ def build_email_prompt(
         from app.ai.personalization import render_personalization_block
 
         lines += ["", render_personalization_block(personalization)]
+    if research:
+        lines += ["", render_research_block(research)]
     lines += [
         "",
         "# Product",
