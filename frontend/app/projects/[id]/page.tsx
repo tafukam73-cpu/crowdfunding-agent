@@ -20,7 +20,7 @@ import {
   fetchProject,
   formatMoney,
   fundingRate,
-  SITE_LABELS,
+  siteLabel,
   STATUS_LABELS,
   updateProjectStatus,
   type Evaluation,
@@ -116,7 +116,7 @@ export default function ProjectDetail() {
   const rate = fundingRate(project);
 
   const rows: [string, string][] = [
-    ["サイト", SITE_LABELS[project.source_site]],
+    ["サイト", siteLabel(project.source_site)],
     ["カテゴリ", project.category ?? "—"],
     ["目標金額", formatMoney(project.goal_amount, project.currency)],
     ["調達額", formatMoney(project.raised_amount, project.currency)],

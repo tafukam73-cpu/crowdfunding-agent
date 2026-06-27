@@ -283,6 +283,18 @@ export const SITE_COLORS: Record<SourceSite, string> = {
   other: "bg-slate-100 text-slate-600",
 };
 
+// サイト名の安全な表示。未知・空欄は「不明」にして空欄表示を防ぐ。
+export function siteLabel(site: string | null | undefined): string {
+  if (!site) return "不明";
+  return SITE_LABELS[site as SourceSite] ?? "不明";
+}
+
+// サイトバッジ色の安全な取得（未知・空欄は other 相当）。
+export function siteColor(site: string | null | undefined): string {
+  if (site && site in SITE_COLORS) return SITE_COLORS[site as SourceSite];
+  return SITE_COLORS.other;
+}
+
 export type ScrapeStatus = "running" | "success" | "error";
 
 export type ScrapeRun = {

@@ -121,7 +121,15 @@ def site_stats(db: Session, site: SourceSite, window: int = 20) -> SiteStats:
     if stats.total:
         stats.success_rate = round(stats.success / stats.total, 4)
 
-    stats.structure_change_suspected = stats.structure_errors > 0
+    # 構造変化の疑い：window 内に structure エラーがある場合に立てる。
+    # ただし、最終成功が最後の構造エラーより新しければ「復旧済み」とみなして
+    # 過剰な警告を抑止する（古い構造エラーで出続けないようにする）。
+    recovered = bool(
+        stats.last_success_at
+        and stats.last_structure_error_at
+        and stats.last_success_at > stats.last_structure_error_at
+    )
+    stats.structure_change_suspected = stats.structure_errors > 0 and not recovered
     stats.degraded = (
         stats.success_rate is not None
         and stats.errors > 0

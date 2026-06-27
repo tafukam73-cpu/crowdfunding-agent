@@ -1,11 +1,11 @@
-import { SITE_COLORS, SITE_LABELS, type SourceSite } from "@/lib/api";
+import { siteColor, siteLabel, type SourceSite } from "@/lib/api";
 
-export default function SourceBadge({ site }: { site: SourceSite }) {
+export default function SourceBadge({ site }: { site: SourceSite | string }) {
   return (
     <span
-      className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${SITE_COLORS[site]}`}
+      className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${siteColor(site)}`}
     >
-      {SITE_LABELS[site]}
+      {siteLabel(site)}
     </span>
   );
 }

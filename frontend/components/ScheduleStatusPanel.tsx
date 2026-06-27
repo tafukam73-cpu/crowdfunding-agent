@@ -11,7 +11,7 @@ import {
   runAllScrape,
   SCRAPE_STATUS_COLORS,
   SCRAPE_STATUS_LABELS,
-  SITE_LABELS,
+  siteLabel,
   type ScheduleStatus,
 } from "@/lib/api";
 
@@ -110,7 +110,7 @@ export default function ScheduleStatusPanel({
             className="rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
           >
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-700">{SITE_LABELS[site]}</span>
+              <span className="font-medium text-slate-700">{siteLabel(site)}</span>
               <span className="flex items-center gap-2 text-xs text-slate-500">
                 {last_run ? (
                   <>

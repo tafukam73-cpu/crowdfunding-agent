@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   fetchScrapeStats,
   formatDateTime,
-  SITE_LABELS,
+  siteLabel,
   type ScrapeStats,
   type SiteStats,
 } from "@/lib/api";
@@ -144,7 +144,7 @@ export default function ScrapeStatsPanel({
           ) : (
             <p className="text-xs font-medium text-red-700">
               ⚠ 要注意：
-              {alerts.map((x) => SITE_LABELS[x.s.site]).join(" / ")}
+              {alerts.map((x) => siteLabel(x.s.site)).join(" / ")}
               {stats.structure_change_suspected && "（構造変化の疑いあり）"}
             </p>
           )}
@@ -160,7 +160,7 @@ export default function ScrapeStatsPanel({
             {/* ヘッダ：サイト名 + バッジ */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-slate-800">
-                {SITE_LABELS[s.site]}
+                {siteLabel(s.site)}
               </span>
               <span className="flex flex-wrap items-center gap-1">
                 {badges.map((b) => (
