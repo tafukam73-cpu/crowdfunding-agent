@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import enum
 import re
 
 from pydantic import BaseModel
@@ -21,6 +22,78 @@ from app.models.email_draft import EmailType
 
 # AI へ渡す会社紹介文の最大文字数（長すぎる場合はトリム）
 COMPANY_PROFILE_MAX_CHARS = 800
+
+
+class EmailTone(str, enum.Enum):
+    """営業メールのトーン（生成時に選択）。"""
+
+    professional = "professional"  # 標準的で丁寧
+    friendly = "friendly"          # 親しみやすい
+    executive = "executive"        # 経営者向けに簡潔
+    short = "short"                # 短文
+    detailed = "detailed"          # 詳しめ
+
+
+# トーンごとの英文指示（プロンプトに含める）
+TONE_INSTRUCTIONS: dict[EmailTone, str] = {
+    EmailTone.professional: (
+        "Tone: standard, polite and professional. Warm but businesslike. "
+        "Aim for roughly 120-180 words."
+    ),
+    EmailTone.friendly: (
+        "Tone: warm, friendly and approachable, while staying professional. "
+        "Use a personable, conversational voice. Aim for roughly 120-180 words."
+    ),
+    EmailTone.executive: (
+        "Tone: concise and high-level, written for a busy executive. Lead with the "
+        "value, get to the point quickly, minimal small talk. Aim for roughly "
+        "90-130 words."
+    ),
+    EmailTone.short: (
+        "Tone: very short and to the point. A few crisp sentences only, no padding. "
+        "Aim for roughly 60-90 words while still covering the key points."
+    ),
+    EmailTone.detailed: (
+        "Tone: thorough and detailed. Elaborate a little more on the product's value "
+        "and how the Japan launch and exclusive distribution would work. Aim for "
+        "roughly 180-240 words."
+    ),
+}
+
+TONE_LABELS: dict[EmailTone, str] = {
+    EmailTone.professional: "Professional（標準・丁寧）",
+    EmailTone.friendly: "Friendly（親しみやすい）",
+    EmailTone.executive: "Executive（経営者向け・簡潔）",
+    EmailTone.short: "Short（短文）",
+    EmailTone.detailed: "Detailed（詳しめ）",
+}
+
+DEFAULT_TONE = EmailTone.professional
+
+# カテゴリ別の強調ポイント（部分一致でマッチ。プロンプトに含める）。
+# 例：ガジェット → innovation / usability / tech-savvy Japanese consumers
+CATEGORY_EMPHASIS: dict[str, str] = {
+    "ガジェット": "innovation, usability, and tech-savvy Japanese consumers",
+    "テック": "innovation, usability, and tech-savvy Japanese consumers",
+    "オーディオ": "sound quality, design, and tech-savvy Japanese consumers",
+    "アウトドア": "the outdoor lifestyle, compact design, and the Japanese camping market",
+    "キャンプ": "the outdoor lifestyle, compact design, and the Japanese camping market",
+    "ペット": "pet owners, safety, and everyday convenience",
+    "美容": "wellness, design, and fitting into a daily routine",
+    "健康": "wellness, design, and fitting into a daily routine",
+    "ヘルス": "wellness, design, and fitting into a daily routine",
+}
+
+DEFAULT_CATEGORY_EMPHASIS = "innovation, visual appeal, and crowdfunding potential"
+
+
+def emphasis_for(category: str | None) -> str:
+    """カテゴリ文字列から強調ポイントを返す（部分一致、未該当は既定）。"""
+    if category:
+        for key, phrase in CATEGORY_EMPHASIS.items():
+            if key in category:
+                return phrase
+    return DEFAULT_CATEGORY_EMPHASIS
 
 # 署名の既定テンプレート（メール設定未登録／未設定時に使用）
 DEFAULT_SIGNATURE_TEMPLATE = (
@@ -87,13 +160,16 @@ SYSTEM_PROMPT = (
     "that helps overseas makers launch their products in Japan via leading "
     "crowdfunding platforms (Makuake and GreenFunding) and secure exclusive "
     "Japanese distribution.\n"
-    "Write warm, professional sales emails in natural English. Be specific and "
+    "Write warm, natural sales emails in fluent English. Be specific and "
     "genuine, never pushy or overly salesy. Never invent facts about the product "
     "or the maker; only use what you are told.\n"
     "Do NOT add a signature, closing block, or contact details — the signature is "
     "appended separately by the system. End the body with a natural closing "
     "sentence only.\n"
-    "Output must follow the given JSON schema exactly (keys: subject, body)."
+    "Output must follow the given JSON schema exactly. Provide exactly three "
+    "distinct subject line options (subject_options), the email body (body), and a "
+    "short Japanese summary (japanese_summary) so the sender can review the email "
+    "quickly before sending."
 )
 
 # 種別ごとの狙い（プロンプトに含める）
@@ -122,17 +198,24 @@ TYPE_INTENT: dict[EmailType, str] = {
 
 # プロンプトに常に含める「自然な営業メールに含めるべき要素」
 EMAIL_GUIDELINES = (
-    "Naturally weave in the following (do not use a bullet list, write flowing "
-    "prose):\n"
+    "Naturally weave the following into the body (do not use a bullet list, write "
+    "flowing prose):\n"
     "- Refer to the product by name.\n"
     "- Mention 1-2 specific, concrete appeals of the product.\n"
+    "- Explain why you became interested in their product / company.\n"
     "- Show respect for its crowdfunding track record (backers / funding).\n"
     "- Give a concrete reason it has potential in the Japanese market.\n"
     "- Express that you would like to launch it on Makuake / GreenFunding.\n"
     "- Raise that you would like to discuss exclusive Japanese distribution rights.\n"
     "- Propose a short online meeting.\n"
-    "- Keep the tone natural and human, not aggressively salesy.\n"
-    "Keep the email concise (roughly 120-180 words)."
+    "- Keep the tone natural and human, not aggressively salesy."
+)
+
+# 日本語要約に含める要素（プロンプトに含める）
+SUMMARY_GUIDELINES = (
+    "Also write japanese_summary in Japanese (3-5 short lines, plain text) so the "
+    "sender can review before sending. It must cover: このメールの狙い / 相手に"
+    "伝えている主な価値 / 独占販売権への言及の有無 / 次のアクション。"
 )
 
 
@@ -147,7 +230,11 @@ def trim_company_profile(profile: str | None, max_chars: int = COMPANY_PROFILE_M
 
 
 def build_email_prompt(
-    project: object, email_type: EmailType, ctx: SenderContext, type_label: str
+    project: object,
+    email_type: EmailType,
+    ctx: SenderContext,
+    type_label: str,
+    tone: EmailTone = DEFAULT_TONE,
 ) -> str:
     """本文生成用のユーザープロンプトを組み立てる。"""
     profile = trim_company_profile(ctx.company_profile)
@@ -156,12 +243,20 @@ def build_email_prompt(
         for part in (ctx.sender_name, ctx.sender_title, ctx.company_name)
         if part
     ) or settings.sender_company
+    category = getattr(project, "category", None)
+    emphasis = emphasis_for(category)
 
     lines = [
         f"Write a sales email of type '{type_label}'.",
         f"Goal: {TYPE_INTENT[email_type]}",
         "",
+        TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS[DEFAULT_TONE]),
+        "",
         EMAIL_GUIDELINES,
+        "",
+        SUMMARY_GUIDELINES,
+        "",
+        f"For this product category, lean the wording toward: {emphasis}.",
         "",
         f"You are writing on behalf of: {sender_line}.",
     ]
@@ -176,11 +271,12 @@ def build_email_prompt(
         "# Product",
         f"Title: {getattr(project, 'title', '')}",
         f"Maker: {getattr(project, 'maker_name', None) or 'the maker'}",
-        f"Category: {getattr(project, 'category', None) or ''}",
+        f"Category: {category or ''}",
         f"Source platform: {getattr(project, 'source_site', None) or ''}",
         f"Description: {getattr(project, 'description', None) or ''}",
         "",
-        "Return JSON with keys: subject, body. Do not include any signature in body.",
+        "Return JSON with keys: subject_options (exactly 3 distinct strings), body, "
+        "japanese_summary. Do not include any signature in body.",
     ]
     return "\n".join(lines)
 

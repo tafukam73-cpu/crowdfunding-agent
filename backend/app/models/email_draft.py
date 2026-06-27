@@ -8,7 +8,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -29,8 +29,19 @@ class EmailDraft(Base):
     )
 
     email_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    # subject は「実際に採用された件名」（後方互換のため必須のまま維持）
     subject: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # --- 営業メール品質向上で追加（いずれも任意・後方互換） ---
+    # 件名候補（3案）を JSON 配列で保存
+    subject_options: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 利用者が実際に選択した件名（既定は候補の先頭。subject と同期する）
+    selected_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 生成時に選択したトーン（professional / friendly / executive / short / detailed）
+    tone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 送信前確認用の日本語要約
+    japanese_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # 営業先は海外メーカー想定のため既定は英語
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="en")

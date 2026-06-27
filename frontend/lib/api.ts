@@ -97,6 +97,13 @@ export type Evaluation = {
 
 export type EmailType = "initial_outreach" | "exclusive_rights" | "followup";
 
+export type EmailTone =
+  | "professional"
+  | "friendly"
+  | "executive"
+  | "short"
+  | "detailed";
+
 export type EmailDraft = {
   id: number;
   project_id: number;
@@ -105,10 +112,30 @@ export type EmailDraft = {
   body: string;
   language: string;
   model: string;
+  subject_options: string[] | null;
+  selected_subject: string | null;
+  tone: string | null;
+  japanese_summary: string | null;
   provider: string | null;
   provider_draft_id: string | null;
   created_at: string;
 };
+
+export const EMAIL_TONE_LABELS: Record<EmailTone, string> = {
+  professional: "Professional（標準・丁寧）",
+  friendly: "Friendly（親しみやすい）",
+  executive: "Executive（経営者向け・簡潔）",
+  short: "Short（短文）",
+  detailed: "Detailed（詳しめ）",
+};
+
+export const EMAIL_TONE_ORDER: EmailTone[] = [
+  "professional",
+  "friendly",
+  "executive",
+  "short",
+  "detailed",
+];
 
 export type EmailProviderInfo = {
   provider: string;
@@ -511,12 +538,34 @@ export async function fetchUsageSummary(): Promise<UsageSummary> {
   return res.json();
 }
 
-// 営業メール下書きを 3 種別生成（同期）。
-export async function generateEmailDrafts(id: number): Promise<EmailDraft[]> {
+// 営業メール下書きを 3 種別生成（同期）。tone でトーンを指定。
+export async function generateEmailDrafts(
+  id: number,
+  tone: EmailTone = "professional"
+): Promise<EmailDraft[]> {
   const res = await fetch(`${API_BASE}/projects/${id}/email-drafts/generate`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tone }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 件名候補から選択した件名を保存（subject にも反映され、下書き作成で使われる）。
+export async function selectEmailSubject(
+  draftId: number,
+  selectedSubject: string
+): Promise<EmailDraft> {
+  const res = await fetch(`${API_BASE}/email-drafts/${draftId}/subject`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_subject: selectedSubject }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

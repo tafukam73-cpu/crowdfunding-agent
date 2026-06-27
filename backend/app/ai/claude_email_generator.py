@@ -19,7 +19,9 @@ from app.ai.email_generator import (
     EmailGenerator,
 )
 from app.ai.prompts import (
+    DEFAULT_TONE,
     SYSTEM_PROMPT,
+    EmailTone,
     SenderContext,
     append_signature,
     build_email_prompt,
@@ -32,10 +34,18 @@ logger = logging.getLogger("ai.claude_email_generator")
 EMAIL_SCHEMA = {
     "type": "object",
     "properties": {
-        "subject": {"type": "string"},
+        # 件名候補は 3 案
+        "subject_options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
         "body": {"type": "string"},
+        # 送信前確認用の日本語要約
+        "japanese_summary": {"type": "string"},
     },
-    "required": ["subject", "body"],
+    "required": ["subject_options", "body", "japanese_summary"],
     "additionalProperties": False,
 }
 
@@ -51,14 +61,18 @@ class ClaudeEmailGenerator(EmailGenerator):
         self._client = Anthropic(api_key=api_key)
 
     def _generate_one(
-        self, project: Project, email_type: EmailType, ctx: SenderContext
+        self,
+        project: Project,
+        email_type: EmailType,
+        ctx: SenderContext,
+        tone: EmailTone,
     ) -> tuple[EmailDraftResult, object]:
         prompt = build_email_prompt(
-            project, email_type, ctx, EMAIL_TYPE_LABELS[email_type]
+            project, email_type, ctx, EMAIL_TYPE_LABELS[email_type], tone=tone
         )
         resp = self._client.messages.create(
             model=self.model,
-            max_tokens=1200,
+            max_tokens=1500,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
             output_config={"format": {"type": "json_schema", "schema": EMAIL_SCHEMA}},
@@ -67,24 +81,34 @@ class ClaudeEmailGenerator(EmailGenerator):
         if not text:
             raise ValueError("Claude 応答に JSON テキストが含まれていません")
         data = json.loads(text)
+        options = [s for s in data.get("subject_options", []) if s]
+        if not options:
+            raise ValueError("Claude 応答に件名候補が含まれていません")
         # 署名は AI に生成させず、保存済みテンプレートを末尾へ固定連結する
         result = EmailDraftResult(
             email_type=email_type,
-            subject=data["subject"],
+            subject=options[0],
+            subject_options=options,
+            selected_subject=options[0],
             body=append_signature(data["body"], ctx),
             language="en",
+            tone=tone.value,
+            japanese_summary=data.get("japanese_summary", ""),
             model=self.name,
         )
         return result, resp.usage
 
     def generate(
-        self, project: Project, ctx: SenderContext | None = None
+        self,
+        project: Project,
+        ctx: SenderContext | None = None,
+        tone: EmailTone = DEFAULT_TONE,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         results: list[EmailDraftResult] = []
         in_tokens = out_tokens = 0
         for t in EMAIL_TYPES:
-            result, usage = self._generate_one(project, t, ctx)
+            result, usage = self._generate_one(project, t, ctx, tone)
             in_tokens += usage.input_tokens
             out_tokens += usage.output_tokens
             results.append(result)

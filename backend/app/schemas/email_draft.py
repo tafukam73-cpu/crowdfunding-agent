@@ -5,6 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.ai.prompts import DEFAULT_TONE, EmailTone
 from app.models.email_draft import EmailType
 
 
@@ -16,11 +17,28 @@ class EmailDraftOut(BaseModel):
     body: str
     language: str
     model: str
+    # 営業メール品質向上で追加（後方互換のため任意）
+    subject_options: list[str] | None = None
+    selected_subject: str | None = None
+    tone: str | None = None
+    japanese_summary: str | None = None
     provider: str | None = None
     provider_draft_id: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GenerateDraftsRequest(BaseModel):
+    """メール生成リクエスト。tone 未指定なら professional。"""
+
+    tone: EmailTone = DEFAULT_TONE
+
+
+class SelectSubjectRequest(BaseModel):
+    """件名選択リクエスト。"""
+
+    selected_subject: str
 
 
 class ProviderDraftRequest(BaseModel):

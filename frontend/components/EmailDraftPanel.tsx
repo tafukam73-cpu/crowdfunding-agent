@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 
 import {
   createProviderDraft,
+  EMAIL_TONE_LABELS,
+  EMAIL_TONE_ORDER,
   EMAIL_TYPE_LABELS,
   EMAIL_TYPE_ORDER,
   fetchEmailDrafts,
   fetchEmailProvider,
   formatDateTime,
   generateEmailDrafts,
+  selectEmailSubject,
   type EmailDraft,
   type EmailProviderInfo,
+  type EmailTone,
   type EmailType,
   type ProviderDraftResult,
 } from "@/lib/api";
@@ -32,8 +36,33 @@ function DraftCard({
   const [result, setResult] = useState<ProviderDraftResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 件名候補（無い古い下書きは subject 単体にフォールバック）
+  const options =
+    draft.subject_options && draft.subject_options.length > 0
+      ? draft.subject_options
+      : [draft.subject];
+  // 選択中の件名（保存済みの subject / selected_subject を初期値に）
+  const [subject, setSubject] = useState(
+    draft.selected_subject || draft.subject
+  );
+  const [savingSubject, setSavingSubject] = useState(false);
+
+  async function chooseSubject(s: string) {
+    if (s === subject) return;
+    setSubject(s); // 楽観的更新
+    setSavingSubject(true);
+    try {
+      await selectEmailSubject(draft.id, s);
+      onCreated(); // 一覧を再読込して保存内容を反映
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingSubject(false);
+    }
+  }
+
   async function copy() {
-    const text = `Subject: ${draft.subject}\n\n${draft.body}`;
+    const text = `Subject: ${subject}\n\n${draft.body}`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -49,6 +78,8 @@ function DraftCard({
     setResult(null);
     setError(null);
     try {
+      // 選択中の件名を確実に反映してから下書き作成
+      await selectEmailSubject(draft.id, subject);
       const r = await createProviderDraft(draft.id, to || undefined);
       setResult(r);
       onCreated();
@@ -64,9 +95,16 @@ function DraftCard({
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
-        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-          {EMAIL_TYPE_LABELS[draft.email_type]}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+            {EMAIL_TYPE_LABELS[draft.email_type]}
+          </span>
+          {draft.tone && (
+            <span className="rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+              {EMAIL_TONE_LABELS[draft.tone as EmailTone] ?? draft.tone}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={makeDraft}
@@ -83,12 +121,51 @@ function DraftCard({
           </button>
         </div>
       </div>
-      <p className="mt-2 text-sm font-semibold text-slate-800">
-        Subject: {draft.subject}
-      </p>
-      <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-slate-700">
+
+      {/* 件名 3 案（選択可能） */}
+      <div className="mt-3">
+        <p className="text-xs font-medium text-slate-500">
+          件名（3案から選択）{savingSubject && " ・保存中…"}
+        </p>
+        <div className="mt-1 space-y-1">
+          {options.map((opt, i) => (
+            <label
+              key={i}
+              className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 text-sm ${
+                opt === subject
+                  ? "border-blue-300 bg-blue-50 text-slate-900"
+                  : "border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <input
+                type="radio"
+                name={`subject-${draft.id}`}
+                className="mt-0.5"
+                checked={opt === subject}
+                onChange={() => chooseSubject(opt)}
+              />
+              <span>{opt}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* 英文本文 */}
+      <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-slate-700">
         {draft.body}
       </pre>
+
+      {/* 日本語要約（送信前確認用） */}
+      {draft.japanese_summary && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-800">
+            日本語要約（送信前チェック）
+          </p>
+          <pre className="mt-1 whitespace-pre-wrap font-sans text-xs text-amber-900">
+            {draft.japanese_summary}
+          </pre>
+        </div>
+      )}
 
       {result && (
         <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-800">
@@ -98,6 +175,7 @@ function DraftCard({
               : "モック下書きを作成しました。Gmailには保存されず、この画面上で確認できます。"}
           </p>
           <p className="mt-1 text-green-700">宛先: {result.to}</p>
+          <p className="text-green-700">件名: {subject}</p>
           {isGmail && result.web_link && (
             <a
               href={result.web_link}
@@ -120,7 +198,7 @@ function DraftCard({
       )}
       {error && (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-          <p className="font-semibold">下書きの作成に失敗しました。</p>
+          <p className="font-semibold">処理に失敗しました。</p>
           <p className="mt-1 break-all">{error}</p>
         </div>
       )}
@@ -143,6 +221,7 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
   const [error, setError] = useState<string | null>(null);
   const [provider, setProvider] = useState<EmailProviderInfo | null>(null);
   const [to, setTo] = useState("");
+  const [tone, setTone] = useState<EmailTone>("professional");
 
   function reload() {
     fetchEmailDrafts(projectId)
@@ -162,7 +241,7 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
     setBusy(true);
     setError(null);
     try {
-      await generateEmailDrafts(projectId);
+      await generateEmailDrafts(projectId, tone);
       reload();
     } catch (e) {
       setError(String(e));
@@ -171,6 +250,8 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
     }
   }
 
+  // 種別ごとに最新の下書き（reload で先頭が最新）。key に id を含めて
+  // 再生成時にカードの内部 state（選択件名など）がリセットされるようにする。
   const latestByType: Partial<Record<EmailType, EmailDraft>> = {};
   for (const d of drafts) {
     if (!latestByType[d.email_type]) latestByType[d.email_type] = d;
@@ -181,21 +262,38 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
 
   return (
     <div className="mt-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-700">営業メール下書き</h2>
-        <button
-          onClick={onGenerate}
-          disabled={busy}
-          className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {busy ? "生成中…" : hasAny ? "再生成" : "下書きを生成"}
-        </button>
+        <div className="flex items-end gap-2">
+          <label className="flex flex-col text-xs text-slate-500">
+            トーン
+            <select
+              className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
+              value={tone}
+              onChange={(e) => setTone(e.target.value as EmailTone)}
+            >
+              {EMAIL_TONE_ORDER.map((t) => (
+                <option key={t} value={t}>
+                  {EMAIL_TONE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={onGenerate}
+            disabled={busy}
+            className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          >
+            {busy ? "生成中…" : hasAny ? "再生成" : "下書きを生成"}
+          </button>
+        </div>
       </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
       <p className="mt-1 text-xs text-slate-400">
-        ※ 自動送信はしません。「{providerLabel}に下書き作成」で下書きを作り、送信は
+        ※ 自動送信はしません。トーンを選び「下書きを生成」すると、件名3案・本文・
+        日本語要約を作成します。「{providerLabel}に下書き作成」で下書きを作り、送信は
         {provider?.provider === "gmail" ? "Gmail 上で" : "メールサービス上で"}最終確認のうえ行ってください。
       </p>
 
@@ -227,7 +325,7 @@ export default function EmailDraftPanel({ projectId }: { projectId: number }) {
             const d = latestByType[t];
             return d ? (
               <DraftCard
-                key={t}
+                key={`${t}-${d.id}`}
                 draft={d}
                 to={to}
                 providerLabel={providerLabel}

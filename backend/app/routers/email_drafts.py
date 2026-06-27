@@ -18,8 +18,10 @@ from app.email.providers.base import EmailProviderError
 from app.schemas.email_draft import (
     EmailDraftOut,
     EmailProviderInfo,
+    GenerateDraftsRequest,
     ProviderDraftRequest,
     ProviderDraftResult,
+    SelectSubjectRequest,
 )
 from app.services import email_delivery_service, email_service, project_service
 
@@ -74,19 +76,38 @@ def create_provider_draft(
     response_model=list[EmailDraftOut],
 )
 def generate_email_drafts(
-    project_id: int, db: Session = Depends(get_db)
+    project_id: int,
+    payload: GenerateDraftsRequest | None = None,
+    db: Session = Depends(get_db),
 ) -> list[EmailDraftOut]:
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
+    tone = (payload or GenerateDraftsRequest()).tone
     try:
-        return email_service.generate_drafts(db, project)
+        return email_service.generate_drafts(db, project, tone=tone)
     except Exception as exc:  # noqa: BLE001  失敗を記録しアプリは落とさない
         db.rollback()
         logger.warning("email generation failed (project=%s): %s", project_id, exc)
         raise HTTPException(
             status_code=502, detail=f"営業メール生成に失敗しました: {exc}"
         )
+
+
+@router.patch("/email-drafts/{draft_id}/subject", response_model=EmailDraftOut)
+def select_email_subject(
+    draft_id: int,
+    payload: SelectSubjectRequest,
+    db: Session = Depends(get_db),
+) -> EmailDraftOut:
+    """件名候補から選択した件名を保存する（subject にも同期）。"""
+    draft = email_delivery_service.get_draft(db, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="下書きが見つかりません")
+    try:
+        return email_service.select_subject(db, draft, payload.selected_subject)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get(
