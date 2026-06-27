@@ -22,6 +22,10 @@ class EmailDraftOut(BaseModel):
     selected_subject: str | None = None
     tone: str | None = None
     japanese_summary: str | None = None
+    # パーソナライズ材料（後方互換のため任意）
+    personalization_context: dict | None = None
+    personalized_compliment: str | None = None
+    product_highlights: list[str] | None = None
     provider: str | None = None
     provider_draft_id: str | None = None
     created_at: datetime

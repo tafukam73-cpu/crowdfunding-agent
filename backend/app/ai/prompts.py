@@ -199,10 +199,14 @@ TYPE_INTENT: dict[EmailType, str] = {
 # プロンプトに常に含める「自然な営業メールに含めるべき要素」
 EMAIL_GUIDELINES = (
     "Naturally weave the following into the body (do not use a bullet list, write "
-    "flowing prose):\n"
-    "- Refer to the product by name.\n"
-    "- Mention 1-2 specific, concrete appeals of the product.\n"
-    "- Explain why you became interested in their product / company.\n"
+    "flowing prose). Make it specific to THIS product and maker — avoid generic, "
+    "template-like phrasing:\n"
+    "- Refer to the product by name (use the exact product name).\n"
+    "- Explain specifically why you were impressed by the product.\n"
+    "- Include one specific, genuine complimentary sentence about the product "
+    "(not a generic compliment).\n"
+    "- Mention 1-2 concrete appeals/features of the product.\n"
+    "- Give a concrete reason you want to work with this particular maker/team.\n"
     "- Show respect for its crowdfunding track record (backers / funding).\n"
     "- Give a concrete reason it has potential in the Japanese market.\n"
     "- Express that you would like to launch it on Makuake / GreenFunding.\n"
@@ -235,8 +239,13 @@ def build_email_prompt(
     ctx: SenderContext,
     type_label: str,
     tone: EmailTone = DEFAULT_TONE,
+    personalization: dict | None = None,
 ) -> str:
-    """本文生成用のユーザープロンプトを組み立てる。"""
+    """本文生成用のユーザープロンプトを組み立てる。
+
+    personalization は personalization.build_personalization() の出力（任意）。
+    渡された場合は個別化材料としてプロンプトに含め、商品ごとに本文を変える。
+    """
     profile = trim_company_profile(ctx.company_profile)
     sender_line = ", ".join(
         part
@@ -266,6 +275,11 @@ def build_email_prompt(
             "# About our company (context, do not quote verbatim)",
             profile,
         ]
+    if personalization:
+        # 遅延 import で循環参照を避ける
+        from app.ai.personalization import render_personalization_block
+
+        lines += ["", render_personalization_block(personalization)]
     lines += [
         "",
         "# Product",
@@ -273,10 +287,14 @@ def build_email_prompt(
         f"Maker: {getattr(project, 'maker_name', None) or 'the maker'}",
         f"Category: {category or ''}",
         f"Source platform: {getattr(project, 'source_site', None) or ''}",
+        f"Funding raised: {getattr(project, 'raised_amount', None) or ''} "
+        f"{getattr(project, 'currency', None) or ''}",
+        f"Backers: {getattr(project, 'backers_count', None) or ''}",
         f"Description: {getattr(project, 'description', None) or ''}",
         "",
-        "Return JSON with keys: subject_options (exactly 3 distinct strings), body, "
-        "japanese_summary. Do not include any signature in body.",
+        "Return JSON with keys: subject_options (exactly 3 distinct strings; at least "
+        "one MUST include the product name), body, japanese_summary. Do not include "
+        "any signature in body.",
     ]
     return "\n".join(lines)
 

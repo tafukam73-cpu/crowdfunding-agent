@@ -17,12 +17,12 @@
 from __future__ import annotations
 
 from app.ai.email_generator import EmailDraftResult, EmailGenerator
+from app.ai.personalization import build_personalization
 from app.ai.prompts import (
     DEFAULT_TONE,
     EmailTone,
     SenderContext,
     append_signature,
-    emphasis_for,
     trim_company_profile,
 )
 from app.models.email_draft import EmailType
@@ -86,26 +86,28 @@ def _subject_options(email_type: EmailType, title: str) -> list[str]:
 
 
 def _parts(
-    project: Project, email_type: EmailType, ctx: SenderContext
+    project: Project, email_type: EmailType, ctx: SenderContext, p: dict
 ) -> dict[str, str]:
-    """本文の構成パーツ（トーンで取捨選択する）。"""
+    """本文の構成パーツ（トーンで取捨選択する）。
+
+    p は personalization.build_personalization() の出力。商品・メーカーごとに
+    変わる称賛文・訴求文を本文へ自然に織り込む。
+    """
     title = project.title
-    platform = _platform(project)
     intro = _intro(ctx)
-    emphasis = emphasis_for(project.category)
+    opening = p["recommended_opening_sentence"]
+    compliment = p["personalized_compliment"]
+    japan_angle = p["japan_market_angle"]
+    maker_appeal = p["maker_appeal"]
 
     if email_type is EmailType.initial_outreach:
         return {
-            "open": (
-                f"I recently came across {title} on {platform} and was genuinely "
-                "impressed — what drew me in was the product itself and the strong "
-                "support it earned from your backers. Congratulations on that success."
-            ),
+            "open": f"{opening} {compliment}",
             "intro": intro,
+            "maker": maker_appeal,
             "value": (
-                f"I believe {title} has real potential with Japanese backers, who "
-                f"tend to respond well to {emphasis}. We would love to introduce it "
-                "to Japan through a Makuake or GreenFunding launch."
+                f"{japan_angle} We would love to introduce {title} to Japan through a "
+                "Makuake or GreenFunding launch."
             ),
             "exclusive": (
                 "Ideally, we'd also like to explore exclusive distribution rights "
@@ -118,15 +120,16 @@ def _parts(
     if email_type is EmailType.exclusive_rights:
         return {
             "open": (
-                f"Following up on {title} — the results you achieved on {platform} "
+                f"Following up on {title} — {compliment} The results you achieved "
                 "speak for themselves, and I'd love to help replicate that success "
                 "in Japan."
             ),
             "intro": intro,
+            "maker": maker_appeal,
             "value": (
                 "I'd like to propose an exclusive distribution partnership for the "
-                f"Japanese market. {title} fits well with {emphasis}, and a focused "
-                "Makuake or GreenFunding launch could showcase exactly that."
+                f"Japanese market. {japan_angle} A focused Makuake or GreenFunding "
+                "launch could showcase exactly that."
             ),
             "exclusive": (
                 "With exclusivity, we can commit the marketing budget and operational "
@@ -146,9 +149,10 @@ def _parts(
             "brief reply would be appreciated."
         ),
         "intro": intro,
+        "maker": maker_appeal,
         "value": (
-            f"{title} really stands out for its {emphasis}, which is why I'm keen to "
-            "help introduce it on Makuake or GreenFunding."
+            f"{compliment} {japan_angle} That's exactly why I'm keen to help "
+            "introduce it on Makuake or GreenFunding."
         ),
         "exclusive": (
             "I'm also happy to share how exclusive distribution for Japan could work."
@@ -169,11 +173,11 @@ def _render_body(parts: dict[str, str], maker: str, tone: EmailTone) -> str:
     elif tone is EmailTone.executive:
         order = ["open", "value", "exclusive", "cta"]
     elif tone is EmailTone.detailed:
-        order = ["open", "intro", "value", "exclusive", "cta"]
+        order = ["open", "intro", "maker", "value", "exclusive", "cta"]
     elif tone is EmailTone.friendly:
-        order = ["open", "intro", "value", "exclusive", "cta"]
+        order = ["open", "intro", "maker", "value", "exclusive", "cta"]
     else:  # professional
-        order = ["open", "intro", "value", "exclusive", "cta"]
+        order = ["open", "intro", "maker", "value", "exclusive", "cta"]
 
     paragraphs = [parts[k] for k in order if parts.get(k)]
     return greeting + "\n\n" + "\n\n".join(paragraphs)
@@ -216,6 +220,8 @@ class MockEmailGenerator(EmailGenerator):
         ctx = ctx or SenderContext.fallback()
         maker = _maker(project)
         title = project.title
+        # 商品・メーカーごとの個別化材料を先に作る
+        p = build_personalization(project)
 
         drafts: list[EmailDraftResult] = []
         for email_type in (
@@ -224,7 +230,7 @@ class MockEmailGenerator(EmailGenerator):
             EmailType.followup,
         ):
             options = _subject_options(email_type, title)
-            parts = _parts(project, email_type, ctx)
+            parts = _parts(project, email_type, ctx, p)
             body = append_signature(_render_body(parts, maker, tone), ctx)
             drafts.append(
                 EmailDraftResult(
@@ -235,6 +241,9 @@ class MockEmailGenerator(EmailGenerator):
                     body=body,
                     tone=tone.value,
                     japanese_summary=_japanese_summary(project, email_type, tone),
+                    personalization_context=p,
+                    personalized_compliment=p["personalized_compliment"],
+                    product_highlights=p["product_highlights"],
                     model=self.name,
                 )
             )

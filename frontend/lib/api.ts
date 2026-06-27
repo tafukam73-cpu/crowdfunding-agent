@@ -116,9 +116,23 @@ export type EmailDraft = {
   selected_subject: string | null;
   tone: string | null;
   japanese_summary: string | null;
+  personalization_context: PersonalizationContext | null;
+  personalized_compliment: string | null;
+  product_highlights: string[] | null;
   provider: string | null;
   provider_draft_id: string | null;
   created_at: string;
+};
+
+export type PersonalizationContext = {
+  product_name?: string;
+  key_features?: string[];
+  impressive_points?: string[];
+  japan_market_angle?: string;
+  maker_appeal?: string;
+  recommended_opening_sentence?: string;
+  personalized_compliment?: string;
+  product_highlights?: string[];
 };
 
 export const EMAIL_TONE_LABELS: Record<EmailTone, string> = {

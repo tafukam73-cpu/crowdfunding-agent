@@ -47,6 +47,9 @@ def generate_drafts(
             selected_subject=selected,
             tone=r.tone or tone.value,
             japanese_summary=r.japanese_summary or None,
+            personalization_context=r.personalization_context,
+            personalized_compliment=r.personalized_compliment or None,
+            product_highlights=r.product_highlights or None,
         )
         db.add(draft)
         drafts.append(draft)

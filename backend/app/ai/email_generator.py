@@ -39,6 +39,10 @@ class EmailDraftResult(BaseModel):
     selected_subject: str = ""
     tone: str = DEFAULT_TONE.value
     japanese_summary: str = ""
+    # パーソナライズ材料（商品・メーカーごとの個別化）
+    personalization_context: dict | None = None
+    personalized_compliment: str = ""
+    product_highlights: list[str] = Field(default_factory=list)
 
 
 class EmailGenerator(ABC):

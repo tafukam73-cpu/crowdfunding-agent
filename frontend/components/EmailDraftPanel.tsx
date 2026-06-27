@@ -20,6 +20,61 @@ import {
   type ProviderDraftResult,
 } from "@/lib/api";
 
+// 個別化ポイントの表示（送信前に「なぜ個別化されているか」を確認できる）
+function PersonalizationBox({ draft }: { draft: EmailDraft }) {
+  const ctx = draft.personalization_context;
+  const productName = ctx?.product_name;
+  const highlights =
+    draft.product_highlights ?? ctx?.product_highlights ?? [];
+  const compliment = draft.personalized_compliment ?? ctx?.personalized_compliment;
+  const japanAngle = ctx?.japan_market_angle;
+
+  // 個別化情報が一切無い旧データでは何も表示しない（画面を壊さない）
+  if (!productName && highlights.length === 0 && !compliment && !japanAngle) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3">
+      <p className="text-xs font-semibold text-sky-800">
+        個別化ポイント（送信前チェック：なぜこのメールが個別化されているか）
+      </p>
+      <dl className="mt-1 space-y-1 text-xs text-sky-900">
+        {productName && (
+          <div className="flex gap-2">
+            <dt className="shrink-0 font-medium text-sky-700">商品名</dt>
+            <dd>{productName}</dd>
+          </div>
+        )}
+        {highlights.length > 0 && (
+          <div className="flex gap-2">
+            <dt className="shrink-0 font-medium text-sky-700">注目ポイント</dt>
+            <dd>
+              <ul className="list-disc pl-4">
+                {highlights.map((h, i) => (
+                  <li key={i}>{h}</li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
+        {compliment && (
+          <div className="flex gap-2">
+            <dt className="shrink-0 font-medium text-sky-700">称賛ポイント</dt>
+            <dd>{compliment}</dd>
+          </div>
+        )}
+        {japanAngle && (
+          <div className="flex gap-2">
+            <dt className="shrink-0 font-medium text-sky-700">日本市場での訴求</dt>
+            <dd>{japanAngle}</dd>
+          </div>
+        )}
+      </dl>
+    </div>
+  );
+}
+
 function DraftCard({
   draft,
   to,
@@ -149,6 +204,9 @@ function DraftCard({
           ))}
         </div>
       </div>
+
+      {/* 個別化ポイント（なぜこのメールが個別化されているか） */}
+      <PersonalizationBox draft={draft} />
 
       {/* 英文本文 */}
       <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-slate-700">

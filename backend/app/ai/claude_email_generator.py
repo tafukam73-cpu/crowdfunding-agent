@@ -18,6 +18,7 @@ from app.ai.email_generator import (
     EmailDraftResult,
     EmailGenerator,
 )
+from app.ai.personalization import build_personalization
 from app.ai.prompts import (
     DEFAULT_TONE,
     SYSTEM_PROMPT,
@@ -66,9 +67,15 @@ class ClaudeEmailGenerator(EmailGenerator):
         email_type: EmailType,
         ctx: SenderContext,
         tone: EmailTone,
+        personalization: dict,
     ) -> tuple[EmailDraftResult, object]:
         prompt = build_email_prompt(
-            project, email_type, ctx, EMAIL_TYPE_LABELS[email_type], tone=tone
+            project,
+            email_type,
+            ctx,
+            EMAIL_TYPE_LABELS[email_type],
+            tone=tone,
+            personalization=personalization,
         )
         resp = self._client.messages.create(
             model=self.model,
@@ -84,6 +91,10 @@ class ClaudeEmailGenerator(EmailGenerator):
         options = [s for s in data.get("subject_options", []) if s]
         if not options:
             raise ValueError("Claude 応答に件名候補が含まれていません")
+        # 件名候補に商品名が 1 つも含まれなければ、商品名入りの候補を補う（要件 8）
+        title = project.title or ""
+        if title and not any(title in s for s in options):
+            options[-1] = f"{title} — {options[-1]}"
         # 署名は AI に生成させず、保存済みテンプレートを末尾へ固定連結する
         result = EmailDraftResult(
             email_type=email_type,
@@ -94,6 +105,9 @@ class ClaudeEmailGenerator(EmailGenerator):
             language="en",
             tone=tone.value,
             japanese_summary=data.get("japanese_summary", ""),
+            personalization_context=personalization,
+            personalized_compliment=personalization.get("personalized_compliment", ""),
+            product_highlights=personalization.get("product_highlights", []),
             model=self.name,
         )
         return result, resp.usage
@@ -105,10 +119,12 @@ class ClaudeEmailGenerator(EmailGenerator):
         tone: EmailTone = DEFAULT_TONE,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
+        # 商品・メーカーごとの個別化材料を先に作る（全種別で共有）
+        personalization = build_personalization(project)
         results: list[EmailDraftResult] = []
         in_tokens = out_tokens = 0
         for t in EMAIL_TYPES:
-            result, usage = self._generate_one(project, t, ctx, tone)
+            result, usage = self._generate_one(project, t, ctx, tone, personalization)
             in_tokens += usage.input_tokens
             out_tokens += usage.output_tokens
             results.append(result)

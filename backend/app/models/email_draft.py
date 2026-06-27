@@ -43,6 +43,14 @@ class EmailDraft(Base):
     # 送信前確認用の日本語要約
     japanese_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # --- パーソナライズ（商品・メーカーごとの個別化）。いずれも任意・後方互換 ---
+    # 生成前に作った個別化材料一式（product_name / key_features 等）
+    personalization_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 商品ごとに変わる具体的な称賛の一文
+    personalized_compliment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # UI 表示用の注目ポイント（実績＋特徴の要約リスト）
+    product_highlights: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     # 営業先は海外メーカー想定のため既定は英語
     language: Mapped[str] = mapped_column(String(8), nullable=False, default="en")
 
