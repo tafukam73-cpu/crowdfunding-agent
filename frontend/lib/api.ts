@@ -655,6 +655,14 @@ export type DiscoveredEmail = {
   sources: string[];
 };
 
+export type ApproachOption = {
+  channel: string;
+  label: string;
+  url: string | null;
+  score: number;
+  reason: string | null;
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
@@ -673,6 +681,13 @@ export type ContactDiscovery = {
   discovered_socials: Record<string, string> | null;
   searched_urls: string[] | null;
   confidence_score: number | null;
+  contactability_score: number | null;
+  recommended_channel: string | null;
+  recommended_action: string | null;
+  discovery_checklist: Record<string, boolean> | null;
+  approach_options: ApproachOption[] | null;
+  search_queries: string[] | null;
+  evidence_summary: string | null;
   notes: string | null;
   error: string | null;
   created_at: string;
@@ -681,8 +696,9 @@ export type ContactDiscovery = {
 
 export type ApplyToCrmResult = {
   maker_id: number;
-  contact_id: number;
-  email: string;
+  contact_id: number | null;
+  email: string | null;
+  recorded: boolean;
 };
 
 // 最新の連絡先探索を取得（未実行なら 204 → null）。

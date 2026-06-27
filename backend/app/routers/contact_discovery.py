@@ -64,15 +64,20 @@ def apply_to_crm(
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
 
+    latest = contact_discovery_service.get_latest(db, project_id)
     email = (payload.email if payload else None) or None
-    if not email:
-        latest = contact_discovery_service.get_latest(db, project_id)
-        email = latest.primary_email if latest else None
-    if not email:
+    if not email and latest is not None:
+        email = latest.primary_email
+    if latest is None and not email:
         raise HTTPException(
             status_code=400,
-            detail="反映するメールアドレスがありません。先に連絡先探索を実行してください。",
+            detail="反映する情報がありません。先に連絡先探索を実行してください。",
         )
 
-    maker_id, contact_id = contact_discovery_service.apply_to_crm(db, project, email)
-    return ApplyToCrmResult(maker_id=maker_id, contact_id=contact_id, email=email)
+    # メールが無くても推奨チャネル・アクション等を CRM に記録する
+    maker_id, contact_id = contact_discovery_service.apply_to_crm(
+        db, project, email=email, row=latest
+    )
+    return ApplyToCrmResult(
+        maker_id=maker_id, contact_id=contact_id, email=email, recorded=True
+    )

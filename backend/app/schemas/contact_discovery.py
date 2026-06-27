@@ -15,6 +15,14 @@ class DiscoveredEmail(BaseModel):
     sources: list[str] = []
 
 
+class ApproachOption(BaseModel):
+    channel: str
+    label: str
+    url: str | None = None
+    score: int
+    reason: str | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -37,6 +45,15 @@ class ContactDiscoveryOut(BaseModel):
     searched_urls: list[str] | None = None
 
     confidence_score: int | None = None
+    # Contact Intelligence
+    contactability_score: int | None = None
+    recommended_channel: str | None = None
+    recommended_action: str | None = None
+    discovery_checklist: dict[str, bool] | None = None
+    approach_options: list[ApproachOption] | None = None
+    search_queries: list[str] | None = None
+    evidence_summary: str | None = None
+
     notes: str | None = None
     error: str | None = None
     created_at: datetime
@@ -46,12 +63,13 @@ class ContactDiscoveryOut(BaseModel):
 
 
 class ApplyToCrmRequest(BaseModel):
-    """CRM 反映リクエスト。email 未指定なら primary_email を使う。"""
+    """CRM 反映リクエスト。email 未指定でも推奨チャネル等を記録する。"""
 
     email: str | None = None
 
 
 class ApplyToCrmResult(BaseModel):
     maker_id: int
-    contact_id: int
-    email: str
+    contact_id: int | None = None
+    email: str | None = None
+    recorded: bool = True

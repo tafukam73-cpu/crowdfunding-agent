@@ -18,19 +18,19 @@ from sqlalchemy.orm import Session
 
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
-from app.models.crm import Contact
+from app.models.crm import ActivityKind, Contact, SalesActivity
 from app.models.project import Project
 from app.services import crm_service
 
 logger = logging.getLogger("contact_discovery")
 
 # --- 安全設計のパラメータ ---
-MAX_URLS = 12               # 最大探索 URL 数（10〜15 の範囲）
+MAX_URLS = 20               # 最大探索 URL 数（既定 20）
 FETCH_TIMEOUT = 8.0         # 1 ページのタイムアウト（秒）
 FETCH_RETRIES = 0           # 失敗時のレスポンスを速くするためリトライしない
 RATE_LIMIT_SECONDS = 1.0    # ページ間隔（過度なアクセスを避ける）
 
-# 公式サイト内で当たりにいく代表パス
+# 公式サイト内で当たりにいく代表パス（Contact Intelligence で拡張）
 KNOWN_PATHS = [
     "/contact",
     "/contact-us",
@@ -46,10 +46,42 @@ KNOWN_PATHS = [
     "/partners",
     "/press",
     "/media",
+    # 拡張パス
+    "/privacy",
+    "/privacy-policy",
+    "/terms",
+    "/terms-of-service",
+    "/legal",
+    "/faq",
+    "/help",
+    "/customer-service",
+    "/business",
+    "/b2b",
+    "/retail",
+    "/affiliate",
+    "/collaboration",
+    "/collaborate",
+    "/brand",
+    "/our-story",
+    "/team",
+    "/careers",
+    "/press-kit",
+    "/media-kit",
 ]
 
 # コンタクト/問い合わせページと判定するパスの語
-CONTACT_PATH_HINTS = ("contact", "support", "inquiry", "inquiries", "wholesale")
+CONTACT_PATH_HINTS = ("contact", "support", "inquiry", "inquiries", "customer-service")
+# Press / Media ページと判定する語
+PRESS_HINTS = ("press", "media", "press-kit", "media-kit", "newsroom")
+# Wholesale / Distributor / B2B ページと判定する語
+WHOLESALE_HINTS = (
+    "wholesale", "distributor", "distribution", "b2b", "retail", "reseller", "business"
+)
+# PDF リンクのうち営業に有用そうなものを示す語
+PDF_KEYWORDS = (
+    "catalog", "catalogue", "media", "press", "distributor", "wholesale",
+    "brand", "deck", "company", "profile", "lookbook", "linesheet", "line-sheet",
+)
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 MAILTO_RE = re.compile(r"""mailto:([^"'>?\s]+)""", re.IGNORECASE)
@@ -176,9 +208,52 @@ def extract_socials(html: str, base_url: str) -> dict[str, str]:
     return socials
 
 
+def extract_pdf_links(html: str, base_url: str) -> list[dict]:
+    """HTML から PDF リンクを抽出する（営業に有用そうなものを優先ラベル付け）。
+
+    PDF 本文は解析しない（MVP）。Returns: [{url, label, relevant}]
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for link in extract_links(html, base_url):
+        low = link.lower()
+        if ".pdf" not in low:
+            continue
+        if link in seen:
+            continue
+        seen.add(link)
+        relevant = any(k in low for k in PDF_KEYWORDS)
+        name = urlparse(link).path.rsplit("/", 1)[-1] or "PDF"
+        out.append({"url": link, "label": name, "relevant": relevant})
+    # 関連性の高い PDF を先に
+    out.sort(key=lambda p: not p["relevant"])
+    return out
+
+
 def _is_contact_url(url: str) -> bool:
     path = urlparse(url).path.lower()
     return any(h in path for h in CONTACT_PATH_HINTS)
+
+
+def _matches_hints(url: str, hints: tuple[str, ...]) -> bool:
+    path = urlparse(url).path.lower()
+    return any(h in path for h in hints)
+
+
+def build_search_queries(maker_name: str | None, official_domain: str | None) -> list[str]:
+    """手動検索用の Google 検索クエリ候補を生成する（API は使わない）。"""
+    queries: list[str] = []
+    name = (maker_name or "").strip()
+    if name:
+        for kw in ("email", "contact", "partnership", "wholesale", "distributor", "press"):
+            queries.append(f'"{name}" {kw}')
+    if official_domain:
+        queries.append(f'"{official_domain}" contact email')
+        queries.append(f"site:{official_domain} email")
+        queries.append(f"site:{official_domain} partnership")
+        queries.append(f"site:{official_domain} wholesale")
+        queries.append(f"site:{official_domain} distributor filetype:pdf")
+    return queries
 
 
 def _same_domain(url: str, domain: str) -> bool:
@@ -190,6 +265,247 @@ def _domain_of(url: str | None) -> str:
         return ""
     net = urlparse(url).netloc.lower()
     return net[4:] if net.startswith("www.") else net
+
+
+# ---------------- Contact Intelligence（評価・推奨） ----------------
+def _email_flags(emails: list[dict]) -> tuple[bool, bool, bool]:
+    """メールのティア有無（high / mid(=mid,other) / low）を返す。"""
+    has_high = any(e["tier"] == "high" for e in emails)
+    has_mid = any(e["tier"] in ("mid", "other") for e in emails)
+    has_low = any(e["tier"] == "low" for e in emails)
+    return has_high, has_mid, has_low
+
+
+def contactability_score(
+    emails: list[dict],
+    *,
+    has_form: bool,
+    socials: dict,
+    has_official_site: bool,
+) -> int:
+    """メールが無くても営業可能性を 0〜100 で評価する（複数は加点・最大100）。"""
+    has_high, has_mid, has_low = _email_flags(emails)
+    vals: list[int] = []
+    if has_high:
+        vals.append(95)
+    if has_mid:
+        vals.append(80)
+    if has_low:
+        vals.append(60)
+    if has_form:
+        vals.append(70)
+    if socials.get("linkedin"):
+        vals.append(60)
+    if socials.get("instagram"):
+        vals.append(45)
+    if socials.get("facebook"):
+        vals.append(40)
+    if socials.get("twitter"):
+        vals.append(40)
+    if socials.get("youtube"):
+        vals.append(35)
+    if not vals:
+        return 25 if has_official_site else 5
+    return min(100, max(vals) + (len(vals) - 1) * 5)
+
+
+# 推奨チャネルの優先順位（上から評価）
+def recommend_channel(
+    emails: list[dict],
+    *,
+    has_form: bool,
+    socials: dict,
+    press_page: str | None,
+    wholesale_page: str | None,
+) -> str:
+    has_high, has_mid, has_low = _email_flags(emails)
+    if has_high or has_mid or has_low:
+        return "email"
+    if has_form:
+        return "contact_form"
+    if socials.get("linkedin"):
+        return "linkedin"
+    if socials.get("instagram"):
+        return "instagram"
+    if socials.get("facebook"):
+        return "facebook"
+    if press_page:
+        return "press"
+    if wholesale_page:
+        return "distributor_page"
+    return "manual_research"
+
+
+def recommend_action(channel: str, result: dict) -> str:
+    """推奨チャネルに応じた具体的な次アクション文。"""
+    emails = result.get("discovered_emails") or []
+    if channel == "email" and emails:
+        top = emails[0]
+        tier_label = {
+            "high": "a partnership/sales-related",
+            "mid": "a general (info/contact)",
+            "other": "a direct",
+            "low": "a support/press",
+        }.get(top["tier"], "an")
+        return (
+            f"{tier_label} email was found ({top['email']}). "
+            "Use it as the primary outreach address and mention a Japanese "
+            "crowdfunding partnership (Makuake / GreenFunding)."
+        )
+    if channel == "contact_form":
+        url = result.get("primary_contact_form_url") or "the official contact form"
+        return (
+            f"No email was found. Use the official contact form ({url}) and mention a "
+            "Japanese crowdfunding partnership and exclusive distribution interest."
+        )
+    if channel == "linkedin":
+        return (
+            "No email or form was found. Reach out via the company LinkedIn page "
+            "(connect or message a relevant person), then use the generated search "
+            "queries for manual research."
+        )
+    if channel == "instagram":
+        return (
+            "No email or form was found. Start with an Instagram DM to the official "
+            "account, and run the generated search queries to find a business email."
+        )
+    if channel == "facebook":
+        return (
+            "No email or form was found. Try messaging the official Facebook page, "
+            "and use the generated search queries for manual research."
+        )
+    if channel == "press":
+        return (
+            "Only a press/media page was found. Check it for a press contact, and run "
+            "the generated search queries to locate a business email."
+        )
+    if channel == "distributor_page":
+        return (
+            "A wholesale/distributor page was found. Follow its instructions for B2B "
+            "inquiries, and run the generated search queries for a direct email."
+        )
+    return (
+        "No reliable contact channel was found automatically. Use the generated search "
+        "queries to research email / contact form / LinkedIn manually."
+    )
+
+
+_CHANNEL_LABELS = {
+    "email": "Email",
+    "contact_form": "Official contact form",
+    "linkedin": "LinkedIn",
+    "instagram": "Instagram DM",
+    "facebook": "Facebook message",
+    "press": "Press / Media page",
+    "distributor_page": "Wholesale / Distributor page",
+    "pdf": "Document (PDF)",
+}
+
+
+def build_approach_options(
+    result: dict,
+    *,
+    forms: list[str],
+    socials: dict,
+    press_page: str | None,
+    wholesale_page: str | None,
+    pdfs: list[dict],
+) -> list[dict]:
+    """営業アプローチ候補（スコア降順）を組み立てる。"""
+    opts: list[dict] = []
+    for e in result.get("discovered_emails") or []:
+        opts.append({
+            "channel": "email",
+            "label": f"Email ({e['tier']})",
+            "url": f"mailto:{e['email']}",
+            "score": e["score"],
+            "reason": f"{e['tier']}-tier email found on the site",
+        })
+    if forms:
+        opts.append({
+            "channel": "contact_form",
+            "label": _CHANNEL_LABELS["contact_form"],
+            "url": forms[0],
+            "score": 70,
+            "reason": "Official contact page/form was found",
+        })
+    if socials.get("linkedin"):
+        opts.append({"channel": "linkedin", "label": _CHANNEL_LABELS["linkedin"],
+                     "url": socials["linkedin"], "score": 60,
+                     "reason": "Official LinkedIn was linked from the website"})
+    if socials.get("instagram"):
+        opts.append({"channel": "instagram", "label": _CHANNEL_LABELS["instagram"],
+                     "url": socials["instagram"], "score": 55,
+                     "reason": "Official Instagram profile was linked from website"})
+    if socials.get("facebook"):
+        opts.append({"channel": "facebook", "label": _CHANNEL_LABELS["facebook"],
+                     "url": socials["facebook"], "score": 45,
+                     "reason": "Official Facebook page was linked from website"})
+    if press_page:
+        opts.append({"channel": "press", "label": _CHANNEL_LABELS["press"],
+                     "url": press_page, "score": 40,
+                     "reason": "Press/Media page was found"})
+    if wholesale_page:
+        opts.append({"channel": "distributor_page",
+                     "label": _CHANNEL_LABELS["distributor_page"],
+                     "url": wholesale_page, "score": 50,
+                     "reason": "Wholesale/Distributor page was found"})
+    for p in pdfs:
+        opts.append({"channel": "pdf", "label": f"PDF: {p['label']}",
+                     "url": p["url"], "score": 35 if p["relevant"] else 20,
+                     "reason": "Relevant PDF found" if p["relevant"] else "PDF found"})
+    opts.sort(key=lambda o: o["score"], reverse=True)
+    return opts
+
+
+def build_checklist(
+    *,
+    official_checked: bool,
+    forms: list[str],
+    emails: list[dict],
+    socials: dict,
+    press_page: str | None,
+    wholesale_page: str | None,
+) -> dict:
+    return {
+        "official_site_checked": official_checked,
+        "contact_page_found": bool(forms),
+        "email_found": bool(emails),
+        "contact_form_found": bool(forms),
+        "instagram_found": bool(socials.get("instagram")),
+        "facebook_found": bool(socials.get("facebook")),
+        "linkedin_found": bool(socials.get("linkedin")),
+        "press_page_found": bool(press_page),
+        "wholesale_page_found": bool(wholesale_page),
+        "pdf_checked": True,
+        "search_queries_generated": True,
+    }
+
+
+def build_evidence_summary(
+    emails: list[dict], forms: list[str], socials: dict, action: str
+) -> str:
+    """次に取る行動が分かる根拠サマリ（日本語）。"""
+    labels = {
+        "instagram": "Instagram", "facebook": "Facebook", "twitter": "X / Twitter",
+        "linkedin": "LinkedIn", "youtube": "YouTube",
+    }
+    found = []
+    if forms:
+        found.append("問い合わせフォーム")
+    for k, lbl in labels.items():
+        if socials.get(k):
+            found.append(lbl)
+    if emails:
+        top = emails[0]
+        return f"メール {top['email']}（{top['tier']}）を主要連絡先として利用できます。"
+    if found:
+        return (
+            "メールは見つかりませんでしたが、"
+            + "・".join(found)
+            + "が見つかりました。"
+        )
+    return "有効な連絡手段が見つかりませんでした。検索クエリ候補で手動リサーチしてください。"
 
 
 # ---------------- クロール ----------------
@@ -317,6 +633,18 @@ def discover(
     email_map: dict[str, dict] = {}     # email_lower -> {email, score, tier, sources}
     forms: list[str] = []
     socials: dict[str, str] = {}
+    pdfs: list[dict] = []
+    pdf_seen: set[str] = set()
+    press_page: str | None = None
+    wholesale_page: str | None = None
+    official_checked = False
+
+    def _consider_page_category(u: str) -> None:
+        nonlocal press_page, wholesale_page
+        if press_page is None and _matches_hints(u, PRESS_HINTS):
+            press_page = u
+        if wholesale_page is None and _matches_hints(u, WHOLESALE_HINTS):
+            wholesale_page = u
 
     try:
         for url in urls:
@@ -327,6 +655,8 @@ def discover(
                 continue
             html = fetch(url)
             searched.append(url)
+            if official_domain and _same_domain(url, official_domain):
+                official_checked = True
             if not html:
                 continue
 
@@ -337,10 +667,7 @@ def discover(
                 rec = email_map.get(key)
                 if rec is None:
                     email_map[key] = {
-                        "email": addr,
-                        "score": score,
-                        "tier": tier,
-                        "sources": [url],
+                        "email": addr, "score": score, "tier": tier, "sources": [url],
                     }
                 else:
                     if url not in rec["sources"]:
@@ -352,28 +679,37 @@ def discover(
             for platform, link in extract_socials(html, url).items():
                 socials.setdefault(platform, link)
 
-            # 問い合わせフォーム/コンタクトページ
+            # 問い合わせフォーム・カテゴリ判定（現在 URL）
             if _is_contact_url(url) and url not in forms:
                 forms.append(url)
-            for link in extract_links(html, url):
-                if (
-                    official_domain
-                    and _same_domain(link, official_domain)
-                    and _is_contact_url(link)
-                    and link not in forms
-                ):
-                    forms.append(link)
+            _consider_page_category(url)
+
+            # 同一ドメインのリンクから フォーム / Press / Wholesale を検出
+            links = extract_links(html, url)
+            for link in links:
+                if official_domain and _same_domain(link, official_domain):
+                    if _is_contact_url(link) and link not in forms:
+                        forms.append(link)
+                    _consider_page_category(link)
+
+            # PDF リンク
+            for p in extract_pdf_links(html, url):
+                if p["url"] not in pdf_seen:
+                    pdf_seen.add(p["url"])
+                    pdfs.append(p)
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)
             if client is not None:
                 client.close()
 
+    pdfs = pdfs[:6]
     emails = sorted(email_map.values(), key=lambda e: e["score"], reverse=True)
     primary_email = emails[0]["email"] if emails else None
     primary_form = forms[0] if forms else None
+    has_official_site = bool(project.maker_url)
 
-    # confidence: メールが最有力。なければフォーム/SNS の有無で段階評価。
+    # confidence（後方互換）: メールが最有力。なければフォーム/SNS の有無で段階評価。
     if emails:
         confidence = emails[0]["score"]
     elif primary_form:
@@ -383,11 +719,7 @@ def discover(
     else:
         confidence = 0
 
-    notes_bits = [f"searched {len(searched)} url(s)", f"{len(emails)} email(s)"]
-    if disallows:
-        notes_bits.append(f"{len(disallows)} robots disallow rule(s) respected")
-
-    return {
+    result: dict = {
         "official_site_url": project.maker_url,
         "primary_email": primary_email,
         "primary_contact_form_url": primary_form,
@@ -401,8 +733,55 @@ def discover(
         "discovered_socials": socials,
         "searched_urls": searched,
         "confidence_score": confidence,
-        "notes": ", ".join(notes_bits),
     }
+
+    # --- Contact Intelligence ---
+    score = contactability_score(
+        emails,
+        has_form=bool(forms),
+        socials=socials,
+        has_official_site=has_official_site,
+    )
+    channel = recommend_channel(
+        emails,
+        has_form=bool(forms),
+        socials=socials,
+        press_page=press_page,
+        wholesale_page=wholesale_page,
+    )
+    action = recommend_action(channel, result)
+    queries = build_search_queries(project.maker_name, official_domain or None)
+    approach = build_approach_options(
+        result, forms=forms, socials=socials, press_page=press_page,
+        wholesale_page=wholesale_page, pdfs=pdfs,
+    )
+    checklist = build_checklist(
+        official_checked=official_checked, forms=forms, emails=emails,
+        socials=socials, press_page=press_page, wholesale_page=wholesale_page,
+    )
+    evidence = build_evidence_summary(emails, forms, socials, action)
+
+    result.update({
+        "contactability_score": score,
+        "recommended_channel": channel,
+        "recommended_action": action,
+        "discovery_checklist": checklist,
+        "approach_options": approach,
+        "search_queries": queries,
+        "evidence_summary": evidence,
+        "discovered_pdfs": pdfs,
+    })
+
+    notes_bits = [
+        f"searched {len(searched)} url(s)",
+        f"{len(emails)} email(s)",
+        f"score {score}",
+        f"channel {channel}",
+    ]
+    if disallows:
+        notes_bits.append(f"{len(disallows)} robots disallow rule(s) respected")
+    result["notes"] = ", ".join(notes_bits)
+    return result
 
 
 # ---------------- DB 連携 ----------------
@@ -447,6 +826,15 @@ def run_discovery(
         row.discovered_socials = result["discovered_socials"] or None
         row.searched_urls = result["searched_urls"] or None
         row.confidence_score = result["confidence_score"]
+        # Contact Intelligence
+        row.contactability_score = result["contactability_score"]
+        row.recommended_channel = result["recommended_channel"]
+        row.recommended_action = result["recommended_action"]
+        row.discovery_checklist = result["discovery_checklist"]
+        # PDF はアプローチ候補に含めて保存（専用カラムは設けない）
+        row.approach_options = result["approach_options"] or None
+        row.search_queries = result["search_queries"] or None
+        row.evidence_summary = result["evidence_summary"]
         row.notes = result["notes"]
     except Exception as exc:  # noqa: BLE001  失敗は failed として保存
         logger.warning("contact discovery failed (project=%s): %s", project.id, exc)
@@ -468,32 +856,73 @@ def get_latest(db: Session, project_id: int) -> ContactDiscovery | None:
     return db.scalar(stmt)
 
 
-def apply_to_crm(
-    db: Session, project: Project, email: str
-) -> tuple[int, int]:
-    """探索結果のメールを CRM に反映する（自動上書きせず追加のみ）。
+def _crm_note(row: ContactDiscovery | None) -> str:
+    """メールが無い場合でも CRM に残す連絡手段メモを組み立てる。"""
+    if row is None:
+        return "連絡先探索の結果を反映"
+    parts: list[str] = []
+    if row.recommended_channel:
+        parts.append(f"推奨チャネル: {row.recommended_channel}")
+    if row.recommended_action:
+        parts.append(f"推奨アクション: {row.recommended_action}")
+    if row.primary_contact_form_url:
+        parts.append(f"問い合わせフォーム: {row.primary_contact_form_url}")
+    socials = row.discovered_socials or {}
+    for k, v in socials.items():
+        parts.append(f"{k}: {v}")
+    if row.contactability_score is not None:
+        parts.append(f"営業可能性スコア: {row.contactability_score}")
+    return " / ".join(parts) or "連絡先探索の結果を反映"
 
-    メーカー未登録なら案件から作成し、その担当者として email を追加する。
-    既に同じ email の担当者があれば重複追加しない。
-    Returns: (maker_id, contact_id)
+
+def apply_to_crm(
+    db: Session,
+    project: Project,
+    *,
+    email: str | None = None,
+    row: ContactDiscovery | None = None,
+) -> tuple[int, int | None]:
+    """探索結果を CRM に反映する（自動上書きせず追加のみ）。
+
+    - email があれば担当者（Contact）として追加（重複は追加しない）。
+    - email が無くても、推奨チャネル・アクション・フォーム・SNS を営業履歴
+      （SalesActivity）として記録する。
+    メーカー未登録なら案件から作成する。
+    Returns: (maker_id, contact_id | None)
     """
     maker = crm_service.create_from_project(db, project)
-    existing = db.scalar(
-        select(Contact).where(
-            Contact.maker_id == maker.id, Contact.email == email
+
+    # メールが無くても連絡手段を営業履歴として記録（要件 9）
+    note = _crm_note(row)
+    db.add(
+        SalesActivity(
+            maker_id=maker.id,
+            project_id=project.id,
+            kind=ActivityKind.note.value,
+            summary=f"連絡先探索を反映: {note}"[:2000],
         )
     )
-    if existing is not None:
-        return maker.id, existing.id
 
-    contact = Contact(
-        maker_id=maker.id,
-        name=f"{maker.name}（探索）",
-        role="discovered",
-        email=email,
-        notes="連絡先探索で発見",
-    )
-    db.add(contact)
+    contact_id: int | None = None
+    if email:
+        existing = db.scalar(
+            select(Contact).where(
+                Contact.maker_id == maker.id, Contact.email == email
+            )
+        )
+        if existing is not None:
+            contact_id = existing.id
+        else:
+            contact = Contact(
+                maker_id=maker.id,
+                name=f"{maker.name}（探索）",
+                role="discovered",
+                email=email,
+                notes="連絡先探索で発見",
+            )
+            db.add(contact)
+            db.flush()
+            contact_id = contact.id
+
     db.commit()
-    db.refresh(contact)
-    return maker.id, contact.id
+    return maker.id, contact_id

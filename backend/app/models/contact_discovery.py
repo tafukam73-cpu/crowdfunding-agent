@@ -60,6 +60,23 @@ class ContactDiscovery(Base):
     # 総合的な確度（0〜100）
     confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # --- Contact Intelligence（メールが無くても営業可能性を総合評価） ---
+    # 営業可能性スコア（0〜100）
+    contactability_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 推奨連絡チャネル（email / contact_form / linkedin / instagram / facebook /
+    # press / distributor_page / manual_research）
+    recommended_channel: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # 推奨アクション（具体的な次の一手）
+    recommended_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 探索チェックリスト（official_site_checked など）
+    discovery_checklist: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 営業アプローチ候補 [{channel,label,url,score,reason}]
+    approach_options: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 手動検索用クエリ候補
+    search_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 根拠サマリ（次に取る行動が分かる説明文）
+    evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

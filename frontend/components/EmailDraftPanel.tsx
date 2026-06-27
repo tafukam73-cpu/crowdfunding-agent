@@ -82,11 +82,13 @@ function DraftCard({
   to,
   providerLabel,
   onCreated,
+  noEmailChannel = false,
 }: {
   draft: EmailDraft;
   to: string;
   providerLabel: string;
   onCreated: () => void;
+  noEmailChannel?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -148,6 +150,8 @@ function DraftCard({
   }
 
   const isGmail = result?.provider === "gmail";
+  // メールアドレスが無い（推奨チャネルがメール以外）かつ手入力も無ければ Gmail 下書き不可
+  const gmailDisabled = noEmailChannel && !to.trim();
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -165,7 +169,12 @@ function DraftCard({
         <div className="flex items-center gap-2">
           <button
             onClick={makeDraft}
-            disabled={busy}
+            disabled={busy || gmailDisabled}
+            title={
+              gmailDisabled
+                ? "Gmail下書きにはメールアドレスが必要です"
+                : undefined
+            }
             className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
           >
             {busy ? "作成中…" : `${providerLabel}に下書き作成`}
@@ -178,6 +187,13 @@ function DraftCard({
           </button>
         </div>
       </div>
+
+      {gmailDisabled && (
+        <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          Gmail下書きにはメールアドレスが必要です。代わりに本文をコピーして問い合わせフォーム／SNS
+          DMで使用してください（連絡先探索の推奨チャネルを確認）。
+        </p>
+      )}
 
       {/* 件名 3 案（選択可能） */}
       <div className="mt-3">
@@ -294,6 +310,10 @@ export default function EmailDraftPanel({
   const [researchApplied, setResearchApplied] = useState(false);
   // 連絡先探索で見つかった宛先候補
   const [primaryEmail, setPrimaryEmail] = useState<string | null>(null);
+  // 連絡先探索の推奨チャネル（メール以外のとき Gmail 下書きを無効化する）
+  const [recommendedChannel, setRecommendedChannel] = useState<string | null>(
+    null
+  );
   // ユーザーが宛先を手で編集したら自動プリフィルしない
   const [toEdited, setToEdited] = useState(false);
 
@@ -324,11 +344,21 @@ export default function EmailDraftPanel({
       .then((d) => {
         const email = d?.primary_email ?? null;
         setPrimaryEmail(email);
+        setRecommendedChannel(d?.recommended_channel ?? null);
         if (email && !toEdited) setTo(email);
       })
-      .catch(() => setPrimaryEmail(null));
+      .catch(() => {
+        setPrimaryEmail(null);
+        setRecommendedChannel(null);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, discoveryVersion]);
+
+  // 探索済みでメールが無く、推奨チャネルがメール以外のとき Gmail 下書きは使えない
+  const noEmailChannel =
+    !primaryEmail &&
+    recommendedChannel != null &&
+    recommendedChannel !== "email";
 
   async function onGenerate() {
     setBusy(true);
@@ -448,6 +478,7 @@ export default function EmailDraftPanel({
                 to={to}
                 providerLabel={providerLabel}
                 onCreated={reload}
+                noEmailChannel={noEmailChannel}
               />
             ) : null;
           })}
