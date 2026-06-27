@@ -728,6 +728,140 @@ export async function applyDiscoveryToCrm(
   return res.json();
 }
 
+// ===== 返信メール AI サポート =====
+export type ReplyTone =
+  | "professional"
+  | "friendly"
+  | "concise"
+  | "detailed"
+  | "executive";
+
+export const REPLY_TONE_LABELS: Record<ReplyTone, string> = {
+  professional: "Professional（標準・丁寧）",
+  friendly: "Friendly（親しみやすい）",
+  concise: "Concise（簡潔）",
+  detailed: "Detailed（詳しめ）",
+  executive: "Executive（経営者向け）",
+};
+
+export const REPLY_TONE_ORDER: ReplyTone[] = [
+  "professional",
+  "friendly",
+  "concise",
+  "detailed",
+  "executive",
+];
+
+export type ReplyStatus = "draft" | "completed" | "failed";
+
+export const INTENT_LABELS: Record<string, string> = {
+  interested: "関心あり",
+  needs_more_info: "追加情報希望",
+  asks_terms: "条件の質問",
+  requests_call: "通話希望",
+  not_interested: "見送り",
+  already_has_distributor: "既存代理店あり",
+  unclear: "意図不明",
+};
+
+export const SENTIMENT_LABELS: Record<string, string> = {
+  positive: "前向き",
+  neutral: "中立",
+  negative: "慎重",
+};
+
+export const SENTIMENT_COLORS: Record<string, string> = {
+  positive: "bg-emerald-100 text-emerald-700",
+  neutral: "bg-slate-100 text-slate-600",
+  negative: "bg-amber-100 text-amber-700",
+};
+
+export type ReplyAssist = {
+  id: number;
+  project_id: number;
+  maker_id: number | null;
+  incoming_subject: string | null;
+  incoming_body: string;
+  incoming_from: string | null;
+  detected_language: string | null;
+  japanese_summary: string | null;
+  intent: string | null;
+  sentiment: string | null;
+  key_points: string[] | null;
+  requested_actions: string[] | null;
+  risks_or_cautions: string[] | null;
+  recommended_next_action: string | null;
+  reply_tone: string | null;
+  reply_subject: string | null;
+  reply_body: string | null;
+  gmail_draft_id: string | null;
+  gmail_web_link: string | null;
+  model: string | null;
+  status: ReplyStatus;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReplyGmailDraftResult = {
+  provider: string;
+  draft_id: string | null;
+  status: string;
+  to: string;
+  web_link: string | null;
+  detail: string | null;
+};
+
+export async function createReplyAssist(
+  projectId: number,
+  input: {
+    incoming_subject?: string;
+    incoming_body: string;
+    incoming_from?: string;
+    reply_tone: ReplyTone;
+  }
+): Promise<ReplyAssist> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/reply-assist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+export async function fetchReplyAssists(
+  projectId: number
+): Promise<ReplyAssist[]> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/reply-assists`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function createReplyGmailDraft(
+  replyAssistId: number,
+  to?: string
+): Promise<ReplyGmailDraftResult> {
+  const res = await fetch(
+    `${API_BASE}/reply-assists/${replyAssistId}/gmail-draft`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: to || null }),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // 生成済み下書きを、設定中プロバイダー（Gmail/mock）に下書き作成。送信はしない。
 export async function createProviderDraft(
   draftId: number,

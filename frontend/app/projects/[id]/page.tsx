@@ -10,6 +10,7 @@ import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
+import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
 import {
@@ -287,6 +288,9 @@ export default function ProjectDetail() {
           researchVersion={researchVersion}
           discoveryVersion={discoveryVersion}
         />
+
+        {/* 返信メールAIサポート */}
+        <ReplyAssistPanel projectId={id} />
       </main>
     </>
   );

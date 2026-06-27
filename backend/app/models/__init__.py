@@ -13,6 +13,7 @@ from app.models.evaluation import AiEvaluation, Recommendation
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
 from app.models.project import Project, ProjectStatus, SourceSite
+from app.models.reply_assistant import ReplyAssistant, ReplyStatus
 from app.models.scrape_run import ScrapeRun, ScrapeStatus
 from app.models.usage_log import UsageLog
 
@@ -45,5 +46,7 @@ __all__ = [
     "ResearchStatus",
     "ContactDiscovery",
     "DiscoveryStatus",
+    "ReplyAssistant",
+    "ReplyStatus",
     "UsageLog",
 ]

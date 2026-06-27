@@ -23,6 +23,7 @@ from app.routers import (
     health,
     japanese_success,
     projects,
+    reply_assistant,
     scrape,
     usage,
 )
@@ -76,6 +77,7 @@ app.include_router(crm.router)
 app.include_router(availability.router)
 app.include_router(company_research.router)
 app.include_router(contact_discovery.router)
+app.include_router(reply_assistant.router)
 app.include_router(usage.router)
 
 
