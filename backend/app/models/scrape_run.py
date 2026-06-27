@@ -22,13 +22,19 @@ class ScrapeStatus(str, enum.Enum):
 class ErrorKind(str, enum.Enum):
     """エラーの種別（取得成功率監視・構造変化検知用）。
 
-    - network   … 接続失敗・タイムアウト・403/429/5xx 等の一時的/取得系エラー
-    - structure … 取得は成功したが期待する要素・キーが無い（構造変化の疑い）
-    - unknown   … 上記に分類できないその他の例外
+    - network      … 接続失敗・タイムアウト・5xx 等の一時的/取得系エラー
+    - blocked      … Cloudflare/ボット対策/403/チャレンジ等のアクセスブロック
+    - empty_result … ページは取得できたが対象案件が 0 件
+    - structure    … 取得は成功したが期待する要素・キーが無い（構造変化の疑い）
+    - parse_error  … 取得データのパースに失敗
+    - unknown      … 上記に分類できないその他の例外
     """
 
     network = "network"
+    blocked = "blocked"
+    empty_result = "empty_result"
     structure = "structure"
+    parse_error = "parse_error"
     unknown = "unknown"
 
 

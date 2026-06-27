@@ -28,10 +28,19 @@ logger = logging.getLogger("collector")
 def classify_error(exc: Exception) -> ErrorKind:
     """例外を監視用のエラー種別へ分類する。
 
+    - 例外が error_kind 属性を持つ（スクレイパーが明示分類）→ それを優先
     - 構造変化（ScraperStructureError）→ structure
     - 取得系（httpx / タイムアウト / 接続）→ network
     - それ以外 → unknown
     """
+    explicit = getattr(exc, "error_kind", None)
+    if isinstance(explicit, ErrorKind):
+        return explicit
+    if isinstance(explicit, str):
+        try:
+            return ErrorKind(explicit)
+        except ValueError:
+            pass
     if isinstance(exc, ScraperStructureError):
         return ErrorKind.structure
     if isinstance(exc, (httpx.HTTPError, TimeoutError, ConnectionError)):

@@ -12,3 +12,6 @@ out/
 *.log
 
 frontend/tsconfig.tsbuildinfo
+
+# Scraper debug dumps (Ulule 等の取得失敗時の HTML/スクリーンショット)
+backend/debug/
