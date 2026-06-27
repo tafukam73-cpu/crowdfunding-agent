@@ -23,14 +23,11 @@ from app.ai.prompts import (
     EmailTone,
     SenderContext,
     append_signature,
+    build_greeting,
     trim_company_profile,
 )
 from app.models.email_draft import EmailType
 from app.models.project import Project
-
-
-def _maker(project: Project) -> str:
-    return project.maker_name or "there"
 
 
 def _platform(project: Project) -> str:
@@ -53,14 +50,6 @@ def _intro(ctx: SenderContext) -> str:
         f"I'm with {who} that helps overseas products launch on Japan's leading "
         "crowdfunding platforms (Makuake and GreenFunding)."
     )
-
-
-def _greeting(maker: str, tone: EmailTone) -> str:
-    if tone is EmailTone.friendly:
-        return f"Hi {maker},"
-    if tone is EmailTone.executive:
-        return f"Dear {maker},"
-    return f"Hello {maker},"
 
 
 # 件名候補（3 案）を種別ごとに用意する。
@@ -164,10 +153,8 @@ def _parts(
     }
 
 
-def _render_body(parts: dict[str, str], maker: str, tone: EmailTone) -> str:
-    """トーンに応じて本文パーツを組み立てる。"""
-    greeting = _greeting(maker, tone)
-
+def _render_body(parts: dict[str, str], greeting: str, tone: EmailTone) -> str:
+    """トーンに応じて本文パーツを組み立てる（冒頭挨拶は greeting を使う）。"""
     if tone is EmailTone.short:
         order = ["open", "value", "cta"]
     elif tone is EmailTone.executive:
@@ -244,8 +231,9 @@ class MockEmailGenerator(EmailGenerator):
         research: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
-        maker = _maker(project)
         title = project.title
+        # 冒頭挨拶（担当者名／部署／メーカー名の有無で切り替え）
+        greeting = build_greeting(maker_name=project.maker_name)
         # 商品・メーカーごとの個別化材料を先に作る
         p = build_personalization(project)
         # 企業リサーチがあれば、より具体的な称賛・強み・日本市場適合性で上書き
@@ -260,7 +248,7 @@ class MockEmailGenerator(EmailGenerator):
         ):
             options = _subject_options(email_type, title)
             parts = _parts(project, email_type, ctx, p)
-            body = append_signature(_render_body(parts, maker, tone), ctx)
+            body = append_signature(_render_body(parts, greeting, tone), ctx)
             drafts.append(
                 EmailDraftResult(
                     email_type=email_type,

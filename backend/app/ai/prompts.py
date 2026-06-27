@@ -96,6 +96,28 @@ def emphasis_for(category: str | None) -> str:
     return DEFAULT_CATEGORY_EMPHASIS
 
 
+def build_greeting(
+    maker_name: str | None = None,
+    person_name: str | None = None,
+    department: str | None = None,
+) -> str:
+    """冒頭挨拶を取得できた情報から組み立てる（モック・Claude 共通）。
+
+    優先順位（要件）:
+      1. 担当者名あり → "Dear {Person Name},"
+      2. 担当部署あり → "Dear {Department Name},"
+      3. メーカー名のみ → "Hello {Maker Name} Team,"
+      4. 何も無い → "Hello Team,"
+    """
+    if person_name and person_name.strip():
+        return f"Dear {person_name.strip()},"
+    if department and department.strip():
+        return f"Dear {department.strip()},"
+    if maker_name and maker_name.strip():
+        return f"Hello {maker_name.strip()} Team,"
+    return "Hello Team,"
+
+
 def render_research_block(research: dict) -> str:
     """企業リサーチ結果をプロンプト用テキストに整形する。
 
@@ -282,6 +304,8 @@ def build_email_prompt(
     ) or settings.sender_company
     category = getattr(project, "category", None)
     emphasis = emphasis_for(category)
+    # 冒頭挨拶は規則に従って決定し、本文の先頭で必ずこの行を使わせる
+    greeting = build_greeting(maker_name=getattr(project, "maker_name", None))
 
     lines = [
         f"Write a sales email of type '{type_label}'.",
@@ -294,6 +318,8 @@ def build_email_prompt(
         SUMMARY_GUIDELINES,
         "",
         f"For this product category, lean the wording toward: {emphasis}.",
+        "",
+        f'Begin the body with exactly this greeting line, unchanged: "{greeting}"',
         "",
         f"You are writing on behalf of: {sender_line}.",
     ]
