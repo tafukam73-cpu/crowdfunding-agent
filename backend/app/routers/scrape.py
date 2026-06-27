@@ -39,6 +39,7 @@ router = APIRouter(prefix="/scrape", tags=["scrape"])
 DASHBOARD_SITES = [
     SourceSite.kickstarter,
     SourceSite.indiegogo,
+    SourceSite.ulule,
     SourceSite.makuake,
     SourceSite.greenfunding,
 ]

@@ -6,6 +6,7 @@ export type SourceSite =
   | "kickstarter"
   | "indiegogo"
   | "wadiz"
+  | "ulule"
   | "makuake"
   | "greenfunding"
   | "other";
@@ -247,6 +248,7 @@ export const SITE_LABELS: Record<SourceSite, string> = {
   kickstarter: "Kickstarter",
   indiegogo: "Indiegogo",
   wadiz: "Wadiz",
+  ulule: "Ulule",
   makuake: "Makuake",
   greenfunding: "GreenFunding",
   other: "その他",
@@ -258,12 +260,14 @@ export const SALES_TARGET_SITES: SourceSite[] = [
   "kickstarter",
   "indiegogo",
   "wadiz",
+  "ulule",
 ];
 
 export const SITE_COLORS: Record<SourceSite, string> = {
   kickstarter: "bg-green-100 text-green-700",
   indiegogo: "bg-pink-100 text-pink-700",
   wadiz: "bg-sky-100 text-sky-700",
+  ulule: "bg-purple-100 text-purple-700",
   makuake: "bg-orange-100 text-orange-700",
   greenfunding: "bg-emerald-100 text-emerald-700",
   other: "bg-slate-100 text-slate-600",

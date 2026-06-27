@@ -91,6 +91,29 @@ MOCK_PROJECTS = [
         status=ProjectStatus.negotiating.value,
     ),
     dict(
+        title="Recycled Ocean Plastic Tote Bag — Made in France",
+        source_site=SourceSite.ulule.value,
+        source_url="https://www.ulule.com/example/ocean-tote",
+        category="Lifestyle & Design",
+        description=(
+            "Sustainable, eco-friendly tote bag made from recycled ocean plastic and "
+            "organic textile. Ethical, made in France, with a refined European design "
+            "for everyday lifestyle and travel."
+        ),
+        image_url="https://picsum.photos/seed/ululetote/640/360",
+        video_url="https://www.youtube.com/watch?v=ulule1",
+        currency="EUR",
+        goal_amount=Decimal("15000.00"),
+        raised_amount=Decimal("82500.00"),
+        backers_count=1640,
+        start_date=date(2026, 5, 10),
+        end_date=date(2026, 6, 25),
+        maker_name="Atelier Vert",
+        maker_url="https://ateliervert.example.com",
+        contact_info="hello@ateliervert.example.com",
+        status=ProjectStatus.new.value,
+    ),
+    dict(
         title="磁気浮上式ワイヤレス卓上時計",
         source_site=SourceSite.indiegogo.value,
         source_url="https://www.indiegogo.com/projects/example/levitating-clock",

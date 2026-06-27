@@ -30,6 +30,7 @@ class SourceSite(str, enum.Enum):
     kickstarter = "kickstarter"
     indiegogo = "indiegogo"
     wadiz = "wadiz"
+    ulule = "ulule"             # フランス発（サステナブル/エコ/デザイン雑貨に強い）
     makuake = "makuake"
     greenfunding = "greenfunding"
     other = "other"
@@ -40,6 +41,7 @@ SALES_TARGET_SITES: list[SourceSite] = [
     SourceSite.kickstarter,
     SourceSite.indiegogo,
     SourceSite.wadiz,
+    SourceSite.ulule,
 ]
 
 # 日本の成功事例（比較用）サイト。営業対象ではなく、japanese_success_projects

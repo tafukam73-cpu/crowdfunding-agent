@@ -78,7 +78,7 @@ class ClaudeEvaluator(Evaluator):
 
     def _build_prompt(self, project: Project) -> str:
         axes = "、".join(AXES)
-        return (
+        base = (
             f"次の海外クラファン案件を評価してください。\n"
             f"各評価軸（{axes}）を 0〜100 でスコア化し、総合スコア total_score(0-100)、"
             f"推奨度 recommendation(high/mid/low)、評価理由 reasons、懸念点 concerns、"
@@ -93,6 +93,12 @@ class ClaudeEvaluator(Evaluator):
             f"動画: {'あり' if project.video_url else 'なし'}\n"
             f"メーカー: {project.maker_name}\n"
         )
+        # Ulule 案件はサステナブル/デザイン/ライフスタイル観点を追加で評価させる
+        from app.ai.ulule import is_ulule, prompt_block
+
+        if is_ulule(project):
+            base += prompt_block(project)
+        return base
 
     def _parse(self, raw_json: str) -> EvaluationResult:
         data = json.loads(raw_json)

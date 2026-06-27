@@ -35,7 +35,11 @@ LOCK_NAME = "daily_collection"
 STALE_LOCK_SECONDS = 2 * 60 * 60
 
 # 海外案件として収集するサイト（projects テーブル）
-OVERSEAS_SITES = [SourceSite.kickstarter, SourceSite.indiegogo]
+OVERSEAS_SITES = [
+    SourceSite.kickstarter,
+    SourceSite.indiegogo,
+    SourceSite.ulule,
+]
 
 
 def _now() -> datetime:
