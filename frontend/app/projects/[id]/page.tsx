@@ -301,6 +301,7 @@ export default function ProjectDetail() {
         {/* 営業先連絡先探索 */}
         <ContactDiscoveryPanel
           projectId={id}
+          searchKeyword={project.maker_name?.trim() || project.title}
           onChanged={() => setDiscoveryVersion((v) => v + 1)}
         />
 

@@ -63,29 +63,71 @@ const SOCIAL_LABELS: { key: keyof ContactDiscovery; label: string }[] = [
 
 // 案件詳細から外部連絡先へ一発で飛べるクイックボタン用の定義。
 // channel は recommended_channel の値と突き合わせて「おすすめ」表示に使う。
+// searchUrl がある項目は URL 未取得でもブランド名/案件名での検索ボタンを表示する。
 const QUICK_LINKS: {
   key: keyof ContactDiscovery;
   label: string;
   channel: string;
+  searchUrl?: (keyword: string) => string;
 }[] = [
-  { key: "primary_contact_form_url", label: "問い合わせフォーム", channel: "contact_form" },
-  { key: "instagram_url", label: "Instagram", channel: "instagram" },
-  { key: "linkedin_url", label: "LinkedIn", channel: "linkedin" },
-  { key: "facebook_url", label: "Facebook", channel: "facebook" },
+  {
+    key: "primary_contact_form_url",
+    label: "問い合わせフォーム",
+    channel: "contact_form",
+    searchUrl: (kw) =>
+      `https://www.google.com/search?q=${encodeURIComponent(`${kw} contact form`)}`,
+  },
+  {
+    key: "instagram_url",
+    label: "Instagram",
+    channel: "instagram",
+    searchUrl: (kw) =>
+      `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(kw)}`,
+  },
+  {
+    key: "linkedin_url",
+    label: "LinkedIn",
+    channel: "linkedin",
+    searchUrl: (kw) =>
+      `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(kw)}`,
+  },
+  {
+    key: "facebook_url",
+    label: "Facebook",
+    channel: "facebook",
+    searchUrl: (kw) =>
+      `https://www.facebook.com/search/top?q=${encodeURIComponent(kw)}`,
+  },
   { key: "twitter_url", label: "X / Twitter", channel: "twitter" },
   { key: "youtube_url", label: "YouTube", channel: "youtube" },
   { key: "official_site_url", label: "公式サイト", channel: "official_site" },
 ];
 
 // 発見済みの外部連絡先リンクへ新しいタブで飛べるクイックボタン群。
-// URL が存在するチャネルだけ表示し、recommended_channel と一致するものは強調する。
-function QuickContactLinks({ data }: { data: ContactDiscovery }) {
-  const available = QUICK_LINKS.filter((l) => {
-    const url = data[l.key];
-    return typeof url === "string" && url.length > 0;
-  });
+// URL が存在するチャネルは「開く」、未取得でも searchUrl を持つチャネルは
+// ブランド名/案件名（searchKeyword）での「検索」ボタンを表示する。
+function QuickContactLinks({
+  data,
+  searchKeyword,
+}: {
+  data: ContactDiscovery;
+  searchKeyword: string;
+}) {
+  const keyword = searchKeyword.trim();
 
-  if (available.length === 0) {
+  // 各リンクを open（URLあり）/ search（URLなし＋検索可）に振り分ける。
+  const items = QUICK_LINKS.map((l) => {
+    const url = data[l.key];
+    if (typeof url === "string" && url.length > 0) {
+      return { link: l, href: url, mode: "open" as const };
+    }
+    if (l.searchUrl && keyword) {
+      return { link: l, href: l.searchUrl(keyword), mode: "search" as const };
+    }
+    return null;
+  }).filter((x): x is NonNullable<typeof x> => x !== null);
+
+  if (items.length === 0) {
     return (
       <div>
         <p className="text-xs font-semibold text-slate-500">外部連絡先リンク</p>
@@ -102,22 +144,32 @@ function QuickContactLinks({ data }: { data: ContactDiscovery }) {
         外部連絡先リンク（クリックで新しいタブ）
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
-        {available.map((l) => {
-          const recommended = data.recommended_channel === l.channel;
+        {items.map(({ link, href, mode }) => {
+          const recommended =
+            mode === "open" && data.recommended_channel === link.channel;
+          const label =
+            mode === "search"
+              ? link.channel === "contact_form"
+                ? "Googleで問い合わせフォーム検索"
+                : `${link.label}で検索`
+              : recommended
+                ? `★ おすすめ：${link.label}`
+                : `${link.label}を開く`;
+          const className = recommended
+            ? "inline-flex items-center gap-1 rounded-md border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
+            : mode === "search"
+              ? "inline-flex items-center gap-1 rounded-md border border-dashed border-sky-400 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-100"
+              : "inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50";
           return (
             <a
-              key={l.key as string}
-              href={data[l.key] as string}
+              key={link.key as string}
+              href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className={
-                recommended
-                  ? "inline-flex items-center gap-1 rounded-md border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
-                  : "inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              }
+              className={className}
             >
-              {recommended ? `★ おすすめ：${l.label}` : `${l.label}を開く`}
-              <span aria-hidden>↗</span>
+              {label}
+              <span aria-hidden>{mode === "search" ? "🔍" : "↗"}</span>
             </a>
           );
         })}
@@ -241,9 +293,12 @@ function ShortOutreach({
 
 export default function ContactDiscoveryPanel({
   projectId,
+  searchKeyword,
   onChanged,
 }: {
   projectId: number;
+  // SNS / 検索フォールバック用のキーワード（メーカー名 → 無ければ案件名）。
+  searchKeyword: string;
   onChanged?: () => void;
 }) {
   const [data, setData] = useState<ContactDiscovery | null>(null);
@@ -370,8 +425,9 @@ export default function ContactDiscoveryPanel({
             }
           />
 
-          {/* 外部連絡先へのクイックリンク（短文を生成→コピー→そのまま開いて貼り付け） */}
-          <QuickContactLinks data={data} />
+          {/* 外部連絡先へのクイックリンク（短文を生成→コピー→そのまま開いて貼り付け）。
+              URL が無いSNS/フォームはブランド名・案件名での検索ボタンを表示する。 */}
+          <QuickContactLinks data={data} searchKeyword={searchKeyword} />
 
           {/* CRM 反映（メールが無くても記録可能） */}
           <div className="flex flex-wrap items-center gap-2">
