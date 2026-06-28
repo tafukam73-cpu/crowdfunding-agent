@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import and_, exists, select
+from sqlalchemy import and_, exists, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.company_research import CompanyResearch, ResearchStatus
@@ -30,6 +30,7 @@ from app.models.project import (
     SALES_TARGET_SITES,
     Project,
     SalesStatus,
+    SourceSite,
 )
 
 # 短文アウトリーチ（DM / フォーム）を生成できるチャネル
@@ -328,6 +329,120 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
 
     out.sort(key=lambda r: r["priority_score"], reverse=True)
     return out[: max(1, limit)]
+
+
+# --- AI 営業優先ランキング（Executive Summary を統合） ---
+# 連絡先ありとみなす推奨チャネル（manual_search 以外）
+_RANKING_SORTS = ("score", "created_at", "latest_score", "contact", "unsold")
+
+
+def _contact_exists_clause():
+    """連絡先（メール / フォーム / SNS）が見つかっている案件の EXISTS 条件。"""
+    return exists().where(
+        and_(
+            ContactDiscovery.project_id == Project.id,
+            or_(
+                ContactDiscovery.primary_email.isnot(None),
+                ContactDiscovery.primary_contact_form_url.isnot(None),
+                ContactDiscovery.instagram_url.isnot(None),
+                ContactDiscovery.linkedin_url.isnot(None),
+                ContactDiscovery.facebook_url.isnot(None),
+            ),
+        )
+    )
+
+
+def _ranking_sort_key(sort: str, project: Project, summary: dict):
+    """ランキングの並び替えキー（reverse=True で降順）。"""
+    from app.services import executive_summary_service as ess
+
+    score = summary["score"]
+    ls = project.latest_score if project.latest_score is not None else -1
+    if sort == "created_at":
+        return (project.created_at,)
+    if sort == "latest_score":
+        return (ls, score)
+    if sort == "contact":
+        has_contact = summary["recommended_channel"] in ess.CONTACT_CHANNELS
+        return (1 if has_contact else 0, score)
+    if sort == "unsold":
+        unsold = summary["japan_sales_status"] == ess.JAPAN_STATUS_UNSOLD
+        return (1 if unsold else 0, score)
+    # 既定：営業価値スコア順（同点は AI 評価で）
+    return (score, ls)
+
+
+def ranking(
+    db: Session,
+    *,
+    limit: int = 20,
+    site: str | None = None,
+    candidates_only: bool = True,
+    unsold_only: bool = False,
+    contact_only: bool = False,
+    not_started_only: bool = False,
+    ulule_only: bool = False,
+    sort: str = "score",
+) -> list[dict]:
+    """AI 営業優先ランキングを返す（Executive Summary を統合してスコア順）。
+
+    パフォーマンスのため、SQL で対象を絞り込み・上位 scan_cap 件に限定してから
+    Executive Summary を算出する（全件は再計算しない）。unsold_only など JSON 由来の
+    条件は算出後に Python で絞り込む。
+    """
+    # 遅延 import で循環参照を避ける
+    from app.services import executive_summary_service as ess
+    from app.services.project_service import _non_candidate_condition
+
+    if sort not in _RANKING_SORTS:
+        sort = "score"
+
+    conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
+    if site:
+        conditions.append(Project.source_site == site)
+    if ulule_only:
+        conditions.append(Project.source_site == SourceSite.ulule.value)
+    if candidates_only:
+        conditions.append(not_(_non_candidate_condition()))
+    if not_started_only:
+        conditions.append(Project.sales_status.in_(_READY_STATUSES))
+    if contact_only:
+        conditions.append(_contact_exists_clause())
+
+    # 算出対象を上位に限定（並びの主軸で事前ソートしてから cap）。
+    # Executive Summary を全件算出しないよう、AI スコア上位の少数だけに絞る。
+    scan_cap = max(limit * 2, 30)
+    stmt = select(Project)
+    for c in conditions:
+        stmt = stmt.where(c)
+    if sort == "created_at":
+        stmt = stmt.order_by(Project.created_at.desc())
+    else:
+        stmt = stmt.order_by(Project.latest_score.desc().nullslast())
+    stmt = stmt.limit(scan_cap)
+
+    rows = list(db.scalars(stmt))
+
+    enriched: list[tuple[Project, dict]] = []
+    for p in rows:
+        summary = ess.build_summary(db, p)
+        if unsold_only and summary["japan_sales_status"] != ess.JAPAN_STATUS_UNSOLD:
+            continue
+        enriched.append((p, summary))
+
+    enriched.sort(key=lambda ps: _ranking_sort_key(sort, ps[0], ps[1]), reverse=True)
+
+    items: list[dict] = []
+    for i, (p, summary) in enumerate(enriched[: max(1, limit)], start=1):
+        items.append(
+            {
+                **summary,
+                "rank": i,
+                "title": p.title,
+                "source_site": p.source_site,
+            }
+        )
+    return items
 
 
 def dashboard_summary(db: Session) -> dict:

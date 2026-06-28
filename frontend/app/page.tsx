@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import CostPanel from "@/components/CostPanel";
 import Header from "@/components/Header";
+import RankingPanel from "@/components/RankingPanel";
 import RecBadge from "@/components/RecBadge";
 import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
@@ -115,7 +116,12 @@ export default function Home() {
     <>
       <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
-        {/* 今日営業する案件 + 営業ダッシュボード（最上部） */}
+        {/* AI 営業優先ランキング（最上部・Executive Summary 統合） */}
+        <div className="mb-6">
+          <RankingPanel reloadKey={reloadKey} />
+        </div>
+
+        {/* 今日営業する案件 + 営業ダッシュボード */}
         <div className="mb-6">
           <TodaySalesPanel reloadKey={reloadKey} />
         </div>

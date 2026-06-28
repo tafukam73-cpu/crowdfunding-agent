@@ -47,6 +47,31 @@ class TodayListOut(BaseModel):
     items: list[TodayProject]
 
 
+class RankingItem(BaseModel):
+    """AI 営業優先ランキングの 1 件（Executive Summary を統合）。"""
+
+    project_id: int
+    rank: int
+    title: str
+    source_site: str
+    score: int
+    stars: int
+    sales_target: str            # "yes" / "no" / "要確認"
+    recommended_channel: str
+    recommended_action: str
+    product_category: str
+    japan_sales_status: str
+    japan_distributor_status: str
+    contact_status: str
+    japan_market_fit: str
+    reasons: list[str]
+    cautions: list[str]
+
+
+class RankingListOut(BaseModel):
+    items: list[RankingItem]
+
+
 class SalesDashboardOut(BaseModel):
     ready_count: int          # 営業準備完了
     today_count: int          # 今日営業する件数

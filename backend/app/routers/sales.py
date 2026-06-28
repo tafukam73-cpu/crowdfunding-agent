@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.project import ProjectOut
 from app.schemas.sales import (
+    RankingListOut,
     SalesDashboardOut,
     SalesStatusUpdate,
     TodayListOut,
@@ -52,3 +53,30 @@ def sales_today(
 @router.get("/sales/dashboard", response_model=SalesDashboardOut)
 def sales_dashboard(db: Session = Depends(get_db)) -> SalesDashboardOut:
     return SalesDashboardOut(**workflow_service.dashboard_summary(db))
+
+
+@router.get("/sales/ranking", response_model=RankingListOut)
+def sales_ranking(
+    limit: int = Query(20, ge=1, le=50),
+    site: str | None = Query(None),
+    candidates_only: bool = Query(True),
+    unsold_only: bool = Query(False),
+    contact_only: bool = Query(False),
+    not_started_only: bool = Query(False),
+    ulule_only: bool = Query(False),
+    sort: str = Query("score"),
+    db: Session = Depends(get_db),
+) -> RankingListOut:
+    """AI 営業優先ランキング（Executive Summary を統合・スコア順）。"""
+    items = workflow_service.ranking(
+        db,
+        limit=limit,
+        site=site,
+        candidates_only=candidates_only,
+        unsold_only=unsold_only,
+        contact_only=contact_only,
+        not_started_only=not_started_only,
+        ulule_only=ulule_only,
+        sort=sort,
+    )
+    return RankingListOut(items=items)

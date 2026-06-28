@@ -68,6 +68,11 @@ _ENGAGED_STATUSES = (
 _CLOSED_STATUSES = (SalesStatus.won.value, SalesStatus.rejected.value)
 _READY_STATUSES = (SalesStatus.not_started.value, SalesStatus.ready.value)
 
+# 日本販売状況のテキスト（ランキングの「日本未販売のみ」フィルタ等で参照）
+JAPAN_STATUS_UNSOLD = "未販売の可能性が高い"
+# 連絡先が見つかっている（= manual_search 以外）とみなす推奨チャネル
+CONTACT_CHANNELS = ("email", "contact_form", "instagram", "linkedin", "facebook")
+
 
 def _clamp(v: float, lo: int = 0, hi: int = 100) -> int:
     return max(lo, min(hi, int(round(v))))
@@ -141,7 +146,7 @@ def _japan_status_text(sig: dict) -> str:
     if sig.get("sold_in_japan"):
         return "日本で販売されている"
     if sig.get("no_japan_presence"):
-        return "未販売の可能性が高い"
+        return JAPAN_STATUS_UNSOLD
     return "一部のみ確認"
 
 

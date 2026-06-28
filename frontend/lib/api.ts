@@ -1032,6 +1032,72 @@ export async function fetchExecutiveSummary(
   return res.json();
 }
 
+// ===== AI 営業優先ランキング =====
+export type RankingSort =
+  | "score"
+  | "created_at"
+  | "latest_score"
+  | "contact"
+  | "unsold";
+
+export const RANKING_SORT_LABELS: Record<RankingSort, string> = {
+  score: "営業価値順",
+  created_at: "新着順",
+  latest_score: "AI評価順",
+  contact: "連絡先あり優先",
+  unsold: "日本未販売優先",
+};
+
+export type RankingItem = {
+  project_id: number;
+  rank: number;
+  title: string;
+  source_site: string;
+  score: number;
+  stars: number;
+  sales_target: SalesTarget;
+  recommended_channel: ExecutiveChannel;
+  recommended_action: string;
+  product_category: string;
+  japan_sales_status: string;
+  japan_distributor_status: string;
+  contact_status: string;
+  japan_market_fit: string;
+  reasons: string[];
+  cautions: string[];
+};
+
+export type RankingParams = {
+  limit?: number;
+  site?: SourceSite | "";
+  candidates_only?: boolean;
+  unsold_only?: boolean;
+  contact_only?: boolean;
+  not_started_only?: boolean;
+  ulule_only?: boolean;
+  sort?: RankingSort;
+};
+
+// AI 営業優先ランキングを取得（Executive Summary を統合してスコア順）。
+export async function fetchSalesRanking(
+  params: RankingParams = {}
+): Promise<RankingItem[]> {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(params.limit ?? 20));
+  if (params.site) qs.set("site", params.site);
+  qs.set("candidates_only", String(params.candidates_only ?? true));
+  qs.set("unsold_only", String(params.unsold_only ?? false));
+  qs.set("contact_only", String(params.contact_only ?? false));
+  qs.set("not_started_only", String(params.not_started_only ?? false));
+  qs.set("ulule_only", String(params.ulule_only ?? false));
+  qs.set("sort", params.sort ?? "score");
+
+  const res = await apiFetch(`/sales/ranking?${qs.toString()}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data = await res.json();
+  return data.items as RankingItem[];
+}
+
 // ===== 日本販売状況チェック =====
 export type JapanSalesStatus = "pending" | "completed" | "failed";
 
