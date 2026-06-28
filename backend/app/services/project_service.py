@@ -4,7 +4,12 @@ from __future__ import annotations
 from sqlalchemy import and_, asc, desc, func, not_, or_, select
 from sqlalchemy.orm import Session
 
-from app.ai.ulule import MEMO_MARKER, NON_PRODUCT_KEYWORDS, PRODUCT_KEYWORDS
+from app.ai.ulule import (
+    MEMO_MARKER,
+    NON_PRODUCT_KEYWORDS,
+    PRODUCT_KEYWORDS,
+    clean_description,
+)
 from app.models.project import (
     JAPANESE_SUCCESS_SITES,
     SALES_TARGET_SITES,
@@ -131,6 +136,8 @@ def create_project(db: Session, data: ProjectCreate) -> Project:
     # Enum -> 値（文字列）へ
     project.source_site = data.source_site.value
     project.status = data.status.value
+    # 生 HTML を除去した表示用の概要を生成して保存
+    project.description_clean = clean_description(project.description)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -143,6 +150,9 @@ def update_project(db: Session, project: Project, data: ProjectUpdate) -> Projec
         if key in {"source_site", "status"} and value is not None:
             value = value.value  # Enum -> 文字列
         setattr(project, key, value)
+    # description が変わったら表示用の概要も作り直す
+    if "description" in payload:
+        project.description_clean = clean_description(project.description)
     db.commit()
     db.refresh(project)
     return project
@@ -259,6 +269,8 @@ def upsert_by_source_url(db: Session, data: ProjectCreate) -> tuple[Project, boo
 
     if existing is None:
         project = Project(**payload)
+        # 生 HTML を除去した表示用の概要を生成して保存
+        project.description_clean = clean_description(project.description)
         db.add(project)
         return project, True
 
@@ -266,4 +278,6 @@ def upsert_by_source_url(db: Session, data: ProjectCreate) -> tuple[Project, boo
         if key in _UPSERT_SKIP:
             continue
         setattr(existing, key, value)
+    # description（収集項目）を更新したので表示用の概要も作り直す
+    existing.description_clean = clean_description(existing.description)
     return existing, False

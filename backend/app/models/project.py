@@ -91,6 +91,9 @@ class Project(Base):
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     category: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # HTML 除去済みの読みやすい概要（UI 表示用）。description から生成して保存する。
+    # 未生成（過去データ）の場合は null。その場合は表示側で description を sanitize する。
+    description_clean: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- メディア ---
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -154,13 +157,6 @@ class Project(Base):
     )
 
     # --- 表示用の派生プロパティ（DB 非保存。ProjectOut が from_attributes で読む） ---
-    @property
-    def description_clean(self) -> str | None:
-        """HTML を除去した読みやすい概要（UI 表示用）。"""
-        from app.ai.ulule import clean_description
-
-        return clean_description(self.description)
-
     @property
     def _ulule_product(self) -> dict | None:
         """Ulule 案件のみ商品性判定を返す（それ以外は None）。"""

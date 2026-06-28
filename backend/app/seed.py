@@ -11,6 +11,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai.ulule import clean_description
 from app.models.project import Project, ProjectStatus, SourceSite
 
 MOCK_PROJECTS = [
@@ -140,6 +141,9 @@ def seed_if_empty(db: Session) -> int:
     count = db.scalar(select(func.count()).select_from(Project)) or 0
     if count > 0:
         return 0
-    db.add_all([Project(**row) for row in MOCK_PROJECTS])
+    projects = [Project(**row) for row in MOCK_PROJECTS]
+    for p in projects:
+        p.description_clean = clean_description(p.description)
+    db.add_all(projects)
     db.commit()
     return len(MOCK_PROJECTS)

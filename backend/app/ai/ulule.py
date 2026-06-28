@@ -116,8 +116,18 @@ def _text(project: Project) -> str:
     ).lower()
 
 
-def clean_description(description: str | None, *, max_len: int = 1500) -> str | None:
+# description_clean に保存する本文の目安の長さ（500〜1000 文字程度に整理する）。
+DESCRIPTION_CLEAN_MAX_LEN = 1000
+
+
+def clean_description(
+    description: str | None, *, max_len: int = DESCRIPTION_CLEAN_MAX_LEN
+) -> str | None:
     """description から HTML を除去した読みやすい概要を返す。
+
+    - `<figure>` `<img>` `<script>` `<style>` 等は内容ごと除去（画像 URL・alt の混入防止）。
+    - HTML エンティティをデコードし、余分な改行・空白を整理する。
+    - `max_len`（既定 1000）程度に語境界でトリムする。
 
     取得メモ（`[Ulule]` 以降）はプレーンテキストなので保持し、その手前の本文だけ
     HTML 除去・トリムする。UI 表示用。
