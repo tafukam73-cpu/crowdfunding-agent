@@ -974,6 +974,53 @@ export async function applyDiscoveryToCrm(
   return res.json();
 }
 
+// ===== AI Executive Summary（営業価値の一目要約） =====
+export type SalesTarget = "yes" | "no" | "要確認";
+
+export type ExecutiveChannel =
+  | "email"
+  | "contact_form"
+  | "instagram"
+  | "linkedin"
+  | "facebook"
+  | "manual_search";
+
+export type ExecutiveSummary = {
+  project_id: number;
+  score: number;
+  stars: number;
+  sales_target: SalesTarget;
+  recommended_action: string;
+  recommended_channel: ExecutiveChannel;
+  product_category: string;
+  japan_sales_status: string;
+  japan_distributor_status: string;
+  contact_status: string;
+  japan_market_fit: string;
+  reasons: string[];
+  cautions: string[];
+};
+
+export const EXECUTIVE_CHANNEL_LABELS: Record<ExecutiveChannel, string> = {
+  email: "メール",
+  contact_form: "問い合わせフォーム",
+  instagram: "Instagram",
+  linkedin: "LinkedIn",
+  facebook: "Facebook",
+  manual_search: "手動検索",
+};
+
+// 案件の Executive Summary を取得（都度算出。未評価でも 200 で返る）。
+export async function fetchExecutiveSummary(
+  id: number
+): Promise<ExecutiveSummary> {
+  const res = await fetch(`${API_BASE}/projects/${id}/executive-summary`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // ===== 日本販売状況チェック =====
 export type JapanSalesStatus = "pending" | "completed" | "failed";
 

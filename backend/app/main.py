@@ -20,6 +20,7 @@ from app.routers import (
     email_drafts,
     email_settings,
     evaluate,
+    executive_summary,
     health,
     japan_sales,
     japanese_success,
@@ -72,6 +73,7 @@ app.include_router(health.router)
 app.include_router(projects.router)
 app.include_router(scrape.router)
 app.include_router(evaluate.router)
+app.include_router(executive_summary.router)
 app.include_router(email_drafts.router)
 app.include_router(email_settings.router)
 app.include_router(japanese_success.router)

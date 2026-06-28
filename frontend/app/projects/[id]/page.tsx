@@ -9,6 +9,7 @@ import CompanyResearchPanel from "@/components/CompanyResearchPanel";
 import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
+import ExecutiveSummaryPanel from "@/components/ExecutiveSummaryPanel";
 import Header from "@/components/Header";
 import JapanSalesPanel from "@/components/JapanSalesPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
@@ -153,6 +154,14 @@ export default function ProjectDetail() {
             ⚠ 営業対象外の可能性あり（寄付・観光・文化活動・イベント・団体支援など、物販ではない案件の可能性）
           </p>
         )}
+
+        {/* AI Executive Summary（最上部：営業すべきか5秒で判断する要約） */}
+        <div className="mt-4">
+          <ExecutiveSummaryPanel
+            projectId={id}
+            refreshKey={researchVersion + discoveryVersion}
+          />
+        </div>
 
         {/* 営業ワークフロー（最上部で「何からやればいいか」を案内） */}
         <div className="mt-4">
