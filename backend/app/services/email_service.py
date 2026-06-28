@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.ai import get_email_generator
 from app.ai.email_generator import EmailGenerator
+from app.ai.outreach import build_outreach_message
 from app.ai.prompts import DEFAULT_TONE, EmailTone, SenderContext
 from app.models.email_draft import EmailDraft
 from app.models.project import Project
@@ -77,6 +78,22 @@ def generate_drafts(
     for d in drafts:
         db.refresh(d)
     return drafts
+
+
+def generate_outreach_message(
+    db: Session, project: Project, channel: str
+) -> dict:
+    """メール以外のチャネル（問い合わせフォーム / SNS DM）向けの短文営業文を作る。
+
+    既存の営業メールとは別物で、署名や独占販売権の詳細は入れず要点のみを 300〜600
+    文字程度にまとめる。差出人情報（メール設定）と、あれば企業リサーチを反映する。
+    生成のみで DB には保存しない（画面でコピーして使う）。
+    """
+    ctx = SenderContext.from_settings(email_settings_service.get_settings(db))
+    research = company_research_service.to_context(
+        company_research_service.get_latest_completed(db, project.id)
+    )
+    return build_outreach_message(project, channel, ctx, research=research)
 
 
 def select_subject(db: Session, draft: EmailDraft, subject: str) -> EmailDraft:

@@ -62,6 +62,15 @@ class ContactDiscoveryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class OutreachMessageOut(BaseModel):
+    """問い合わせフォーム / SNS DM 用の短文アウトリーチ文。"""
+
+    channel: str
+    channel_label: str
+    text: str
+    char_count: int
+
+
 class ApplyToCrmRequest(BaseModel):
     """CRM 反映リクエスト。email 未指定でも推奨チャネル等を記録する。"""
 

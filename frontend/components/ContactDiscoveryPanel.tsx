@@ -6,9 +6,19 @@ import {
   applyDiscoveryToCrm,
   type ContactDiscovery,
   fetchContactDiscovery,
+  fetchOutreachMessage,
   formatDateTime,
+  type OutreachMessage,
   runContactDiscovery,
 } from "@/lib/api";
+
+// 短文アウトリーチ文を出す対象チャネル（メールアドレスが無い場合の代替手段）
+const SHORT_OUTREACH_CHANNELS = [
+  "contact_form",
+  "instagram",
+  "linkedin",
+  "facebook",
+];
 
 const TIER_COLORS: Record<string, string> = {
   high: "bg-emerald-100 text-emerald-700",
@@ -68,6 +78,69 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
     >
       {copied ? "コピーしました" : label ?? "コピー"}
     </button>
+  );
+}
+
+// メールアドレスが見つからない案件向けの短文アウトリーチ文（フォーム / SNS DM 用）。
+// 既存の営業メールとは別に、貼り付けてすぐ使える短い営業文を生成する。
+function ShortOutreach({
+  projectId,
+  channel,
+}: {
+  projectId: number;
+  channel: string;
+}) {
+  const [msg, setMsg] = useState<OutreachMessage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function generate() {
+    setBusy(true);
+    setError(null);
+    try {
+      setMsg(await fetchOutreachMessage(projectId, channel));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const channelLabel = CHANNEL_LABELS[channel] ?? channel;
+
+  return (
+    <div className="rounded-md border border-violet-200 bg-violet-50 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-violet-800">
+          短文アウトリーチ文（{channelLabel}用・メール不要）
+        </p>
+        <button
+          onClick={generate}
+          disabled={busy}
+          className="rounded border border-violet-300 bg-white px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+        >
+          {busy ? "生成中…" : msg ? "再生成" : "短文を生成"}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-violet-600">
+        メールアドレスが無くても、問い合わせフォームやSNSのDMにそのまま貼り付けられる
+        短い営業文（約300〜600文字）を作成します。送信は手動で行ってください。
+      </p>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {msg && (
+        <div className="mt-2 rounded border border-violet-200 bg-white p-3">
+          <pre className="whitespace-pre-wrap font-sans text-sm text-slate-800">
+            {msg.text}
+          </pre>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <CopyButton text={msg.text} label="アウトリーチ文をコピー" />
+            <span className="text-xs text-slate-400">{msg.char_count}文字</span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -186,6 +259,15 @@ export default function ContactDiscoveryPanel({
               <p className="mt-0.5 text-slate-800">{data.recommended_action}</p>
             </div>
           )}
+
+          {/* 短文アウトリーチ文（メールが無く、推奨チャネルがフォーム/SNSのとき） */}
+          {data.recommended_channel &&
+            SHORT_OUTREACH_CHANNELS.includes(data.recommended_channel) && (
+              <ShortOutreach
+                projectId={projectId}
+                channel={data.recommended_channel}
+              />
+            )}
 
           {/* CRM 反映（メールが無くても記録可能） */}
           <div className="flex flex-wrap items-center gap-2">

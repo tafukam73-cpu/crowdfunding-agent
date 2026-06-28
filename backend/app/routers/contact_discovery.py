@@ -13,13 +13,15 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.ai.outreach import OUTREACH_CHANNELS
 from app.db.session import get_db
 from app.schemas.contact_discovery import (
     ApplyToCrmRequest,
     ApplyToCrmResult,
     ContactDiscoveryOut,
+    OutreachMessageOut,
 )
-from app.services import contact_discovery_service, project_service
+from app.services import contact_discovery_service, email_service, project_service
 
 logger = logging.getLogger("router.contact_discovery")
 
@@ -49,6 +51,38 @@ def get_contact_discovery(project_id: int, db: Session = Depends(get_db)):
     if row is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     return row
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/outreach-message",
+    response_model=OutreachMessageOut,
+)
+def get_outreach_message(
+    project_id: int,
+    channel: str | None = None,
+    db: Session = Depends(get_db),
+) -> OutreachMessageOut:
+    """メール以外のチャネル向けの短文アウトリーチ文を生成して返す。
+
+    channel 未指定なら最新の探索結果の推奨チャネルを使う。問い合わせフォーム /
+    SNS（Instagram / LinkedIn / Facebook）以外のチャネルでは 400 を返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+
+    if channel is None:
+        latest = contact_discovery_service.get_latest(db, project_id)
+        channel = latest.recommended_channel if latest else None
+    if channel not in OUTREACH_CHANNELS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "短文アウトリーチ文は問い合わせフォーム / SNS（Instagram / "
+                "LinkedIn / Facebook）チャネル向けです。"
+            ),
+        )
+    return email_service.generate_outreach_message(db, project, channel)
 
 
 @router.post(
