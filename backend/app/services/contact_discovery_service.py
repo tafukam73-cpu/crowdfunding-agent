@@ -90,6 +90,96 @@ HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 # 画像やアセットに紛れる「メールっぽい文字列」を除外する拡張子
 _BAD_EMAIL_SUFFIX = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")
 
+# --- 営業に使えないメール候補の除外ルール（要件: 連絡先抽出の精度向上） ---
+# エラートラッキング / 監視 / プレースホルダー等のドメイン。完全一致または
+# サブドメイン（".sentry.io" など）で一致したら除外する。
+# 例: 2c2bbb0...@o35514.ingest.sentry.io（Sentry DSN 由来）はここで弾く。
+EXCLUDED_EMAIL_DOMAINS = (
+    "sentry.io",
+    "ingest.sentry.io",   # sentry.io のサブドメインだが意図を明示
+    "sentry-next.com",
+    "localhost",
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+)
+
+# 自動送信アドレスのローカル部（前方一致で除外。"noreply2@" 等も弾く）。
+_AUTO_REPLY_PREFIXES = (
+    "no-reply",
+    "noreply",
+    "no_reply",
+    "donotreply",
+    "do-not-reply",
+    "do_not_reply",
+)
+
+# 技術系 / 配送系 / 監視系のローカル部（完全一致で除外）。
+# info / sales / hello / partnership などの営業に使える宛先は含めない。
+_TECHNICAL_LOCAL_PARTS = frozenset(
+    {
+        # 配送・システム
+        "mailer-daemon", "mailerdaemon", "postmaster", "bounce", "bounces",
+        "abuse", "root", "daemon", "cron", "nobody", "devnull",
+        # 監視・エラートラッキング・自動通知
+        "sentry", "sentry-next", "alert", "alerts", "monitoring", "monitor",
+        "nagios", "datadog", "pagerduty", "statuspage", "notifications",
+    }
+)
+
+
+def _looks_like_hash(local: str) -> bool:
+    """ローカル部がハッシュ/トークン風（営業に使えない自動生成）かどうか。
+
+    - 24 文字以上の 16 進数（Sentry DSN の公開鍵 32hex などを含む）
+    - 区切り（. _ - +）が無く、数字を多く含む 25 文字以上の英数字トークン
+    """
+    if re.fullmatch(r"[0-9a-f]{24,}", local):
+        return True
+    if (
+        len(local) >= 25
+        and local.isalnum()
+        and sum(c.isdigit() for c in local) >= 4
+    ):
+        return True
+    return False
+
+
+def email_exclusion_reason(email: str) -> str | None:
+    """営業に使えないメール候補なら「除外理由」を返す（使えるなら None）。
+
+    理由は機械可読な文字列（テストで検証できるよう "種別:詳細" 形式）。
+    sales@ / partnership@ / hello@ / info@ などの営業向け宛先は除外しない。
+    """
+    addr = (email or "").strip().lower()
+    if "@" not in addr:
+        return "invalid"
+    local, domain = addr.split("@", 1)
+
+    # アセットファイル名がメール風に紛れたもの（example.png 等）
+    if domain.endswith(_BAD_EMAIL_SUFFIX):
+        return "asset_file"
+
+    # 除外ドメイン（完全一致 / サブドメイン）
+    for d in EXCLUDED_EMAIL_DOMAINS:
+        if domain == d or domain.endswith("." + d):
+            return f"excluded_domain:{d}"
+
+    # 自動送信アドレス（no-reply 系）
+    if any(local.startswith(p) for p in _AUTO_REPLY_PREFIXES):
+        return "auto_reply_local_part"
+
+    # 技術系 / 監視系
+    if local in _TECHNICAL_LOCAL_PARTS:
+        return f"technical_local_part:{local}"
+
+    # ハッシュ/トークン風ローカル部（Sentry DSN の公開鍵など）
+    if _looks_like_hash(local):
+        return "hash_local_part"
+
+    return None
+
 # メールアドレスのローカル部によるスコア（要件 4）
 HIGH_PREFIXES = (
     "partnership",
@@ -103,14 +193,12 @@ HIGH_PREFIXES = (
     "international",
 )
 MID_PREFIXES = ("hello", "contact", "info")
+# 注: no-reply / noreply / donotreply 等の自動送信系は extract_emails の段階で
+# 除外するため、ここには含めない（_AUTO_REPLY_PREFIXES を参照）。
 LOW_PREFIXES = (
     "support",
     "press",
     "media",
-    "no-reply",
-    "noreply",
-    "donotreply",
-    "do-not-reply",
 )
 SCORE_HIGH, SCORE_MID, SCORE_LOW, SCORE_OTHER = 90, 60, 30, 50
 
@@ -155,23 +243,30 @@ def score_email(email: str, official_domain: str | None = None) -> tuple[int, st
 
 
 def extract_emails(html: str) -> list[str]:
-    """HTML から mailto: と本文テキストのメールアドレスを抽出（重複排除）。"""
+    """HTML から mailto: と本文テキストのメールアドレスを抽出（重複排除）。
+
+    営業に使えない技術系・監視系・自動送信系・プレースホルダー・ハッシュ風
+    （Sentry DSN 由来など）のアドレスは email_exclusion_reason で除外する。
+    """
     found: list[str] = []
     seen: set[str] = set()
     for m in MAILTO_RE.findall(html or ""):
         addr = m.split("?", 1)[0].strip()
         key = addr.lower()
-        if "@" in addr and key not in seen:
-            seen.add(key)
-            found.append(addr)
+        if "@" not in addr or key in seen:
+            continue
+        seen.add(key)
+        if email_exclusion_reason(addr):
+            continue
+        found.append(addr)
     for m in EMAIL_RE.findall(html or ""):
         addr = m.strip().strip(".")
         key = addr.lower()
         if key in seen:
             continue
-        if key.endswith(_BAD_EMAIL_SUFFIX):
-            continue
         seen.add(key)
+        if email_exclusion_reason(addr):
+            continue
         found.append(addr)
     return found
 
