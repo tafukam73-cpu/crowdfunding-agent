@@ -112,7 +112,7 @@ function RankCard({ item }: { item: RankingItem }) {
           案件を開く
         </Link>
         <Link
-          href={`/projects/${item.project_id}`}
+          href={`/projects/${item.project_id}?sales=1`}
           className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
         >
           営業開始 →

@@ -1078,6 +1078,29 @@ export type RankingParams = {
   sort?: RankingSort;
 };
 
+// ===== 今日やること（営業状況で分類） =====
+export type SalesTask = {
+  project_id: number;
+  title: string;
+  source_site: string;
+  sales_status: SalesStatus;
+  latest_score: number | null;
+};
+
+export type TodayTasks = {
+  to_contact: SalesTask[];
+  followup: SalesTask[];
+  replied: SalesTask[];
+  negotiating: SalesTask[];
+};
+
+// トップページ「今日やること」を取得（営業状況で分類した案件リスト）。
+export async function fetchSalesTasks(perGroup = 5): Promise<TodayTasks> {
+  const res = await apiFetch(`/sales/tasks?per_group=${perGroup}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // AI 営業優先ランキングを取得（Executive Summary を統合してスコア順）。
 export async function fetchSalesRanking(
   params: RankingParams = {}

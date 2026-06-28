@@ -331,6 +331,50 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
     return out[: max(1, limit)]
 
 
+# --- トップページ「今日やること」（営業状況で分類した案件リスト） ---
+# 営業フロー上の「次の一手」ごとに案件をまとめる。既存データの並べ替えのみ。
+_TASK_GROUPS: list[tuple[str, tuple[str, ...]]] = [
+    ("to_contact", (SalesStatus.not_started.value, SalesStatus.ready.value)),
+    ("followup", (SalesStatus.contacted.value, SalesStatus.awaiting_reply.value)),
+    ("replied", (SalesStatus.replied.value,)),
+    ("negotiating", (SalesStatus.negotiating.value,)),
+]
+
+
+def today_tasks(db: Session, *, per_group: int = 5) -> dict:
+    """営業状況で分類した「今日やること」を返す（各グループ最大 per_group 件）。
+
+    - to_contact : 未営業 / 準備完了（これから営業）
+    - followup   : 営業済み / 返信待ち（フォローアップ）
+    - replied    : 返信あり
+    - negotiating: 商談中
+    既存の projects を読むだけで、新たな算出や外部アクセスは行わない。
+    """
+
+    def _list(statuses: tuple[str, ...]) -> list[dict]:
+        stmt = (
+            select(Project)
+            .where(
+                Project.source_site.in_(_SALES_TARGET_VALUES),
+                Project.sales_status.in_(statuses),
+            )
+            .order_by(Project.latest_score.desc().nullslast(), Project.updated_at.desc())
+            .limit(per_group)
+        )
+        return [
+            {
+                "project_id": p.id,
+                "title": p.title,
+                "source_site": p.source_site,
+                "sales_status": p.sales_status,
+                "latest_score": p.latest_score,
+            }
+            for p in db.scalars(stmt)
+        ]
+
+    return {key: _list(statuses) for key, statuses in _TASK_GROUPS}
+
+
 # --- AI 営業優先ランキング（Executive Summary を統合） ---
 # 連絡先ありとみなす推奨チャネル（manual_search 以外）
 _RANKING_SORTS = ("score", "created_at", "latest_score", "contact", "unsold")

@@ -72,6 +72,23 @@ class RankingListOut(BaseModel):
     items: list[RankingItem]
 
 
+class TaskItem(BaseModel):
+    """「今日やること」の 1 件（営業状況で分類した案件）。"""
+
+    project_id: int
+    title: str
+    source_site: str
+    sales_status: SalesStatus
+    latest_score: int | None = None
+
+
+class TodayTasksOut(BaseModel):
+    to_contact: list[TaskItem]    # これから営業（未営業 / 準備完了）
+    followup: list[TaskItem]      # フォローアップ（営業済み / 返信待ち）
+    replied: list[TaskItem]       # 返信あり
+    negotiating: list[TaskItem]   # 商談中
+
+
 class SalesDashboardOut(BaseModel):
     ready_count: int          # 営業準備完了
     today_count: int          # 今日営業する件数

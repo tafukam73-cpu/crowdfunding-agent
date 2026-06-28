@@ -17,6 +17,7 @@ from app.schemas.sales import (
     SalesDashboardOut,
     SalesStatusUpdate,
     TodayListOut,
+    TodayTasksOut,
     WorkflowOut,
 )
 from app.services import project_service, workflow_service
@@ -53,6 +54,15 @@ def sales_today(
 @router.get("/sales/dashboard", response_model=SalesDashboardOut)
 def sales_dashboard(db: Session = Depends(get_db)) -> SalesDashboardOut:
     return SalesDashboardOut(**workflow_service.dashboard_summary(db))
+
+
+@router.get("/sales/tasks", response_model=TodayTasksOut)
+def sales_tasks(
+    per_group: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> TodayTasksOut:
+    """トップページ「今日やること」（営業状況で分類した案件リスト）。"""
+    return TodayTasksOut(**workflow_service.today_tasks(db, per_group=per_group))
 
 
 @router.get("/sales/ranking", response_model=RankingListOut)
