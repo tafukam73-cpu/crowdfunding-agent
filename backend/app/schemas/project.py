@@ -7,7 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.evaluation import Recommendation
-from app.models.project import ProjectStatus, SourceSite
+from app.models.project import ProjectStatus, SalesStatus, SourceSite
 
 
 class ProjectBase(BaseModel):
@@ -62,6 +62,7 @@ class ProjectStatusUpdate(BaseModel):
 class ProjectOut(ProjectBase):
     id: int
     status: ProjectStatus
+    sales_status: SalesStatus = SalesStatus.not_started
     latest_score: int | None = None
     latest_recommendation: Recommendation | None = None
     maker_id: int | None = None

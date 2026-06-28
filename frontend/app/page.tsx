@@ -10,6 +10,7 @@ import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
 import ScrapeStatsPanel from "@/components/ScrapeStatsPanel";
 import SourceBadge from "@/components/SourceBadge";
+import TodaySalesPanel from "@/components/TodaySalesPanel";
 import StatusBadge from "@/components/StatusBadge";
 import {
   AVAILABILITY_COLORS,
@@ -114,6 +115,11 @@ export default function Home() {
     <>
       <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
+        {/* 今日営業する案件 + 営業ダッシュボード（最上部） */}
+        <div className="mb-6">
+          <TodaySalesPanel reloadKey={reloadKey} />
+        </div>
+
         {/* 収集コントロール */}
         <ScrapePanel onCompleted={() => setReloadKey((k) => k + 1)} />
 

@@ -18,6 +18,17 @@ export type ProjectStatus =
   | "won"
   | "rejected";
 
+// 営業ワークフロー上の営業状況（既存の status とは別軸）
+export type SalesStatus =
+  | "not_started"
+  | "ready"
+  | "contacted"
+  | "awaiting_reply"
+  | "replied"
+  | "negotiating"
+  | "won"
+  | "rejected";
+
 export type Recommendation = "high" | "mid" | "low";
 
 export type Project = {
@@ -41,6 +52,7 @@ export type Project = {
   maker_url: string | null;
   contact_info: string | null;
   status: ProjectStatus;
+  sales_status: SalesStatus;
   latest_score: number | null;
   latest_recommendation: Recommendation | null;
   maker_id: number | null;
@@ -432,6 +444,111 @@ export const STATUS_COLORS: Record<ProjectStatus, string> = {
   won: "bg-green-100 text-green-700",
   rejected: "bg-red-100 text-red-700",
 };
+
+// --- 営業ワークフローの営業状況 ---
+export const SALES_STATUS_LABELS: Record<SalesStatus, string> = {
+  not_started: "未営業",
+  ready: "営業準備完了",
+  contacted: "営業済み",
+  awaiting_reply: "返信待ち",
+  replied: "返信あり",
+  negotiating: "商談中",
+  won: "契約",
+  rejected: "見送り",
+};
+
+export const SALES_STATUS_COLORS: Record<SalesStatus, string> = {
+  not_started: "bg-slate-100 text-slate-600",
+  ready: "bg-sky-100 text-sky-700",
+  contacted: "bg-amber-100 text-amber-700",
+  awaiting_reply: "bg-yellow-100 text-yellow-700",
+  replied: "bg-indigo-100 text-indigo-700",
+  negotiating: "bg-purple-100 text-purple-700",
+  won: "bg-green-100 text-green-700",
+  rejected: "bg-red-100 text-red-700",
+};
+
+// 営業ワークフロー
+export type WorkflowStep = {
+  key: string;
+  label: string;
+  done: boolean;
+};
+
+export type WorkflowChannel = {
+  key: string;
+  label: string;
+  url: string;
+  recommended: boolean;
+};
+
+export type Workflow = {
+  project_id: number;
+  sales_status: SalesStatus;
+  steps: WorkflowStep[];
+  channels: WorkflowChannel[];
+  priority_score: number;
+  stars: number;
+  ready_to_sell: boolean;
+};
+
+export type TodayProject = {
+  project_id: number;
+  title: string;
+  source_site: SourceSite;
+  sales_status: SalesStatus;
+  priority_score: number;
+  stars: number;
+  reasons: string[];
+};
+
+export type SalesDashboard = {
+  ready_count: number;
+  today_count: number;
+  awaiting_reply_count: number;
+  replied_count: number;
+  negotiating_count: number;
+  won_count: number;
+  contacted_count: number;
+};
+
+export async function fetchWorkflow(id: number): Promise<Workflow> {
+  const res = await fetch(`${API_BASE}/projects/${id}/workflow`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSalesStatus(
+  id: number,
+  sales_status: SalesStatus
+): Promise<Project> {
+  const res = await fetch(`${API_BASE}/projects/${id}/sales-status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sales_status }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTodayProjects(
+  limit = 10
+): Promise<TodayProject[]> {
+  const res = await fetch(`${API_BASE}/sales/today?limit=${limit}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data = await res.json();
+  return data.items as TodayProject[];
+}
+
+export async function fetchSalesDashboard(): Promise<SalesDashboard> {
+  const res = await fetch(`${API_BASE}/sales/dashboard`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
 
 export async function fetchProjects(params: ListParams = {}): Promise<ProjectList> {
   const qs = new URLSearchParams();

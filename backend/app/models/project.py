@@ -63,6 +63,23 @@ class ProjectStatus(str, enum.Enum):
     rejected = "rejected"     # 見送り
 
 
+class SalesStatus(str, enum.Enum):
+    """営業ワークフロー上の営業状況。
+
+    既存の status（ProjectStatus）とは別軸で、営業ワークフローカードが案内する
+    「次に何をするか」の進捗を表す。
+    """
+
+    not_started = "not_started"        # 未営業
+    ready = "ready"                    # 営業準備完了
+    contacted = "contacted"            # 営業済み
+    awaiting_reply = "awaiting_reply"  # 返信待ち
+    replied = "replied"                # 返信あり
+    negotiating = "negotiating"        # 商談中
+    won = "won"                        # 契約
+    rejected = "rejected"              # 見送り
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -108,6 +125,15 @@ class Project(Base):
     # --- 営業ステータス ---
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=ProjectStatus.new.value, index=True
+    )
+
+    # --- 営業ワークフロー上の営業状況（未営業→営業準備完了→営業済み→…） ---
+    sales_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=SalesStatus.not_started.value,
+        server_default=SalesStatus.not_started.value,
+        index=True,
     )
 
     # --- AI 評価キャッシュ（最新評価。一覧のソート/フィルタ用） ---

@@ -10,6 +10,7 @@ from app.models.project import (
     SALES_TARGET_SITES,
     Project,
     ProjectStatus,
+    SalesStatus,
     SourceSite,
 )
 from app.schemas.project import ProjectCreate, ProjectUpdate
@@ -150,6 +151,73 @@ def update_project(db: Session, project: Project, data: ProjectUpdate) -> Projec
 def update_status(db: Session, project: Project, status: ProjectStatus) -> Project:
     project.status = status.value
     db.commit()
+    db.refresh(project)
+    return project
+
+
+# 営業状況の遷移時に CRM へ自動記録する営業履歴の要約・種別。
+# not_started / ready は「営業前」のため履歴は残さない。
+_SALES_ACTIVITY_SUMMARY: dict[str, str] = {
+    SalesStatus.contacted.value: "営業を開始しました（営業済み）。",
+    SalesStatus.awaiting_reply.value: "返信待ちに変更しました。",
+    SalesStatus.replied.value: "先方から返信がありました。",
+    SalesStatus.negotiating.value: "商談中になりました。",
+    SalesStatus.won.value: "契約成立しました。",
+    SalesStatus.rejected.value: "見送りにしました。",
+}
+
+
+def update_sales_status(
+    db: Session, project: Project, sales_status: SalesStatus
+) -> Project:
+    """営業ワークフローの営業状況を更新し、CRM に営業履歴を自動記録する。
+
+    意味のある遷移（営業済み・返信あり・商談中・契約 など）のときは、
+    必要に応じてメーカーを作成・リンクしたうえで SalesActivity を追加し、
+    メーカーの交渉ステータスも同期する。
+    """
+    # 遅延 import で循環参照を避ける
+    from app.models.crm import ActivityKind, CrmStatus
+    from app.schemas.crm import ActivityCreate
+    from app.services import crm_service
+
+    prev = project.sales_status
+    project.sales_status = sales_status.value
+    db.commit()
+    db.refresh(project)
+
+    summary = _SALES_ACTIVITY_SUMMARY.get(sales_status.value)
+    if not summary or prev == sales_status.value:
+        return project
+
+    # CRM 反映：メーカーが無ければ案件情報から作成・リンク
+    maker = crm_service.create_from_project(db, project)
+
+    kind = (
+        ActivityKind.email
+        if sales_status.value in (SalesStatus.contacted.value, SalesStatus.replied.value)
+        else ActivityKind.note
+    )
+    crm_service.add_activity(
+        db,
+        maker.id,
+        ActivityCreate(kind=kind, summary=summary, project_id=project.id),
+    )
+
+    # メーカーの交渉ステータスも同期
+    crm_map = {
+        SalesStatus.contacted.value: CrmStatus.contacted,
+        SalesStatus.awaiting_reply.value: CrmStatus.contacted,
+        SalesStatus.replied.value: CrmStatus.contacted,
+        SalesStatus.negotiating.value: CrmStatus.negotiating,
+        SalesStatus.won.value: CrmStatus.won,
+        SalesStatus.rejected.value: CrmStatus.lost,
+    }
+    crm_status = crm_map.get(sales_status.value)
+    if crm_status is not None:
+        maker.status = crm_status.value
+        db.commit()
+
     db.refresh(project)
     return project
 

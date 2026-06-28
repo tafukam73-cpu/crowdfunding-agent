@@ -13,6 +13,7 @@ import Header from "@/components/Header";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
+import WorkflowCard from "@/components/WorkflowCard";
 import {
   createMakerFromProject,
   evaluateProject,
@@ -151,6 +152,17 @@ export default function ProjectDetail() {
             ⚠ 営業対象外の可能性あり（寄付・観光・文化活動・イベント・団体支援など、物販ではない案件の可能性）
           </p>
         )}
+
+        {/* 営業ワークフロー（最上部で「何からやればいいか」を案内） */}
+        <div className="mt-4">
+          <WorkflowCard
+            projectId={id}
+            refreshKey={researchVersion + discoveryVersion}
+            onSalesStatusChange={(s) =>
+              setProject((p) => (p ? { ...p, sales_status: s } : p))
+            }
+          />
+        </div>
 
         {project.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
