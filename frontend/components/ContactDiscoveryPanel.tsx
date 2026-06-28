@@ -146,15 +146,25 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
+// 短文アウトリーチ文を生成できるチャネル（手動選択用）。
+const OUTREACH_CHANNEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "contact_form", label: "問い合わせフォーム" },
+  { value: "instagram", label: "Instagram" },
+  { value: "linkedin", label: "LinkedIn" },
+  { value: "facebook", label: "Facebook" },
+];
+
 // メールアドレスが見つからない案件向けの短文アウトリーチ文（フォーム / SNS DM 用）。
-// 既存の営業メールとは別に、貼り付けてすぐ使える短い営業文を生成する。
+// 推奨チャネルに依存せず常に表示し、ユーザーがチャネルを選んで生成できる。
+// URL が無くても本文は案件情報から作れるため、チャネル選択だけで利用可能。
 function ShortOutreach({
   projectId,
-  channel,
+  defaultChannel,
 }: {
   projectId: number;
-  channel: string;
+  defaultChannel: string;
 }) {
+  const [channel, setChannel] = useState(defaultChannel);
   const [msg, setMsg] = useState<OutreachMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,25 +181,43 @@ function ShortOutreach({
     }
   }
 
-  const channelLabel = CHANNEL_LABELS[channel] ?? channel;
-
   return (
     <div className="rounded-md border border-violet-200 bg-violet-50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold text-violet-800">
-          短文アウトリーチ文（{channelLabel}用・メール不要）
+          短文アウトリーチ文（メール不要・フォーム / SNS DM 用）
         </p>
-        <button
-          onClick={generate}
-          disabled={busy}
-          className="rounded border border-violet-300 bg-white px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
-        >
-          {busy ? "生成中…" : msg ? "再生成" : "短文を生成"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-violet-700">
+            チャネル
+            <select
+              value={channel}
+              onChange={(e) => {
+                setChannel(e.target.value);
+                setMsg(null);
+              }}
+              className="rounded border border-violet-300 bg-white px-2 py-1 text-xs text-violet-800"
+            >
+              {OUTREACH_CHANNEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={generate}
+            disabled={busy}
+            className="rounded border border-violet-300 bg-white px-2 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+          >
+            {busy ? "生成中…" : msg ? "再生成" : "短文を作成"}
+          </button>
+        </div>
       </div>
       <p className="mt-1 text-xs text-violet-600">
-        メールアドレスが無くても、問い合わせフォームやSNSのDMにそのまま貼り付けられる
-        短い営業文（約300〜600文字）を作成します。送信は手動で行ってください。
+        メールアドレスが無くても、選んだチャネル（問い合わせフォーム / Instagram /
+        LinkedIn / Facebook）のDMにそのまま貼り付けられる短い営業文（約300〜600文字）を
+        作成します。送信は手動で行ってください。
       </p>
 
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -201,7 +229,9 @@ function ShortOutreach({
           </pre>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <CopyButton text={msg.text} label="アウトリーチ文をコピー" />
-            <span className="text-xs text-slate-400">{msg.char_count}文字</span>
+            <span className="text-xs text-slate-400">
+              {msg.channel_label} ・ {msg.char_count}文字
+            </span>
           </div>
         </div>
       )}
@@ -329,14 +359,16 @@ export default function ContactDiscoveryPanel({
             </div>
           )}
 
-          {/* 短文アウトリーチ文（メールが無く、推奨チャネルがフォーム/SNSのとき） */}
-          {data.recommended_channel &&
-            SHORT_OUTREACH_CHANNELS.includes(data.recommended_channel) && (
-              <ShortOutreach
-                projectId={projectId}
-                channel={data.recommended_channel}
-              />
-            )}
+          {/* 短文アウトリーチ文（常に表示。チャネルを選んでメール不要で生成） */}
+          <ShortOutreach
+            projectId={projectId}
+            defaultChannel={
+              data.recommended_channel &&
+              SHORT_OUTREACH_CHANNELS.includes(data.recommended_channel)
+                ? data.recommended_channel
+                : "contact_form"
+            }
+          />
 
           {/* 外部連絡先へのクイックリンク（短文を生成→コピー→そのまま開いて貼り付け） */}
           <QuickContactLinks data={data} />
