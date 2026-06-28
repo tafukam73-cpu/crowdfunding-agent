@@ -485,24 +485,34 @@ export default function ContactDiscoveryPanel({
             </div>
           )}
 
-          {/* 手動検索クエリ候補 */}
-          {data.search_queries && data.search_queries.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-slate-500">
-                手動検索クエリ候補（Google等で検索）
-              </p>
+          {/* Google検索アシスト（メールが無い企業でも手動で営業先を探せる検索候補） */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500">
+              Google検索アシスト（手動で営業先を探す）
+            </p>
+            {data.search_queries && data.search_queries.length > 0 ? (
               <ul className="mt-1 space-y-1">
                 {data.search_queries.map((q, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">
                       {q}
                     </code>
                     <CopyButton text={q} />
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(q)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      Googleで開く ↗
+                    </a>
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p className="mt-1 text-xs text-slate-400">検索候補はまだありません。</p>
+            )}
+          </div>
 
           {/* チェックリスト */}
           {data.discovery_checklist && (
