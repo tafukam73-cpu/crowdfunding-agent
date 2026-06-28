@@ -61,6 +61,71 @@ const SOCIAL_LABELS: { key: keyof ContactDiscovery; label: string }[] = [
   { key: "youtube_url", label: "YouTube" },
 ];
 
+// 案件詳細から外部連絡先へ一発で飛べるクイックボタン用の定義。
+// channel は recommended_channel の値と突き合わせて「おすすめ」表示に使う。
+const QUICK_LINKS: {
+  key: keyof ContactDiscovery;
+  label: string;
+  channel: string;
+}[] = [
+  { key: "primary_contact_form_url", label: "問い合わせフォーム", channel: "contact_form" },
+  { key: "instagram_url", label: "Instagram", channel: "instagram" },
+  { key: "linkedin_url", label: "LinkedIn", channel: "linkedin" },
+  { key: "facebook_url", label: "Facebook", channel: "facebook" },
+  { key: "twitter_url", label: "X / Twitter", channel: "twitter" },
+  { key: "youtube_url", label: "YouTube", channel: "youtube" },
+  { key: "official_site_url", label: "公式サイト", channel: "official_site" },
+];
+
+// 発見済みの外部連絡先リンクへ新しいタブで飛べるクイックボタン群。
+// URL が存在するチャネルだけ表示し、recommended_channel と一致するものは強調する。
+function QuickContactLinks({ data }: { data: ContactDiscovery }) {
+  const available = QUICK_LINKS.filter((l) => {
+    const url = data[l.key];
+    return typeof url === "string" && url.length > 0;
+  });
+
+  if (available.length === 0) {
+    return (
+      <div>
+        <p className="text-xs font-semibold text-slate-500">外部連絡先リンク</p>
+        <p className="mt-1 text-xs text-slate-400">
+          利用可能な外部連絡先リンクはまだ見つかっていません。
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-slate-500">
+        外部連絡先リンク（クリックで新しいタブ）
+      </p>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {available.map((l) => {
+          const recommended = data.recommended_channel === l.channel;
+          return (
+            <a
+              key={l.key as string}
+              href={data[l.key] as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={
+                recommended
+                  ? "inline-flex items-center gap-1 rounded-md border border-emerald-400 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
+                  : "inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              }
+            >
+              {recommended ? `★ おすすめ：${l.label}` : `${l.label}を開く`}
+              <span aria-hidden>↗</span>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -268,6 +333,9 @@ export default function ContactDiscoveryPanel({
                 channel={data.recommended_channel}
               />
             )}
+
+          {/* 外部連絡先へのクイックリンク（短文を生成→コピー→そのまま開いて貼り付け） */}
+          <QuickContactLinks data={data} />
 
           {/* CRM 反映（メールが無くても記録可能） */}
           <div className="flex flex-wrap items-center gap-2">
