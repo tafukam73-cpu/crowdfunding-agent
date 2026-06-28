@@ -300,7 +300,7 @@ export default function Home() {
                       >
                         {p.title}
                       </Link>
-                      {!p.is_sales_target_candidate && (
+                      {p.is_sales_target_candidate === false && (
                         <span
                           className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
                           title="寄付・観光・文化活動など物販ではない可能性"

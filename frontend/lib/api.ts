@@ -472,6 +472,57 @@ export async function updateProjectStatus(
   return res.json();
 }
 
+// SSR 用の名前付きエンティティ最小マップ（仏語の頻出アクセントを含む）。
+const _ENTITY_MAP: Record<string, string> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
+  eacute: "é", egrave: "è", ecirc: "ê", euml: "ë", agrave: "à", acirc: "â",
+  ccedil: "ç", ugrave: "ù", ucirc: "û", icirc: "î", iuml: "ï", ocirc: "ô",
+  oelig: "œ", aelig: "æ", laquo: "«", raquo: "»", hellip: "…", rsquo: "’",
+  lsquo: "‘", ldquo: "“", rdquo: "”", ndash: "–", mdash: "—", euro: "€",
+};
+
+// HTML エンティティをデコードする。ブラウザでは textarea を使って全エンティティを
+// 確実に復号し（タグ除去後なのでスクリプト実行の恐れなし）、SSR では最小マップで代替する。
+function decodeEntities(s: string): string {
+  if (!s.includes("&")) return s;
+  if (typeof document !== "undefined") {
+    const el = document.createElement("textarea");
+    el.innerHTML = s;
+    return el.value;
+  }
+  return s
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&([a-z]+);/gi, (m, name) => _ENTITY_MAP[name.toLowerCase()] ?? m);
+}
+
+// HTML 文字列から本文テキストだけを抽出する（正規表現ベース・サーバ/クライアント両対応）。
+// バックエンドの description_clean が無い/空のときのフォールバック表示に使う。
+// <img>/<figure> 等は内容ごと除去し、ブロック要素は改行に、残りのタグは除去する。
+export function htmlToText(value: string | null | undefined): string {
+  if (!value) return "";
+  let text = value;
+  // 画像・図・スクリプト・動画などは内容ごと除去（画像 URL・alt の混入を防ぐ）
+  text = text.replace(
+    /<(script|style|noscript|figure|picture|svg|video|iframe)\b[\s\S]*?<\/\1>/gi,
+    " "
+  );
+  text = text.replace(/<(img|source|br)\b[^>]*\/?>/gi, (m) =>
+    /^<br/i.test(m) ? "\n" : " "
+  );
+  // ブロック要素の境界は改行にする（インライン要素は連結）
+  text = text.replace(
+    /<\/?(p|div|li|ul|ol|tr|table|section|article|header|footer|h[1-6]|blockquote|pre)\b[^>]*>/gi,
+    "\n"
+  );
+  // 残りのタグを除去 → エンティティをデコード
+  text = decodeEntities(text.replace(/<[^>]+>/g, ""));
+  // 空白・改行を整理
+  text = text.replace(/\r\n?/g, "\n");
+  const lines = text.split("\n").map((l) => l.replace(/[ \t ]+/g, " ").trim());
+  return lines.filter(Boolean).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function formatMoney(amount: number | null, currency: string): string {
   if (amount == null) return "—";
   return `${currency} ${Math.round(amount).toLocaleString()}`;

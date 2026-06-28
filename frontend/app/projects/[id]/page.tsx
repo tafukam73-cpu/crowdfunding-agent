@@ -20,6 +20,7 @@ import {
   fetchProject,
   formatMoney,
   fundingRate,
+  htmlToText,
   siteLabel,
   STATUS_LABELS,
   updateProjectStatus,
@@ -115,6 +116,11 @@ export default function ProjectDetail() {
 
   const rate = fundingRate(project);
 
+  // 概要表示：description_clean（HTML除去済み）を優先。空ならクライアント側で
+  // 生 description を sanitize してから表示する（HTMLタグを画面に出さない）。
+  const summary =
+    project.description_clean?.trim() || htmlToText(project.description);
+
   const rows: [string, string][] = [
     ["サイト", siteLabel(project.source_site)],
     ["カテゴリ", project.category ?? "—"],
@@ -140,7 +146,7 @@ export default function ProjectDetail() {
           <StatusBadge status={project.status} />
         </div>
 
-        {!project.is_sales_target_candidate && (
+        {project.is_sales_target_candidate === false && (
           <p className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800">
             ⚠ 営業対象外の可能性あり（寄付・観光・文化活動・イベント・団体支援など、物販ではない案件の可能性）
           </p>
@@ -155,10 +161,8 @@ export default function ProjectDetail() {
           />
         )}
 
-        {(project.description_clean ?? project.description) && (
-          <p className="mt-4 whitespace-pre-wrap text-slate-700">
-            {project.description_clean ?? project.description}
-          </p>
+        {summary && (
+          <p className="mt-4 whitespace-pre-wrap text-slate-700">{summary}</p>
         )}
 
         <dl className="mt-6 grid grid-cols-[8rem_1fr] gap-y-3 rounded-lg border border-slate-200 bg-white p-5 text-sm">
