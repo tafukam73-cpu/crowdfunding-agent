@@ -1,9 +1,10 @@
 """案件の業務ロジック（CRUD・検索）。"""
 from __future__ import annotations
 
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import and_, asc, desc, func, not_, or_, select
 from sqlalchemy.orm import Session
 
+from app.ai.ulule import MEMO_MARKER, NON_PRODUCT_KEYWORDS, PRODUCT_KEYWORDS
 from app.models.project import (
     JAPANESE_SUCCESS_SITES,
     SALES_TARGET_SITES,
@@ -29,6 +30,37 @@ SORTABLE = {
 }
 
 
+# 営業対象候補の判定に使う検索テキスト（title + description本文 + category を結合・小文字化）。
+# description は取得メモ（[Ulule] 以降）を除いた本文だけを対象にする。メモには
+# "Europe Design" 等が含まれ商品語判定を誤らせるため、Postgres の split_part で切り出す。
+# モデル側の product_assessment（_text もメモを除外）と同じ語で判定し、ページングと整合させる。
+def _search_text():
+    body = func.split_part(func.coalesce(Project.description, ""), MEMO_MARKER, 1)
+    return func.lower(
+        func.coalesce(Project.title, "")
+        + " "
+        + body
+        + " "
+        + func.coalesce(Project.category, "")
+    )
+
+
+def _non_candidate_condition():
+    """『営業対象外』の Ulule 案件を表す SQL 条件。
+
+    Ulule 案件で、非商品語を含み、かつ商品語を一切含まないものを営業対象外とする
+    （app.ai.ulule.product_assessment の is_sales_target_candidate と同じ定義）。
+    """
+    text = _search_text()
+    has_non_product = or_(*[text.like(f"%{kw.lower()}%") for kw in NON_PRODUCT_KEYWORDS])
+    has_product = or_(*[text.like(f"%{kw.lower()}%") for kw in PRODUCT_KEYWORDS])
+    return and_(
+        Project.source_site == SourceSite.ulule.value,
+        has_non_product,
+        not_(has_product),
+    )
+
+
 def get_project(db: Session, project_id: int) -> Project | None:
     return db.get(Project, project_id)
 
@@ -42,6 +74,7 @@ def list_projects(
     q: str | None = None,
     min_score: int | None = None,
     recommendation: str | None = None,
+    candidates_only: bool = False,
     sort: str = "created_at",
     order: str = "desc",
     page: int = 1,
@@ -67,6 +100,9 @@ def list_projects(
         conditions.append(Project.latest_score >= min_score)
     if recommendation:
         conditions.append(Project.latest_recommendation == recommendation)
+    if candidates_only:
+        # 営業対象候補のみ（営業対象外っぽい Ulule 案件を除外）。
+        conditions.append(not_(_non_candidate_condition()))
 
     base = select(Project)
     count_stmt = select(func.count()).select_from(Project)

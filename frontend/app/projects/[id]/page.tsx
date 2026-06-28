@@ -140,6 +140,12 @@ export default function ProjectDetail() {
           <StatusBadge status={project.status} />
         </div>
 
+        {!project.is_sales_target_candidate && (
+          <p className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800">
+            ⚠ 営業対象外の可能性あり（寄付・観光・文化活動・イベント・団体支援など、物販ではない案件の可能性）
+          </p>
+        )}
+
         {project.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -149,9 +155,9 @@ export default function ProjectDetail() {
           />
         )}
 
-        {project.description && (
+        {(project.description_clean ?? project.description) && (
           <p className="mt-4 whitespace-pre-wrap text-slate-700">
-            {project.description}
+            {project.description_clean ?? project.description}
           </p>
         )}
 

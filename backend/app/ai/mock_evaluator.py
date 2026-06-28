@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 
 from app.ai.evaluator import AXES, EvaluationResult, Evaluator, score_to_recommendation
+from app.ai.ulule import product_assessment as ulule_product
 from app.ai.ulule import signals as ulule_signals
 from app.models.project import Project
 
@@ -78,6 +79,12 @@ class MockEvaluator(Evaluator):
                 # 映画/音楽/寄付など営業対象外寄りは減点
                 axis["営業すべきか"] = _clamp(axis["営業すべきか"] - 15)
                 axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] - 10)
+            # 寄付/観光/文化/団体支援などの非商品（営業対象外）は大きく減点する
+            if not ulule_product(project)["is_sales_target_candidate"]:
+                axis["営業すべきか"] = _clamp(axis["営業すべきか"] - 40)
+                axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] - 30)
+                axis["Makuake向き"] = _clamp(axis["Makuake向き"] - 25)
+                axis["GreenFunding向き"] = _clamp(axis["GreenFunding向き"] - 25)
 
         # AXES の順序を保証
         axis_scores = {k: int(axis[k]) for k in AXES}

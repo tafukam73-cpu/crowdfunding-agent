@@ -37,6 +37,9 @@ def list_projects(
     recommendation: str | None = Query(
         None, pattern="^(high|mid|low)$", description="推奨度で絞り込み"
     ),
+    candidates_only: bool = Query(
+        False, description="営業対象候補のみ（営業対象外っぽい Ulule 案件を除外）"
+    ),
     sort: str = Query("created_at", description="並び替えキー"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -50,6 +53,7 @@ def list_projects(
         q=q,
         min_score=min_score,
         recommendation=recommendation,
+        candidates_only=candidates_only,
         sort=sort,
         order=order,
         page=page,

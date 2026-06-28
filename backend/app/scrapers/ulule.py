@@ -32,6 +32,10 @@ from app.models.scrape_run import ErrorKind
 from app.schemas.project import ProjectCreate
 from app.scrapers.base import BaseScraper, ScraperStructureError
 from app.scrapers.useragents import ua_for_attempt
+from app.util.text import html_to_text
+
+# 保存する本文の最大長（HTML 除去後）。長すぎる説明文はここでトリムする。
+DESCRIPTION_MAX_LEN = 4000
 
 logger = logging.getLogger("scraper.ulule")
 
@@ -230,7 +234,7 @@ def normalize(card: dict, detail: dict | None, category_label: str | None) -> Pr
         source_site=SourceSite.ulule,
         source_url=card.get("href"),
         category=category_label,
-        description=detail.get("description"),
+        description=html_to_text(detail.get("description"), max_len=DESCRIPTION_MAX_LEN),
         image_url=detail.get("image") or card.get("img"),
         video_url=None,
         currency=currency,
@@ -372,9 +376,11 @@ def _build_memo(
 def normalize_api(it: dict) -> ProjectCreate:
     """Ulule 検索 API の 1 件 → ProjectCreate（source_site=ulule）。"""
     name = _api_name(it) or "(no title)"
-    desc = _api_localized(it.get("description_yourself")) or _api_localized(
+    raw_desc = _api_localized(it.get("description_yourself")) or _api_localized(
         it.get("description")
     )
+    # API の説明文には HTML（<p>/<img>/<figure> 等）が含まれるため本文だけ抽出する。
+    desc = html_to_text(raw_desc, max_len=DESCRIPTION_MAX_LEN)
     currency = (it.get("currency") or "EUR").upper()
     raised = _api_decimal(it.get("amount_raised"))
     goal = _api_decimal(it.get("goal"))

@@ -27,6 +27,8 @@ export type Project = {
   source_url: string | null;
   category: string | null;
   description: string | null;
+  // HTML 除去済みの読みやすい概要（表示はこちらを優先）
+  description_clean: string | null;
   image_url: string | null;
   video_url: string | null;
   currency: string;
@@ -44,6 +46,10 @@ export type Project = {
   maker_id: number | null;
   latest_availability: AvailabilityVerdict | null;
   latest_availability_at: string | null;
+  // 商品性 / 営業対象判定（Ulule 案件のみ算出。それ以外は null / true）
+  physical_product_score: number | null;
+  sales_target_score: number | null;
+  is_sales_target_candidate: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -248,6 +254,7 @@ export type ListParams = {
   q?: string;
   min_score?: number;
   recommendation?: Recommendation | "";
+  candidates_only?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   page?: number;
@@ -433,6 +440,7 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   if (params.q) qs.set("q", params.q);
   if (params.min_score != null) qs.set("min_score", String(params.min_score));
   if (params.recommendation) qs.set("recommendation", params.recommendation);
+  if (params.candidates_only) qs.set("candidates_only", "true");
   if (params.sort) qs.set("sort", params.sort);
   if (params.order) qs.set("order", params.order);
   qs.set("page", String(params.page ?? 1));
@@ -747,6 +755,32 @@ export async function runContactDiscovery(
     method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 問い合わせフォーム / SNS DM 用の短文アウトリーチ文。
+export type OutreachMessage = {
+  channel: string;
+  channel_label: string;
+  text: string;
+  char_count: number;
+};
+
+// メール以外のチャネル向けの短文アウトリーチ文を生成（生成のみ・保存しない）。
+// channel 省略時はサーバ側で推奨チャネルを使う。
+export async function fetchOutreachMessage(
+  id: number,
+  channel?: string
+): Promise<OutreachMessage> {
+  const qs = channel ? `?channel=${encodeURIComponent(channel)}` : "";
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/outreach-message${qs}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

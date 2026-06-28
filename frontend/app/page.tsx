@@ -41,6 +41,8 @@ export default function Home() {
   const [status, setStatus] = useState<ProjectStatus | "">("");
   const [q, setQ] = useState("");
   const [recommendation, setRecommendation] = useState<Recommendation | "">("");
+  // 既定では営業対象候補のみ表示（寄付/観光/文化など非商品の Ulule 案件を除外）
+  const [candidatesOnly, setCandidatesOnly] = useState(true);
   const [sort, setSort] = useState("created_at");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -54,6 +56,7 @@ export default function Home() {
       status,
       q,
       recommendation,
+      candidates_only: candidatesOnly,
       sort,
       order,
       page,
@@ -67,7 +70,7 @@ export default function Home() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [site, status, q, recommendation, sort, order, page, reloadKey]);
+  }, [site, status, q, recommendation, candidatesOnly, sort, order, page, reloadKey]);
 
   async function onEvaluateAll() {
     try {
@@ -206,6 +209,21 @@ export default function Home() {
           </label>
 
           <label className="flex flex-col text-xs text-slate-500">
+            営業対象
+            <select
+              className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
+              value={candidatesOnly ? "candidates" : "all"}
+              onChange={(e) => {
+                setPage(1);
+                setCandidatesOnly(e.target.value === "candidates");
+              }}
+            >
+              <option value="candidates">営業対象候補のみ</option>
+              <option value="all">営業対象外を含む</option>
+            </select>
+          </label>
+
+          <label className="flex flex-col text-xs text-slate-500">
             並び替え
             <select
               className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
@@ -282,6 +300,14 @@ export default function Home() {
                       >
                         {p.title}
                       </Link>
+                      {!p.is_sales_target_candidate && (
+                        <span
+                          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                          title="寄付・観光・文化活動など物販ではない可能性"
+                        >
+                          営業対象外の可能性
+                        </span>
+                      )}
                       <div className="text-xs text-slate-400">{p.category ?? "—"}</div>
                     </td>
                     <td className="px-4 py-3">

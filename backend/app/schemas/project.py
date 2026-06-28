@@ -67,6 +67,12 @@ class ProjectOut(ProjectBase):
     maker_id: int | None = None
     latest_availability: str | None = None
     latest_availability_at: datetime | None = None
+    # HTML 除去済みの読みやすい概要（UI 表示用。元の description も併せて返す）
+    description_clean: str | None = None
+    # 商品性 / 営業対象判定（Ulule 案件のみ算出。それ以外は None / True）
+    physical_product_score: int | None = None
+    sales_target_score: int | None = None
+    is_sales_target_candidate: bool = True
     created_at: datetime
     updated_at: datetime
 

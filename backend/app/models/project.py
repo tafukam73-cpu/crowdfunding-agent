@@ -126,3 +126,36 @@ class Project(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # --- 表示用の派生プロパティ（DB 非保存。ProjectOut が from_attributes で読む） ---
+    @property
+    def description_clean(self) -> str | None:
+        """HTML を除去した読みやすい概要（UI 表示用）。"""
+        from app.ai.ulule import clean_description
+
+        return clean_description(self.description)
+
+    @property
+    def _ulule_product(self) -> dict | None:
+        """Ulule 案件のみ商品性判定を返す（それ以外は None）。"""
+        from app.ai.ulule import is_ulule, product_assessment
+
+        if not is_ulule(self):
+            return None
+        return product_assessment(self)
+
+    @property
+    def physical_product_score(self) -> int | None:
+        pa = self._ulule_product
+        return pa["physical_product_score"] if pa else None
+
+    @property
+    def sales_target_score(self) -> int | None:
+        pa = self._ulule_product
+        return pa["sales_target_score"] if pa else None
+
+    @property
+    def is_sales_target_candidate(self) -> bool:
+        """営業対象候補か。Ulule 以外は常に True（既存の営業対象サイト）。"""
+        pa = self._ulule_product
+        return pa["is_sales_target_candidate"] if pa else True
