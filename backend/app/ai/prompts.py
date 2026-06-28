@@ -143,6 +143,39 @@ def render_research_block(research: dict) -> str:
     ]
     return "\n".join(lines)
 
+
+def render_japan_sales_block(js: dict) -> str:
+    """日本販売状況チェックの結果をプロンプト用テキストに整形する。
+
+    既存代理店や EC 販売が見つからない場合は「日本市場への参入機会」を本文で自然に
+    訴求させる。逆に既存代理店や販売がある場合は、無いと断言しないよう注意させる。
+    """
+    lines = [
+        "# Japan market presence (verified check — reflect naturally, do NOT overstate)",
+        f"Sales-opportunity rating: {js.get('stars', '')}/5 (5 = not yet sold in Japan)",
+        f"Summary: {js.get('summary', '') or ''}",
+    ]
+    if js.get("no_japan_presence"):
+        lines.append(
+            "No existing Japanese distributor or e-commerce listings were found. "
+            "Emphasize this as an exciting opportunity to be the first to introduce the "
+            "product to Japan. For example: \"We could not find an existing distributor "
+            "in Japan, and we believe this creates an exciting opportunity to introduce "
+            "your product to the Japanese market.\" Frame it as what your research "
+            "suggests, not as an absolute fact."
+        )
+    elif js.get("has_distributor"):
+        lines.append(
+            "A Japanese distributor may already exist; do NOT claim there is none. "
+            "Focus on additional value (a crowdfunding launch, marketing reach)."
+        )
+    elif js.get("sold_in_japan"):
+        lines.append(
+            "The product appears to have some Japanese sales already; avoid claiming it "
+            "is unavailable in Japan. Focus on expanding reach via Makuake / GreenFunding."
+        )
+    return "\n".join(lines)
+
 # 署名の既定テンプレート（メール設定未登録／未設定時に使用）
 DEFAULT_SIGNATURE_TEMPLATE = (
     "Best regards,\n\n"
@@ -289,12 +322,14 @@ def build_email_prompt(
     tone: EmailTone = DEFAULT_TONE,
     personalization: dict | None = None,
     research: dict | None = None,
+    japan_sales: dict | None = None,
 ) -> str:
     """本文生成用のユーザープロンプトを組み立てる。
 
     personalization は personalization.build_personalization() の出力（任意）。
-    research は企業リサーチ結果（任意）。いずれも渡された場合はプロンプトに含め、
-    商品・企業ごとに本文を具体化する。
+    research は企業リサーチ結果（任意）。japan_sales は日本販売状況チェックの
+    メール文脈（任意）。いずれも渡された場合はプロンプトに含め、商品・企業ごとに
+    本文を具体化する。
     """
     profile = trim_company_profile(ctx.company_profile)
     sender_line = ", ".join(
@@ -336,6 +371,8 @@ def build_email_prompt(
         lines += ["", render_personalization_block(personalization)]
     if research:
         lines += ["", render_research_block(research)]
+    if japan_sales:
+        lines += ["", render_japan_sales_block(japan_sales)]
     lines += [
         "",
         "# Product",

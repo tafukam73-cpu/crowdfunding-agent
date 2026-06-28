@@ -974,6 +974,67 @@ export async function applyDiscoveryToCrm(
   return res.json();
 }
 
+// ===== 日本販売状況チェック =====
+export type JapanSalesStatus = "pending" | "completed" | "failed";
+
+// チャネルの販売/掲載状況
+export type ChannelStatus = "found" | "limited" | "not_found" | "unknown";
+
+export type ChannelFinding = {
+  channel: string;
+  label: string;
+  status: ChannelStatus;
+  search_url: string;
+  note: string;
+};
+
+export type JapanSalesCheck = {
+  id: number;
+  project_id: number;
+  maker_id: number | null;
+  status: JapanSalesStatus;
+  sales_value_stars: number | null;
+  channels: ChannelFinding[] | null;
+  search_queries: string[] | null;
+  ai_comment: string | null;
+  summary: string | null;
+  model: string | null;
+  notes: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export const CHANNEL_STATUS_LABELS: Record<ChannelStatus, string> = {
+  found: "販売・掲載あり",
+  limited: "一部のみ",
+  not_found: "未確認",
+  unknown: "不明",
+};
+
+// 最新の日本販売状況チェックを取得（未実行なら 204 → null）。
+export async function fetchJapanSalesCheck(
+  id: number
+): Promise<JapanSalesCheck | null> {
+  const res = await fetch(`${API_BASE}/projects/${id}/japan-sales-check`, {
+    cache: "no-store",
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 日本販売状況チェックを実行（同期）。失敗時も failed として 200 で返る。
+export async function runJapanSalesCheck(
+  id: number
+): Promise<JapanSalesCheck> {
+  const res = await fetch(`${API_BASE}/projects/${id}/japan-sales-check`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // ===== 返信メール AI サポート =====
 export type ReplyTone =
   | "professional"

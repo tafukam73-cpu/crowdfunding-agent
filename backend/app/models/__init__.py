@@ -10,6 +10,7 @@ from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivit
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.email_settings import EmailSettings
 from app.models.evaluation import AiEvaluation, Recommendation
+from app.models.japan_sales_check import JapanSalesCheck, JapanSalesStatus
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
 from app.models.project import Project, ProjectStatus, SalesStatus, SourceSite
@@ -30,6 +31,8 @@ __all__ = [
     "EmailType",
     "EmailSettings",
     "JapaneseSuccessProject",
+    "JapanSalesCheck",
+    "JapanSalesStatus",
     "JobRun",
     "JobLock",
     "JobStatus",

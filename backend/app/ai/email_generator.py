@@ -59,6 +59,7 @@ class EmailGenerator(ABC):
         ctx: SenderContext | None = None,
         tone: EmailTone = DEFAULT_TONE,
         research: dict | None = None,
+        japan_sales: dict | None = None,
     ) -> list[EmailDraftResult]:
         """案件に対し 3 種別の下書きを生成して返す。
 
@@ -66,6 +67,8 @@ class EmailGenerator(ABC):
         使い、設定未登録でも生成が動くようにする。本文末尾には署名を連結する。
         tone は文章のトーン（既定は professional）。各下書きは件名候補 3 案と
         日本語要約を含む。research は企業リサーチ結果（あれば）で、本文をより具体化
-        するために使う。None なら従来の個別化ロジックのみで生成する。
+        するために使う。japan_sales は日本販売状況チェックの文脈（あれば）で、既存
+        代理店が無ければ「日本市場への参入機会」を本文に反映する。None なら従来の
+        個別化ロジックのみで生成する。
         """
         raise NotImplementedError

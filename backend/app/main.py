@@ -21,6 +21,7 @@ from app.routers import (
     email_settings,
     evaluate,
     health,
+    japan_sales,
     japanese_success,
     projects,
     reply_assistant,
@@ -74,6 +75,7 @@ app.include_router(evaluate.router)
 app.include_router(email_drafts.router)
 app.include_router(email_settings.router)
 app.include_router(japanese_success.router)
+app.include_router(japan_sales.router)
 app.include_router(crm.router)
 app.include_router(availability.router)
 app.include_router(company_research.router)

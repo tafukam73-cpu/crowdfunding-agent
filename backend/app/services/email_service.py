@@ -17,6 +17,7 @@ from app.models.project import Project
 from app.services import (
     company_research_service,
     email_settings_service,
+    japan_sales_service,
     usage_service,
 )
 
@@ -32,6 +33,7 @@ def generate_drafts(
     tone で文章のトーンを指定（既定 professional）。各下書きは件名候補 3 案と
     日本語要約を保持する。subject には初期選択（候補の先頭）を入れる。
     最新の completed な企業リサーチがあれば、それを反映してより具体的にする。
+    最新の completed な日本販売状況チェックがあれば、既存代理店の有無などを反映する。
     """
     generator = generator or get_email_generator()
     # 保存済みメール設定を会社情報・署名コンテキストとして渡す（未登録なら
@@ -41,7 +43,13 @@ def generate_drafts(
     research = company_research_service.to_context(
         company_research_service.get_latest_completed(db, project.id)
     )
-    results = generator.generate(project, ctx, tone, research=research)
+    # 日本販売状況チェック（あれば）をメール生成へ渡す。無ければ None。
+    japan_sales = japan_sales_service.to_email_context(
+        japan_sales_service.get_latest_completed(db, project.id)
+    )
+    results = generator.generate(
+        project, ctx, tone, research=research, japan_sales=japan_sales
+    )
 
     drafts: list[EmailDraft] = []
     for r in results:

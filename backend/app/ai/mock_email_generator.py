@@ -220,6 +220,22 @@ def _apply_research(p: dict, research: dict) -> dict:
     return merged
 
 
+def _japan_opportunity_sentence(japan_sales: dict | None) -> str:
+    """日本販売状況チェックから本文に差し込む一文を作る（無ければ空文字）。
+
+    既存代理店・EC 販売とも未確認なら「日本市場への参入機会」を訴求する一文を返す。
+    """
+    if not japan_sales:
+        return ""
+    if japan_sales.get("no_japan_presence"):
+        return (
+            "We could not find an existing distributor in Japan, and we believe this "
+            "creates an exciting opportunity to introduce your product to the Japanese "
+            "market."
+        )
+    return ""
+
+
 class MockEmailGenerator(EmailGenerator):
     name = "mock-email-v1"
 
@@ -229,6 +245,7 @@ class MockEmailGenerator(EmailGenerator):
         ctx: SenderContext | None = None,
         tone: EmailTone = DEFAULT_TONE,
         research: dict | None = None,
+        japan_sales: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         title = project.title
@@ -239,6 +256,8 @@ class MockEmailGenerator(EmailGenerator):
         # 企業リサーチがあれば、より具体的な称賛・強み・日本市場適合性で上書き
         if research:
             p = _apply_research(p, research)
+        # 日本販売状況（あれば）：日本未上陸なら参入機会の一文を本文へ反映
+        japan_sentence = _japan_opportunity_sentence(japan_sales)
 
         drafts: list[EmailDraftResult] = []
         for email_type in (
@@ -248,6 +267,8 @@ class MockEmailGenerator(EmailGenerator):
         ):
             options = _subject_options(email_type, title)
             parts = _parts(project, email_type, ctx, p)
+            if japan_sentence:
+                parts["value"] = f"{parts['value']} {japan_sentence}"
             body = append_signature(_render_body(parts, greeting, tone), ctx)
             drafts.append(
                 EmailDraftResult(

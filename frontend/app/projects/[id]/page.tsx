@@ -10,6 +10,7 @@ import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
+import JapanSalesPanel from "@/components/JapanSalesPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
@@ -163,6 +164,9 @@ export default function ProjectDetail() {
             }
           />
         </div>
+
+        {/* 日本販売状況チェック（営業ワークフローのすぐ下・案件詳細の上部） */}
+        <JapanSalesPanel projectId={id} />
 
         {project.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
