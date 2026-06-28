@@ -20,15 +20,16 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.ai import ulule
+from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import Project, SalesStatus
 from app.services import (
     company_research_service,
     contact_discovery_service,
     japan_sales_service,
-    japanese_success_service,
 )
 
 logger = logging.getLogger("executive_summary")
@@ -356,8 +357,27 @@ def synthesize(sig: dict) -> dict:
     }
 
 
+def _has_similar_category(db: Session, project: Project) -> bool:
+    """同カテゴリの日本成功事例が存在するかを軽量に判定する（EXISTS・全件走査しない）。
+
+    Executive Summary は画面表示で都度呼ばれるため、全成功事例をロードして Python で
+    スコアリングする find_similar は使わず、安価な EXISTS だけで類似シグナルを得る。
+    詳細な類似事例は「類似する日本の成功事例」パネル（実行/表示時）で確認する。
+    """
+    cat = (project.category or "").strip()
+    if not cat:
+        return False
+    return bool(
+        db.scalar(select(exists().where(JapaneseSuccessProject.category == cat)))
+    )
+
+
 def _gather_signals(db: Session, project: Project) -> dict:
-    """DB から各情報源を集め、synthesize() 用の正規化シグナルにする。"""
+    """DB から各情報源を集め、synthesize() 用の正規化シグナルにする。
+
+    すべて保存済みデータの軽量読み取り（最新行 or EXISTS）で構成し、重い再計算や
+    外部アクセスは行わない。
+    """
     # 日本販売状況
     js_ctx = japan_sales_service.to_email_context(
         japan_sales_service.get_latest_completed(db, project.id)
@@ -371,16 +391,20 @@ def _gather_signals(db: Session, project: Project) -> dict:
     # 企業リサーチ
     cr = company_research_service.get_latest_completed(db, project.id)
 
-    # 日本成功事例との類似（最上位の類似度）
-    sims = japanese_success_service.find_similar(db, project, limit=1)
-    similarity_top = sims[0][1] if sims else None
+    # 日本成功事例との類似（軽量な EXISTS のみ。同カテゴリがあれば類似度高とみなす）
+    similarity_top = 70 if _has_similar_category(db, project) else None
 
-    # Ulule 専用スコア
+    # Ulule 専用スコア（product_assessment は 1 回だけ算出して使い回す）
     is_ulule = ulule.is_ulule(project)
     u_axis: dict = {}
+    is_candidate = True
+    u_sales_target: int | None = None
     if is_ulule:
         try:
             u_axis = ulule.ulule_axis_scores(project)
+            pa = ulule.product_assessment(project)
+            is_candidate = pa["is_sales_target_candidate"]
+            u_sales_target = pa["sales_target_score"]
         except Exception:  # noqa: BLE001  シグナル算出失敗は無視（要約は継続）
             u_axis = {}
 
@@ -403,12 +427,12 @@ def _gather_signals(db: Session, project: Project) -> dict:
         "research_japan_fit": (cr.japan_market_fit or "") if cr else "",
         "similarity_top": similarity_top,
         "is_ulule": is_ulule,
-        "is_sales_target_candidate": project.is_sales_target_candidate,
+        "is_sales_target_candidate": is_candidate,
         "ulule_europe_design": u_axis.get("europe_design_score"),
         "ulule_sustainability": u_axis.get("sustainability_score"),
         "ulule_gift": u_axis.get("gift_potential_score"),
         "ulule_jp_lifestyle": u_axis.get("japan_lifestyle_fit_score"),
-        "ulule_sales_target_score": project.sales_target_score,
+        "ulule_sales_target_score": u_sales_target,
         "sales_status": project.sales_status,
         "category": project.category,
     }

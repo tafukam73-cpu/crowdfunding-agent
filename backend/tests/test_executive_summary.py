@@ -200,6 +200,42 @@ def test_build_summary_end_to_end() -> None:
     db.close()
 
 
+def test_lightweight_similarity() -> None:
+    print("軽量類似シグナル（同カテゴリ EXISTS・全件走査しない）")
+    from app.models.japanese_success import JapaneseSuccessProject
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = Session(engine)
+    project = Project(
+        title="Eco Bottle",
+        source_site="kickstarter",
+        currency="USD",
+        category="キッチン",
+    )
+    db.add(project)
+    db.add(
+        JapaneseSuccessProject(
+            title="まほうびん",
+            platform="makuake",
+            source_url="https://www.makuake.com/project/x1",
+            category="キッチン",
+            currency="JPY",
+        )
+    )
+    db.commit()
+    db.refresh(project)
+    check("同カテゴリ成功事例を EXISTS で検出", ess._has_similar_category(db, project) is True)
+    sig = ess._gather_signals(db, project)
+    check("類似シグナルが立つ", sig["similarity_top"] == 70)
+
+    # カテゴリ不一致なら類似なし
+    project.category = "ガジェット"
+    db.commit()
+    check("不一致カテゴリは類似なし", ess._has_similar_category(db, project) is False)
+    db.close()
+
+
 def main() -> int:
     test_high_value()
     test_distributor_present()
@@ -208,6 +244,7 @@ def main() -> int:
     test_actions_branching()
     test_ulule_high_signals()
     test_build_summary_end_to_end()
+    test_lightweight_similarity()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

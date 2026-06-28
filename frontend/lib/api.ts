@@ -2,6 +2,37 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// 画面表示用 GET の既定タイムアウト（ミリ秒）。応答が無いまま画面が固まるのを防ぐ。
+export const DEFAULT_TIMEOUT_MS = 12000;
+
+// fetch にタイムアウト（AbortController）を付与する共通ヘルパー。
+// 一定時間で必ず打ち切り、「ページが応答しません」で固まらないようにする。
+// cache は既定で no-store（常に最新の保存済みデータを読む）。
+export async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`${API_BASE}${path}`, {
+      cache: "no-store",
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(
+        `タイムアウト：${Math.round(timeoutMs / 1000)}秒以内に応答がありませんでした`
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type SourceSite =
   | "kickstarter"
   | "indiegogo"
@@ -414,9 +445,7 @@ export type ScrapeStats = {
 
 // サイト別の取得成功率・エラー種別内訳・構造変化の疑い（直近 window 件）。
 export async function fetchScrapeStats(window = 20): Promise<ScrapeStats> {
-  const res = await fetch(`${API_BASE}/scrape/stats?window=${window}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/scrape/stats?window=${window}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -513,9 +542,7 @@ export type SalesDashboard = {
 };
 
 export async function fetchWorkflow(id: number): Promise<Workflow> {
-  const res = await fetch(`${API_BASE}/projects/${id}/workflow`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/workflow`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -536,16 +563,14 @@ export async function updateSalesStatus(
 export async function fetchTodayProjects(
   limit = 10
 ): Promise<TodayProject[]> {
-  const res = await fetch(`${API_BASE}/sales/today?limit=${limit}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/sales/today?limit=${limit}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   const data = await res.json();
   return data.items as TodayProject[];
 }
 
 export async function fetchSalesDashboard(): Promise<SalesDashboard> {
-  const res = await fetch(`${API_BASE}/sales/dashboard`, { cache: "no-store" });
+  const res = await apiFetch(`/sales/dashboard`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -563,15 +588,13 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   qs.set("page", String(params.page ?? 1));
   qs.set("page_size", String(params.page_size ?? 20));
 
-  const res = await fetch(`${API_BASE}/projects?${qs.toString()}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects?${qs.toString()}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export async function fetchProject(id: number): Promise<Project> {
-  const res = await fetch(`${API_BASE}/projects/${id}`, { cache: "no-store" });
+  const res = await apiFetch(`/projects/${id}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -675,16 +698,14 @@ export async function runScrape(site?: SourceSite, limit = 10): Promise<ScrapeRu
 }
 
 export async function fetchScrapeRuns(limit = 10): Promise<ScrapeRun[]> {
-  const res = await fetch(`${API_BASE}/scrape/runs?limit=${limit}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/scrape/runs?limit=${limit}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 // 日次スケジューラの状態とサイト別の最終実行結果。
 export async function fetchScheduleStatus(): Promise<ScheduleStatus> {
-  const res = await fetch(`${API_BASE}/scrape/last`, { cache: "no-store" });
+  const res = await apiFetch(`/scrape/last`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -706,9 +727,7 @@ export async function evaluateProject(id: number): Promise<Evaluation> {
 }
 
 export async function fetchEvaluations(id: number): Promise<Evaluation[]> {
-  const res = await fetch(`${API_BASE}/projects/${id}/evaluations`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/evaluations`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -749,7 +768,7 @@ export type UsageSummary = {
 };
 
 export async function fetchUsageSummary(): Promise<UsageSummary> {
-  const res = await fetch(`${API_BASE}/usage/summary`, { cache: "no-store" });
+  const res = await apiFetch(`/usage/summary`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -786,15 +805,13 @@ export async function selectEmailSubject(
 }
 
 export async function fetchEmailDrafts(id: number): Promise<EmailDraft[]> {
-  const res = await fetch(`${API_BASE}/projects/${id}/email-drafts`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/email-drafts`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export async function fetchEmailProvider(): Promise<EmailProviderInfo> {
-  const res = await fetch(`${API_BASE}/email/provider`, { cache: "no-store" });
+  const res = await apiFetch(`/email/provider`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -830,9 +847,7 @@ export type CompanyResearch = {
 export async function fetchCompanyResearch(
   id: number
 ): Promise<CompanyResearch | null> {
-  const res = await fetch(`${API_BASE}/projects/${id}/company-research`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/company-research`);
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -909,9 +924,7 @@ export type ApplyToCrmResult = {
 export async function fetchContactDiscovery(
   id: number
 ): Promise<ContactDiscovery | null> {
-  const res = await fetch(`${API_BASE}/projects/${id}/contact-discovery`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/contact-discovery`);
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -1014,9 +1027,7 @@ export const EXECUTIVE_CHANNEL_LABELS: Record<ExecutiveChannel, string> = {
 export async function fetchExecutiveSummary(
   id: number
 ): Promise<ExecutiveSummary> {
-  const res = await fetch(`${API_BASE}/projects/${id}/executive-summary`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/executive-summary`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -1063,9 +1074,7 @@ export const CHANNEL_STATUS_LABELS: Record<ChannelStatus, string> = {
 export async function fetchJapanSalesCheck(
   id: number
 ): Promise<JapanSalesCheck | null> {
-  const res = await fetch(`${API_BASE}/projects/${id}/japan-sales-check`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${id}/japan-sales-check`);
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -1190,9 +1199,7 @@ export async function createReplyAssist(
 export async function fetchReplyAssists(
   projectId: number
 ): Promise<ReplyAssist[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/reply-assists`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${projectId}/reply-assists`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -1290,10 +1297,7 @@ export async function fetchSimilarJapanese(
   id: number,
   limit = 3
 ): Promise<SimilarSuccess[]> {
-  const res = await fetch(
-    `${API_BASE}/projects/${id}/similar-japanese?limit=${limit}`,
-    { cache: "no-store" }
-  );
+  const res = await apiFetch(`/projects/${id}/similar-japanese?limit=${limit}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -1320,9 +1324,7 @@ export async function fetchJapaneseSuccess(
   qs.set("page", String(params.page ?? 1));
   qs.set("page_size", String(params.page_size ?? 20));
 
-  const res = await fetch(`${API_BASE}/japanese-success?${qs.toString()}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/japanese-success?${qs.toString()}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -1445,9 +1447,7 @@ export async function fetchMakers(params: MakerParams = {}): Promise<MakerList> 
   if (params.order) qs.set("order", params.order);
   qs.set("page", String(params.page ?? 1));
   qs.set("page_size", String(params.page_size ?? 20));
-  const res = await fetch(`${API_BASE}/crm/makers?${qs.toString()}`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/crm/makers?${qs.toString()}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -1551,9 +1551,7 @@ export async function runAvailabilityCheck(
 export async function fetchAvailabilityChecks(
   projectId: number
 ): Promise<AvailabilityCheck[]> {
-  const res = await fetch(`${API_BASE}/projects/${projectId}/availability-checks`, {
-    cache: "no-store",
-  });
+  const res = await apiFetch(`/projects/${projectId}/availability-checks`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }

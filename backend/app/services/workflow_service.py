@@ -277,6 +277,9 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
         _contact_done_clause(),
         _email_done_clause(),
     )
+    # 全件を Python 側で再計算しないよう、AI 総合スコア上位だけに絞ってから優先度を
+    # 算出する（priority_score は latest_score と強く相関するため上位で十分）。
+    scan_cap = max(limit * 5, 50)
     stmt = (
         select(Project)
         .where(
@@ -284,6 +287,8 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
             Project.sales_status.in_(_READY_STATUSES),
             prepared,
         )
+        .order_by(Project.latest_score.desc().nullslast())
+        .limit(scan_cap)
     )
     rows = list(db.scalars(stmt))
 
