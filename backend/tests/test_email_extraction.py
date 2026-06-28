@@ -21,9 +21,11 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 from app.services.contact_discovery_service import (  # noqa: E402
+    classify_email_owner,
     email_exclusion_reason,
     extract_emails,
     score_email,
+    source_site_email_domain,
 )
 
 _passed = 0
@@ -121,10 +123,74 @@ def test_scores() -> None:
     check("sales@ は high", s_tier == "high")
 
 
+def test_platform_exclusion() -> None:
+    print("test_platform_exclusion")
+    # クラウドファンディング運営会社のメールは除外（理由は platform_domain）
+    for a in ("support@ulule.com", "support@kickstarter.com", "hi@indiegogo.com",
+              "info@makuake.com", "x@greenfunding.jp", "y@wadiz.kr"):
+        r = email_exclusion_reason(a)
+        check(f"{a} 除外", r is not None and r.startswith("platform_domain:"))
+
+    # source_site 一致のプラットフォームも除外（静的リストに無いドメインを想定）
+    check(
+        "source_site 一致で除外",
+        email_exclusion_reason("info@newplatform.io", source_site_domain="newplatform.io")
+        is not None,
+    )
+
+    # メーカーのメールはプラットフォーム扱いしない（採用される）
+    for a in ("sales@maker.com", "partnership@maker.com", "info@maker.com"):
+        check(f"{a} は除外しない", email_exclusion_reason(a) is None)
+
+
+def test_email_owner() -> None:
+    print("test_email_owner")
+    check("ulule は platform", classify_email_owner("support@ulule.com") == "platform")
+    check("kickstarter は platform",
+          classify_email_owner("support@kickstarter.com") == "platform")
+    check("sentry は monitoring", classify_email_owner("a@x.ingest.sentry.io") == "monitoring")
+    check("postmaster は monitoring",
+          classify_email_owner("postmaster@maker.com") == "monitoring")
+    check(
+        "公式ドメイン一致は maker",
+        classify_email_owner("sales@maker.com", official_domain="maker.com") == "maker",
+    )
+    check("公式不明は unknown", classify_email_owner("sales@maker.com") == "unknown")
+    check("source_site map", source_site_email_domain("ulule") == "ulule.com")
+
+
+def test_official_domain_score() -> None:
+    print("test_official_domain_score")
+    base, _ = score_email("info@maker.com")
+    boosted, _ = score_email("info@maker.com", official_domain="maker.com")
+    check("公式ドメイン一致でスコア上昇", boosted > base)
+    sub, _ = score_email("info@shop.maker.com", official_domain="maker.com")
+    check("サブドメイン一致でもスコア上昇", sub > base)
+
+
+def test_extract_excludes_platform() -> None:
+    print("test_extract_excludes_platform")
+    html = """
+    <a href="mailto:support@ulule.com">help</a>
+    <a href="mailto:support@kickstarter.com">ks</a>
+    <p>sales@maker.com partnership@maker.com info@maker.com</p>
+    """
+    emails = [e.lower() for e in extract_emails(html, source_site_domain="ulule.com")]
+    check("support@ulule.com 除外", "support@ulule.com" not in emails)
+    check("support@kickstarter.com 除外", "support@kickstarter.com" not in emails)
+    check("sales@maker.com 採用", "sales@maker.com" in emails)
+    check("partnership@maker.com 採用", "partnership@maker.com" in emails)
+    check("info@maker.com 採用", "info@maker.com" in emails)
+
+
 def main() -> int:
     test_exclusion_reasons()
     test_extract_emails_filters()
     test_scores()
+    test_platform_exclusion()
+    test_email_owner()
+    test_official_domain_score()
+    test_extract_excludes_platform()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

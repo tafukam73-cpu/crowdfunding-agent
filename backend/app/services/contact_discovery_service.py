@@ -105,6 +105,41 @@ EXCLUDED_EMAIL_DOMAINS = (
     "test.com",
 )
 
+# クラウドファンディング運営会社（プラットフォーム）のドメイン。
+# support@ulule.com のような運営側のメールは「営業先メーカー」ではないため
+# 営業候補から除外する（email_owner=platform）。
+PLATFORM_EMAIL_DOMAINS = (
+    "ulule.com",
+    "kickstarter.com",
+    "indiegogo.com",
+    "makuake.com",
+    "greenfunding.jp",
+    "wadiz.kr",
+)
+
+# source_site（収集元プラットフォーム）→ そのプラットフォームのドメイン。
+# 案件の source_site と一致するプラットフォームのメールを確実に除外するために使う。
+SOURCE_SITE_DOMAINS = {
+    "ulule": "ulule.com",
+    "kickstarter": "kickstarter.com",
+    "indiegogo": "indiegogo.com",
+    "makuake": "makuake.com",
+    "greenfunding": "greenfunding.jp",
+    "wadiz": "wadiz.kr",
+}
+
+
+def _domain_matches(domain: str, target: str) -> bool:
+    """domain が target と完全一致、または target のサブドメインか。"""
+    return domain == target or domain.endswith("." + target)
+
+
+def source_site_email_domain(source_site: str | None) -> str | None:
+    """source_site に対応するプラットフォームのメールドメインを返す。"""
+    if not source_site:
+        return None
+    return SOURCE_SITE_DOMAINS.get(str(source_site).lower())
+
 # 自動送信アドレスのローカル部（前方一致で除外。"noreply2@" 等も弾く）。
 _AUTO_REPLY_PREFIXES = (
     "no-reply",
@@ -146,11 +181,14 @@ def _looks_like_hash(local: str) -> bool:
     return False
 
 
-def email_exclusion_reason(email: str) -> str | None:
+def email_exclusion_reason(
+    email: str, source_site_domain: str | None = None
+) -> str | None:
     """営業に使えないメール候補なら「除外理由」を返す（使えるなら None）。
 
     理由は機械可読な文字列（テストで検証できるよう "種別:詳細" 形式）。
     sales@ / partnership@ / hello@ / info@ などの営業向け宛先は除外しない。
+    source_site_domain を渡すと、その案件の収集元プラットフォームのメールも除外する。
     """
     addr = (email or "").strip().lower()
     if "@" not in addr:
@@ -161,9 +199,17 @@ def email_exclusion_reason(email: str) -> str | None:
     if domain.endswith(_BAD_EMAIL_SUFFIX):
         return "asset_file"
 
+    # クラウドファンディング運営会社（プラットフォーム）のメールは営業先ではない
+    for d in PLATFORM_EMAIL_DOMAINS:
+        if _domain_matches(domain, d):
+            return f"platform_domain:{d}"
+    # source_site と一致するプラットフォーム（静的リストに無くても除外）
+    if source_site_domain and _domain_matches(domain, source_site_domain):
+        return f"platform_domain:{source_site_domain}"
+
     # 除外ドメイン（完全一致 / サブドメイン）
     for d in EXCLUDED_EMAIL_DOMAINS:
-        if domain == d or domain.endswith("." + d):
+        if _domain_matches(domain, d):
             return f"excluded_domain:{d}"
 
     # 自動送信アドレス（no-reply 系）
@@ -179,6 +225,48 @@ def email_exclusion_reason(email: str) -> str | None:
         return "hash_local_part"
 
     return None
+
+
+def classify_email_owner(
+    email: str,
+    official_domain: str | None = None,
+    source_site_domain: str | None = None,
+) -> str:
+    """メール候補の所有者を分類する。
+
+    - "platform"   : クラウドファンディング運営会社のドメイン
+    - "monitoring" : エラートラッキング/監視/自動送信/ハッシュ風など
+    - "maker"      : 営業先メーカーの公式サイトと同一ドメイン
+    - "unknown"    : 上記いずれにも当てはまらない
+    """
+    addr = (email or "").strip().lower()
+    if "@" not in addr:
+        return "unknown"
+    local, domain = addr.split("@", 1)
+
+    # プラットフォーム（運営会社）
+    for d in PLATFORM_EMAIL_DOMAINS:
+        if _domain_matches(domain, d):
+            return "platform"
+    if source_site_domain and _domain_matches(domain, source_site_domain):
+        return "platform"
+
+    # 監視・技術・自動送信系
+    for d in EXCLUDED_EMAIL_DOMAINS:
+        if _domain_matches(domain, d):
+            return "monitoring"
+    if (
+        local in _TECHNICAL_LOCAL_PARTS
+        or _looks_like_hash(local)
+        or any(local.startswith(p) for p in _AUTO_REPLY_PREFIXES)
+    ):
+        return "monitoring"
+
+    # メーカー公式ドメイン一致
+    if official_domain and _domain_matches(domain, official_domain):
+        return "maker"
+
+    return "unknown"
 
 # メールアドレスのローカル部によるスコア（要件 4）
 HIGH_PREFIXES = (
@@ -242,11 +330,13 @@ def score_email(email: str, official_domain: str | None = None) -> tuple[int, st
     return score, tier
 
 
-def extract_emails(html: str) -> list[str]:
+def extract_emails(html: str, source_site_domain: str | None = None) -> list[str]:
     """HTML から mailto: と本文テキストのメールアドレスを抽出（重複排除）。
 
     営業に使えない技術系・監視系・自動送信系・プレースホルダー・ハッシュ風
-    （Sentry DSN 由来など）のアドレスは email_exclusion_reason で除外する。
+    （Sentry DSN 由来など）や、クラウドファンディング運営会社（プラットフォーム）の
+    アドレスは email_exclusion_reason で除外する。source_site_domain を渡すと、
+    その案件の収集元プラットフォームのメールも除外する。
     """
     found: list[str] = []
     seen: set[str] = set()
@@ -256,7 +346,7 @@ def extract_emails(html: str) -> list[str]:
         if "@" not in addr or key in seen:
             continue
         seen.add(key)
-        if email_exclusion_reason(addr):
+        if email_exclusion_reason(addr, source_site_domain):
             continue
         found.append(addr)
     for m in EMAIL_RE.findall(html or ""):
@@ -265,7 +355,7 @@ def extract_emails(html: str) -> list[str]:
         if key in seen:
             continue
         seen.add(key)
-        if email_exclusion_reason(addr):
+        if email_exclusion_reason(addr, source_site_domain):
             continue
         found.append(addr)
     return found
@@ -708,6 +798,8 @@ def discover(
     fetch_fn は url->html|None。未指定なら既存 HTTP 基盤を使う（テストでは差し替え）。
     """
     urls, official_domain = _candidate_urls(project, research)
+    # 案件の収集元プラットフォーム（運営会社）のメールドメイン。営業候補から除外する。
+    site_domain = source_site_email_domain(getattr(project, "source_site", None))
     own_fetcher = fetch_fn is None
     fetch = fetch_fn or _default_fetcher()
 
@@ -755,14 +847,19 @@ def discover(
             if not html:
                 continue
 
-            # メール
-            for addr in extract_emails(html):
+            # メール（プラットフォーム/運営会社のメールは extract_emails で除外済み）
+            for addr in extract_emails(html, site_domain):
                 score, tier = score_email(addr, official_domain)
+                owner = classify_email_owner(addr, official_domain, site_domain)
                 key = addr.lower()
                 rec = email_map.get(key)
                 if rec is None:
                     email_map[key] = {
-                        "email": addr, "score": score, "tier": tier, "sources": [url],
+                        "email": addr,
+                        "score": score,
+                        "tier": tier,
+                        "email_owner": owner,
+                        "sources": [url],
                     }
                 else:
                     if url not in rec["sources"]:

@@ -12,6 +12,9 @@ class DiscoveredEmail(BaseModel):
     email: str
     score: int
     tier: str
+    # 所有者分類（maker / platform / monitoring / unknown）。
+    # platform は UI 非表示。過去データには無いため任意。
+    email_owner: str | None = None
     sources: list[str] = []
 
 

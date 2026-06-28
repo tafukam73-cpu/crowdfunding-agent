@@ -260,6 +260,10 @@ export default function ContactDiscoveryPanel({
   const completed = data?.status === "completed";
   const socials = SOCIAL_LABELS.filter((s) => data?.[s.key]);
   const pdfs = (data?.approach_options ?? []).filter((o) => o.channel === "pdf");
+  // 運営会社（プラットフォーム）のメールは営業先ではないため UI に表示しない
+  const discoveredEmails = (data?.discovered_emails ?? []).filter(
+    (e) => e.email_owner !== "platform"
+  );
 
   return (
     <div className="mt-8">
@@ -388,14 +392,14 @@ export default function ContactDiscoveryPanel({
             </div>
           )}
 
-          {/* 発見メール */}
-          {data.discovered_emails && data.discovered_emails.length > 0 && (
+          {/* 発見メール（運営会社=platform のメールは非表示） */}
+          {discoveredEmails.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-slate-500">
                 発見メール（優先度順）
               </p>
               <ul className="mt-1 space-y-1">
-                {data.discovered_emails.map((e) => (
+                {discoveredEmails.map((e) => (
                   <li key={e.email} className="flex flex-wrap items-center gap-2">
                     <span
                       className={`rounded px-2 py-0.5 text-xs font-medium ${

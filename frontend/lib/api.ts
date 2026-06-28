@@ -854,6 +854,8 @@ export type DiscoveredEmail = {
   email: string;
   score: number;
   tier: string;
+  // maker / platform / monitoring / unknown（platform は UI 非表示）
+  email_owner?: string | null;
   sources: string[];
 };
 
