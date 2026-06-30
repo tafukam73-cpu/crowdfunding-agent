@@ -55,6 +55,7 @@ class HttpClient:
         # 詳細ログ用
         self.last_attempts: int = 0
         self.last_status: int | None = None
+        self.last_content_type: str | None = None
 
     def _respect_rate_limit(self) -> None:
         if self._last_request_at is not None:
@@ -89,6 +90,7 @@ class HttpClient:
                 continue
 
             self.last_status = resp.status_code
+            self.last_content_type = resp.headers.get("content-type")
             if resp.status_code in RETRYABLE_STATUS:
                 logger.warning(
                     "retryable status %d (attempt %d) for %s",

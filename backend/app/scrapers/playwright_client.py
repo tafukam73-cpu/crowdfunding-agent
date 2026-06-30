@@ -54,6 +54,8 @@ class PlaywrightClient:
         self._last_request_at: float | None = None
         # 詳細ログ用
         self.last_attempts: int = 0
+        self.last_status: int | None = None
+        self.last_content_type: str | None = None
 
     # --- ブラウザ起動（遅延）。UA を指定してコンテキストを作る ---
     def _ensure(self, user_agent: str) -> None:
@@ -97,7 +99,15 @@ class PlaywrightClient:
             self._respect_rate_limit()
             page = self._context.new_page()  # type: ignore[union-attr]
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                resp = page.goto(
+                    url, wait_until="domcontentloaded", timeout=self.timeout_ms
+                )
+                if resp is not None:
+                    try:
+                        self.last_status = resp.status
+                        self.last_content_type = resp.headers.get("content-type")
+                    except Exception:  # noqa: BLE001  メタ取得失敗は無視
+                        pass
                 if self.wait_ms:
                     page.wait_for_timeout(self.wait_ms)
                 inner = page.evaluate(

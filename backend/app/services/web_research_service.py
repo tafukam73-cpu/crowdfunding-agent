@@ -1043,23 +1043,51 @@ def web_research(
             page["emails"] = page_emails
             if page_emails:
                 email_pages_count += 1
-            logger.info("web_research[%s] fetch ok: %s (%d chars, %d email(s))",
-                        pid, url, len(html), page_emails)
+
+            # このページの全リンクを一度だけ抽出して各処理で使い回す。
+            links = cds.extract_links(html, url)
+            logger.info(
+                "web_research[%s] page loaded %s: chars=%d hrefs=%d email(s)=%d",
+                pid, url, len(html), len(links), page_emails,
+            )
+            # href 一覧（先頭 20 件）をログに出す（要件 3）
+            logger.info("web_research[%s] hrefs(first20) of %s: %s",
+                        pid, url, links[:20])
 
             # SNS（ページ内の全リンクを走査。運営 SNS は除外、メーカー名一致を優先）。
             # 検索エンジンに頼らず HTML から取得する（要件 5）。
-            for link in cds.extract_links(html, url):
+            sns_counts: dict[str, int] = {}
+            before_socials = len(socials)
+            for link in links:
                 plat = _social_platform(link)
                 if not plat:
                     continue
+                sns_counts[plat] = sns_counts.get(plat, 0) + 1
                 handle = _social_handle(plat, link) or ""
                 sc = 25 + (15 if any(t in handle for t in maker_terms) else 0)
                 consider_social(plat, link, sc, f"page:{url}")
 
+            # 公式サイト候補（外部・非運営・非SNS）を数える
+            official_links = [
+                lk for lk in links
+                if not _social_platform(lk) and not _is_platform_domain(lk)
+                and not any(h in urlparse(lk).netloc.lower() for h in _NON_OFFICIAL_HOST_HINTS)
+                and cds._domain_of(lk) and cds._domain_of(lk) != cds._domain_of(url)
+            ]
+            logger.info(
+                "web_research[%s] extracted from %s: facebook=%d instagram=%d "
+                "linkedin=%d youtube=%d tiktok=%d official_candidates=%d "
+                "(socials added now=%d)",
+                pid, url, sns_counts.get("facebook", 0), sns_counts.get("instagram", 0),
+                sns_counts.get("linkedin", 0), sns_counts.get("youtube", 0),
+                sns_counts.get("tiktok", 0), len(official_links),
+                len(socials) - before_socials,
+            )
+
             # 問い合わせフォーム
             if cds._is_contact_url(url) and url not in forms:
                 forms.append(url)
-            for link in cds.extract_links(html, url):
+            for link in links:
                 if effective_domain and cds._same_domain(link, effective_domain):
                     if cds._is_contact_url(link) and link not in forms:
                         forms.append(link)
@@ -1077,9 +1105,18 @@ def web_research(
                     html, url, project_terms, maker_terms
                 ) or search_inferred_official
                 if cand:
+                    before_queue = len(crawl_urls)
                     logger.info("web_research[%s] inferred official from %s -> %s",
                                 pid, url, cand)
                     expand_official(cand, i)
+                    logger.info("web_research[%s] added crawl URLs: %d (queue now %d)",
+                                pid, len(crawl_urls) - before_queue, len(crawl_urls))
+                else:
+                    logger.info(
+                        "web_research[%s] no official site link found on %s "
+                        "(html may be JS-rendered/blocked; %d external candidates)",
+                        pid, url, len(official_links),
+                    )
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)
@@ -1194,19 +1231,50 @@ def web_research(
 
 
 def _make_fetcher():
-    """既存 HTTP 基盤を使った取得関数（url -> html|None）。"""
-    from app.scrapers.http import HttpClient
+    """取得関数（url -> html|None）。
 
-    client = HttpClient(
-        rate_limit_seconds=RATE_LIMIT_SECONDS, timeout=FETCH_TIMEOUT, retries=0
-    )
+    クラウドファンディングページ（Kickstarter/Indiegogo/Ulule 等）は Cloudflare/JS で
+    httpx だと空/403 になりやすい。そこでスクレイパーと同じ設定済み fetcher
+    （既定 Playwright）を使う。初期化に失敗したら httpx にフォールバックする。
+    取得ごとに HTTP ステータス・Content-Type・文字数をログに出す（要件 2）。
+    """
+    from app.config import settings
+
+    method = getattr(settings, "scrape_fetcher", "httpx") or "httpx"
+    try:
+        from app.scrapers.fetcher import get_fetcher
+
+        client = get_fetcher(
+            method, rate_limit_seconds=RATE_LIMIT_SECONDS,
+            timeout=FETCH_TIMEOUT, retries=1,
+        )
+    except Exception as exc:  # noqa: BLE001  Playwright 未導入等は httpx に退避
+        logger.warning(
+            "web_research fetcher init failed for '%s' (%s); falling back to httpx",
+            method, exc,
+        )
+        from app.scrapers.http import HttpClient
+
+        client = HttpClient(
+            rate_limit_seconds=RATE_LIMIT_SECONDS, timeout=FETCH_TIMEOUT, retries=1
+        )
+    logger.info("web_research fetcher: %s (method=%s)", type(client).__name__, method)
 
     def fetch(url: str) -> str | None:
         try:
-            return client.get_text(url)
+            html = client.get_text(url)
         except Exception as exc:  # noqa: BLE001  1 URL 失敗は無視
-            logger.info("fetch failed (%s): %s", url, exc)
+            logger.info(
+                "web_research fetch FAILED %s: status=%s err=%s",
+                url, getattr(client, "last_status", None), exc,
+            )
             return None
+        logger.info(
+            "web_research loaded %s: status=%s content-type=%s chars=%d",
+            url, getattr(client, "last_status", None),
+            getattr(client, "last_content_type", None), len(html or ""),
+        )
+        return html
 
     fetch._client = client  # type: ignore[attr-defined]
     return fetch
