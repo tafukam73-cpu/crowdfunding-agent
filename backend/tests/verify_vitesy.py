@@ -28,6 +28,7 @@ sys.path.insert(0, str(BACKEND))
 # web_research の INFO ログを標準出力に出す（要件1・2・5）
 logging.basicConfig(level=logging.INFO, format="LOG %(name)s: %(message)s")
 
+from app.services import search_providers as sp  # noqa: E402
 from app.services import web_research_service as w  # noqa: E402
 
 
@@ -91,6 +92,74 @@ def brave_like_search(query: str):
 brave_like_search.provider = "brave"  # type: ignore[attr-defined]
 
 
+# 実際の Brave Web Search API レスポンス構造（web.results / mixed / videos）を模した
+# ペイロード。これを parse_brave_results に通して web_research に渡すことで、
+# 「Brave レスポンス → 解析 → 探索」の全経路を検証する（要件8）。
+BRAVE_PAYLOAD = {
+    "type": "search",
+    "mixed": {"main": [{"type": "web", "index": i} for i in range(7)]},
+    "web": {
+        "results": [
+            {"title": "Vitesy – Official", "url": "https://vitesy.com/",
+             "description": "Fruit Bowl", "profile": {"url": "https://vitesy.com/"}},
+            {"title": "Contact Vitesy", "url": "https://vitesy.com/pages/contact",
+             "description": "get in touch"},
+            {"title": "About Vitesy", "url": "https://vitesy.com/about",
+             "description": "our story"},
+            {"title": "Vitesy (@vitesy) Facebook", "url": "https://www.facebook.com/vitesy/",
+             "description": "Official", "meta_url": {"hostname": "www.facebook.com"}},
+            {"title": "Vitesy Instagram", "url": "https://www.instagram.com/vitesy/",
+             "description": "Fruit Bowl"},
+            {"title": "Vitesy LinkedIn", "url": "https://www.linkedin.com/company/vitesy/",
+             "description": "company"},
+            {"title": "Indiegogo", "url": "https://www.instagram.com/indiegogo/",
+             "description": "platform"},
+            {"title": "Amazon", "url": "https://www.amazon.com/dp/B0XYZ",
+             "description": "buy"},
+        ]
+    },
+    "videos": {"results": [{"title": "v", "url": "https://www.youtube.com/watch?v=abc"}]},
+}
+
+
+def brave_parsed_search(query: str):
+    """Brave のレスポンス JSON を実パーサに通して返す（解析経路も検証）。"""
+    return sp.parse_brave_results(BRAVE_PAYLOAD)
+
+
+brave_parsed_search.provider = "brave"  # type: ignore[attr-defined]
+
+
+def _run_brave_path() -> bool:
+    print("\n=== Brave レスポンス → parse_brave_results → web_research（要件8）===")
+    parsed = sp.parse_brave_results(BRAVE_PAYLOAD)
+    print(f"  parse_brave_results: {len(parsed)} 件取得")
+    for r in parsed[:8]:
+        print(f"      {r['url']}")
+    res = w.web_research(Vitesy(), None, fetch_fn=fetch, search_fn=brave_parsed_search)
+    dc = res["debug_counts"]
+    print(f"  検索結果件数: {dc['results']} / 巡回URL: {dc['crawled']} "
+          f"(ok {dc['ok']}/fail {dc['failed']})")
+    print(f"  フロー: {res['research_flow']}")
+    checks = [
+        ("Brave解析で結果>=5", len(parsed) >= 5),
+        ("facebook.com/vitesy を解析取得",
+         any("facebook.com/vitesy" in r["url"] for r in parsed)),
+        ("検索結果件数 0→10件以上にできる素地（>=5）", dc["results"] >= 5),
+        ("巡回URL 1→10件以上", dc["crawled"] >= 10),
+        ("Facebook 発見", bool(res["discovered_socials"].get("facebook"))),
+        ("Instagram 発見", bool(res["discovered_socials"].get("instagram"))),
+        ("公式サイト発見", any("vitesy.com" in u for u in res["searched_urls"])),
+        ("運営SNS(indiegogo)を誤採用しない",
+         "indiegogo" not in (res["discovered_socials"].get("instagram") or "")),
+    ]
+    ok = True
+    for label, cond in checks:
+        print(f"  [{'OK' if cond else 'NG'}] {label}")
+        ok = ok and cond
+    return ok
+
+
 def main() -> int:
     print("=== Vitesy Fruit Bowl 再検証（公式サイト未登録ケース）===\n")
     res = w.web_research(Vitesy(), None, fetch_fn=fetch, search_fn=brave_like_search)
@@ -144,6 +213,9 @@ def main() -> int:
     for label, cond in checks:
         print(f"  [{'OK' if cond else 'NG'}] {label}")
         ok = ok and cond
+
+    ok = _run_brave_path() and ok
+
     print("\n" + ("すべて期待どおり（巡回1件問題は解消）" if ok else "未達あり"))
     return 0 if ok else 1
 

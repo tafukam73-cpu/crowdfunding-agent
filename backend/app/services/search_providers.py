@@ -19,11 +19,21 @@ query->[{url,title,snippet}] を返す呼び出し可能オブジェクトで、
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from app.config import settings
 
 logger = logging.getLogger("search_providers")
+
+# 検索 API 呼び出しにはブラウザ偽装ヘッダー（Sec-Fetch-*, Accept: text/html 等）を
+# 付けない。これらが付くと一部 API（Brave 等）がリクエストを弾き、結果が 0 件に
+# なることがある。JSON を要求するクリーンなヘッダーのみを送る。
+_API_HEADERS = {
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip",
+    "User-Agent": "crowdfunding-agent/1.0",
+}
 
 VALID_PROVIDERS = ("none", "brave", "serpapi", "tavily", "google_cse")
 
@@ -49,21 +59,70 @@ def _clean(s) -> str:
     return str(s or "").strip()
 
 
+def _result_record(r) -> dict | None:
+    """検索結果 1 件（url を持つ dict）を {url,title,snippet} に正規化する。"""
+    if not isinstance(r, dict):
+        return None
+    url = _clean(r.get("url"))
+    if not url.startswith(("http://", "https://")):
+        return None
+    return {
+        "url": url,
+        "title": _clean(r.get("title")),
+        "snippet": _clean(r.get("description") or r.get("snippet") or r.get("content")),
+    }
+
+
+def _collect_url_records(node, out: list[dict], seen: set[str], depth: int = 0) -> None:
+    """JSON を再帰的に走査し、url を持つ結果オブジェクトを収集する（構造変化への保険）。
+
+    url を持つ dict は「結果」とみなしてそれ以上潜らない（profile/meta_url など
+    入れ子の url を二重取得しない）。
+    """
+    if depth > 6:
+        return
+    if isinstance(node, dict):
+        rec = _result_record(node)
+        if rec is not None:
+            if rec["url"] not in seen:
+                seen.add(rec["url"])
+                out.append(rec)
+            return
+        for v in node.values():
+            _collect_url_records(v, out, seen, depth + 1)
+    elif isinstance(node, list):
+        for v in node:
+            _collect_url_records(v, out, seen, depth + 1)
+
+
 def parse_brave_results(payload: dict) -> list[dict]:
-    """Brave Search API のレスポンスを {url,title,snippet} に正規化する。"""
+    """Brave Search API のレスポンスを {url,title,snippet} に正規化する。
+
+    Brave のレスポンスは web / news / videos / mixed などのバケットを持つ。通常は
+    web.results に Web 検索結果が入る（mixed.main は並び順メタデータで、実体は各
+    バケット側）。web.results を最優先し、補助バケットも拾う。構造が想定外でも
+    0 件にならないよう、最後に payload 全体から url を持つ結果を再帰収集する。
+    """
     out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(r) -> None:
+        rec = _result_record(r)
+        if rec and rec["url"] not in seen:
+            seen.add(rec["url"])
+            out.append(rec)
+
     web = (payload or {}).get("web") or {}
     for r in web.get("results") or []:
-        url = _clean(r.get("url"))
-        if not url:
-            continue
-        out.append(
-            {
-                "url": url,
-                "title": _clean(r.get("title")),
-                "snippet": _clean(r.get("description")),
-            }
-        )
+        add(r)
+    # 補助バケット（news / faq / discussions）も Web ページ URL を持つ
+    for key in ("news", "faq", "discussions"):
+        bucket = (payload or {}).get(key) or {}
+        for r in bucket.get("results") or []:
+            add(r)
+    # web.results が空でも、構造変化に備えて payload 全体から再帰収集（保険）
+    if not out:
+        _collect_url_records(payload, out, seen)
     return out
 
 
@@ -142,8 +201,23 @@ def _new_client():
     from app.scrapers.http import HttpClient
 
     return HttpClient(
-        rate_limit_seconds=DEFAULT_RATE_LIMIT, timeout=DEFAULT_TIMEOUT, retries=1
+        rate_limit_seconds=DEFAULT_RATE_LIMIT,
+        timeout=DEFAULT_TIMEOUT,
+        retries=1,
+        default_headers=dict(_API_HEADERS),
+        rotate_user_agent=False,
     )
+
+
+def _error_body(exc: Exception) -> str:
+    """例外に HTTP レスポンスが付いていれば本文（先頭）を取り出す（ログ用）。"""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return ""
+    try:
+        return resp.text[:1000]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _brave_search_fn(count: int):
@@ -155,16 +229,35 @@ def _brave_search_fn(count: int):
             resp = client.get(
                 BRAVE_ENDPOINT,
                 params={"q": query, "count": count},
-                headers={
-                    "Accept": "application/json",
-                    "X-Subscription-Token": settings.brave_search_api_key,
-                },
+                headers={"X-Subscription-Token": settings.brave_search_api_key},
             )
-            payload = resp.json()
-        except Exception as exc:  # noqa: BLE001
-            logger.info("brave search failed (%s): %s", query, exc)
+        except Exception as exc:  # noqa: BLE001  ステータス・本文を必ずログに残す
+            logger.warning(
+                "Brave search error '%s': %s | body=%s",
+                query, exc, _error_body(exc),
+            )
             return []
-        return parse_brave_results(payload)[:count]
+        try:
+            payload = resp.json()
+        except Exception as exc:  # noqa: BLE001  非 JSON はそのまま記録
+            logger.warning(
+                "Brave non-JSON response '%s': status=%s body=%s",
+                query, resp.status_code, resp.text[:1000],
+            )
+            return []
+        results = parse_brave_results(payload)
+        logger.info(
+            "Brave search '%s': status=%s, %d result(s)",
+            query, resp.status_code, len(results),
+        )
+        # 0 件ならレスポンス JSON を丸ごと（先頭）ログに出して原因を可視化する
+        if not results:
+            try:
+                raw = json.dumps(payload, ensure_ascii=False)[:2000]
+            except Exception:  # noqa: BLE001
+                raw = str(payload)[:2000]
+            logger.warning("Brave 0 results '%s' raw=%s", query, raw)
+        return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
     search.provider = "brave"  # type: ignore[attr-defined]
@@ -186,9 +279,12 @@ def _serpapi_search_fn(count: int):
                 },
             )
         except Exception as exc:  # noqa: BLE001
-            logger.info("serpapi search failed (%s): %s", query, exc)
+            logger.warning("SerpAPI search error '%s': %s | body=%s",
+                           query, exc, _error_body(exc))
             return []
-        return parse_serpapi_results(payload)[:count]
+        results = parse_serpapi_results(payload)
+        logger.info("SerpAPI search '%s': %d result(s)", query, len(results))
+        return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
     search.provider = "serpapi"  # type: ignore[attr-defined]
@@ -210,9 +306,12 @@ def _tavily_search_fn(count: int):
                 },
             )
         except Exception as exc:  # noqa: BLE001
-            logger.info("tavily search failed (%s): %s", query, exc)
+            logger.warning("Tavily search error '%s': %s | body=%s",
+                           query, exc, _error_body(exc))
             return []
-        return parse_tavily_results(payload)[:count]
+        results = parse_tavily_results(payload)
+        logger.info("Tavily search '%s': %d result(s)", query, len(results))
+        return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
     search.provider = "tavily"  # type: ignore[attr-defined]
@@ -234,9 +333,12 @@ def _google_cse_search_fn(count: int):
                 },
             )
         except Exception as exc:  # noqa: BLE001
-            logger.info("google_cse search failed (%s): %s", query, exc)
+            logger.warning("Google CSE search error '%s': %s | body=%s",
+                           query, exc, _error_body(exc))
             return []
-        return parse_google_cse_results(payload)[:count]
+        results = parse_google_cse_results(payload)
+        logger.info("Google CSE search '%s': %d result(s)", query, len(results))
+        return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
     search.provider = "google_cse"  # type: ignore[attr-defined]

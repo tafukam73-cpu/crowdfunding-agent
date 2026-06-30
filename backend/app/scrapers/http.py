@@ -38,12 +38,19 @@ class HttpClient:
         rate_limit_seconds: float = 2.0,
         timeout: float = 30.0,
         retries: int = 2,
+        default_headers: dict | None = None,
+        rotate_user_agent: bool = True,
     ) -> None:
         self.rate_limit_seconds = rate_limit_seconds
         self.retries = retries
+        # rotate_user_agent=False の場合、試行ごとのブラウザ UA 偽装をやめる
+        # （JSON 検索 API など、ブラウザ偽装ヘッダーが不要/有害な呼び出し向け）。
+        self.rotate_user_agent = rotate_user_agent
         self._last_request_at: float | None = None
         self._client = httpx.Client(
-            timeout=timeout, follow_redirects=True, headers=DEFAULT_HEADERS
+            timeout=timeout,
+            follow_redirects=True,
+            headers=default_headers if default_headers is not None else DEFAULT_HEADERS,
         )
         # 詳細ログ用
         self.last_attempts: int = 0
@@ -67,8 +74,10 @@ class HttpClient:
         for attempt in range(self.retries + 1):
             self.last_attempts = attempt + 1
             self._respect_rate_limit()
-            # 試行ごとに UA を変える（403/ボット対策）
-            req_headers = {"User-Agent": ua_for_attempt(attempt)}
+            # 試行ごとに UA を変える（403/ボット対策）。API 呼び出しでは無効化できる。
+            req_headers: dict = {}
+            if self.rotate_user_agent:
+                req_headers["User-Agent"] = ua_for_attempt(attempt)
             if headers:
                 req_headers.update(headers)
             try:

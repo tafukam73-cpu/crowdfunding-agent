@@ -64,6 +64,90 @@ def test_parsers() -> None:
     check("None 安全", sp.parse_serpapi_results(None) == [])
 
 
+# PowerShell で取得した Brave Web Search API レスポンスを模した実構造。
+# web.results に Web 結果、mixed.main は並び順メタデータ、videos は別バケット。
+# 各結果には profile.url / meta_url / thumbnail などの入れ子 url も含む。
+BRAVE_VITESY_RESPONSE = {
+    "type": "search",
+    "query": {"original": "Vitesy Facebook"},
+    "mixed": {
+        "type": "mixed",
+        "main": [
+            {"type": "web", "index": 0, "all": False},
+            {"type": "web", "index": 1, "all": False},
+            {"type": "videos", "all": True},
+        ],
+    },
+    "web": {
+        "type": "search",
+        "results": [
+            {
+                "title": "Vitesy (@vitesy) • Instagram / Facebook",
+                "url": "https://www.facebook.com/vitesy/",
+                "description": "Official Vitesy Facebook page.",
+                "profile": {
+                    "name": "Facebook",
+                    "url": "https://www.facebook.com/",
+                    "img": "https://imgs.search.brave.com/abc.ico",
+                },
+                "meta_url": {"hostname": "www.facebook.com"},
+                "thumbnail": {"src": "https://imgs.search.brave.com/thumb.jpg"},
+            },
+            {
+                "title": "Vitesy – Natural Technology",
+                "url": "https://www.vitesy.com/",
+                "description": "Vitesy official site. Fruit Bowl and more.",
+                "profile": {"url": "https://www.vitesy.com/"},
+            },
+            {
+                "title": "Vitesy | LinkedIn",
+                "url": "https://www.linkedin.com/company/vitesy/",
+                "description": "Vitesy company page on LinkedIn.",
+            },
+        ],
+    },
+    "videos": {
+        "type": "videos",
+        "results": [
+            {"title": "Vitesy video", "url": "https://www.youtube.com/watch?v=xyz"}
+        ],
+    },
+}
+
+
+def test_brave_real_response() -> None:
+    """要件7：実レスポンス構造から facebook.com/vitesy を最低1件取得できる。"""
+    print("test_brave_real_response")
+    results = sp.parse_brave_results(BRAVE_VITESY_RESPONSE)
+    urls = [r["url"] for r in results]
+    check("facebook.com/vitesy を取得", "https://www.facebook.com/vitesy/" in urls)
+    check("公式サイト vitesy.com を取得", "https://www.vitesy.com/" in urls)
+    check("linkedin.com/company/vitesy を取得",
+          "https://www.linkedin.com/company/vitesy/" in urls)
+    check("web.results を3件取得（profile等の入れ子urlを誤収集しない）", len(results) == 3)
+    check("入れ子の facebook.com トップは含めない",
+          "https://www.facebook.com/" not in urls)
+    fb = next(r for r in results if "facebook.com/vitesy" in r["url"])
+    check("title/snippet も取得", bool(fb["title"]) and bool(fb["snippet"]))
+
+
+def test_brave_fallback_when_structure_unexpected() -> None:
+    """web.results が無い想定外構造でも、再帰収集で結果を拾える（0件にしない）。"""
+    print("test_brave_fallback_when_structure_unexpected")
+    weird = {
+        "results": {
+            "main": [
+                {"title": "Vitesy FB", "url": "https://www.facebook.com/vitesy/",
+                 "description": "x"},
+            ]
+        }
+    }
+    results = sp.parse_brave_results(weird)
+    urls = [r["url"] for r in results]
+    check("想定外構造でも facebook.com/vitesy を取得",
+          "https://www.facebook.com/vitesy/" in urls)
+
+
 def test_resolution() -> None:
     print("test_resolution")
     _reset()
@@ -96,6 +180,8 @@ def test_resolution() -> None:
 
 def main() -> int:
     test_parsers()
+    test_brave_real_response()
+    test_brave_fallback_when_structure_unexpected()
     test_resolution()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
