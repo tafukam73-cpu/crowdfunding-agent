@@ -124,6 +124,14 @@ class ContactDiscovery(Base):
     web_researched: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # 生成したキーワード候補（project_title / short_title / maker_name /
+    # brand_names / official_domain など。検索戦略のデバッグ表示用）
+    web_keyword_candidates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 生成した検索クエリ全体（優先度順。実行したのは web_searched_queries）
+    web_generated_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 検索結果のスコアリング履歴
+    # [{query, url, title, score, kind, adopted, reason}]
+    web_search_results: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 実行した検索クエリ / 探索した URL
     web_searched_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
     web_searched_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)

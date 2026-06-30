@@ -51,6 +51,30 @@ class WebCandidatePage(BaseModel):
     type: str | None = None
 
 
+class WebKeywordCandidates(BaseModel):
+    """検索語の素材になるキーワード候補（検索戦略のデバッグ表示用）。"""
+
+    project_title: str | None = None
+    short_title: str | None = None
+    maker_name: str | None = None
+    brand_names: list[str] = []
+    official_domain: str | None = None
+    domain_name: str | None = None
+    source_site: str | None = None
+
+
+class WebSearchResult(BaseModel):
+    """検索結果 1 件のスコアリング履歴（採用/除外理由つき）。"""
+
+    query: str | None = None
+    url: str
+    title: str | None = None
+    score: int | None = None
+    kind: str | None = None      # social / pdf / page / excluded
+    adopted: bool | None = None
+    reason: str | None = None
+
+
 class DiscoveredPdf(BaseModel):
     url: str
     label: str | None = None
@@ -109,6 +133,9 @@ class ContactDiscoveryOut(BaseModel):
 
     # --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
     web_researched: bool = False
+    web_keyword_candidates: WebKeywordCandidates | None = None
+    web_generated_queries: list[str] | None = None
+    web_search_results: list[WebSearchResult] | None = None
     web_searched_queries: list[str] | None = None
     web_searched_urls: list[str] | None = None
     web_candidate_pages: list[WebCandidatePage] | None = None

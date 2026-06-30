@@ -910,6 +910,28 @@ export type DiscoveredPdf = {
   relevant: boolean | null;
 };
 
+// AI Web Research が生成したキーワード候補（検索戦略のデバッグ表示用）。
+export type WebKeywordCandidates = {
+  project_title: string | null;
+  short_title: string | null;
+  maker_name: string | null;
+  brand_names: string[];
+  official_domain: string | null;
+  domain_name: string | null;
+  source_site: string | null;
+};
+
+// 検索結果 1 件のスコアリング履歴（採用/除外理由つき）。
+export type WebSearchResult = {
+  query: string | null;
+  url: string;
+  title: string | null;
+  score: number | null;
+  kind: string | null; // social / pdf / page / excluded
+  adopted: boolean | null;
+  reason: string | null;
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
@@ -954,6 +976,9 @@ export type ContactDiscovery = {
   ai_researched_at: string | null;
   // --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
   web_researched: boolean;
+  web_keyword_candidates: WebKeywordCandidates | null;
+  web_generated_queries: string[] | null;
+  web_search_results: WebSearchResult[] | null;
   web_searched_queries: string[] | null;
   web_searched_urls: string[] | null;
   web_candidate_pages: WebCandidatePage[] | null;

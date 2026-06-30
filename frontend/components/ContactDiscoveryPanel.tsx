@@ -603,6 +603,163 @@ type WebEmail = {
   email_owner?: string | null;
 };
 
+// 🔍 検索クエリ戦略（どのキーワード/クエリで探し、何を採用/除外したか）。
+function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
+  const kw = data.web_keyword_candidates;
+  const generated = data.web_generated_queries ?? [];
+  const executed = new Set(data.web_searched_queries ?? []);
+  const results = data.web_search_results ?? [];
+
+  const hasAnything =
+    kw ||
+    generated.length > 0 ||
+    (data.web_searched_queries ?? []).length > 0 ||
+    results.length > 0;
+  if (!hasAnything) return null;
+
+  // どのクエリで SNS を発見したか（採用された social のみ）。
+  const snsHits = results.filter((r) => r.kind === "social" && r.adopted);
+  const excluded = results.filter((r) => (r.score ?? 0) < 0 || r.kind === "excluded");
+  const socials = Object.keys(data.web_discovered_socials ?? {});
+
+  return (
+    <details className="rounded-md border border-teal-200 bg-white/70 p-2 text-xs">
+      <summary className="cursor-pointer font-semibold text-teal-800">
+        🔍 検索クエリ戦略（キーワード・生成/実行クエリ・採用/除外理由）
+      </summary>
+
+      <div className="mt-2 space-y-3">
+        {/* キーワード候補 */}
+        {kw && (
+          <div>
+            <p className="font-semibold text-slate-700">検索キーワード候補</p>
+            <ul className="mt-1 space-y-0.5 text-slate-600">
+              {kw.project_title && (
+                <li>プロジェクト名: {kw.project_title}</li>
+              )}
+              {kw.short_title && <li>短縮名: {kw.short_title}</li>}
+              {kw.maker_name && <li>メーカー名: {kw.maker_name}</li>}
+              {kw.brand_names && kw.brand_names.length > 0 && (
+                <li>ブランド名候補: {kw.brand_names.join(" / ")}</li>
+              )}
+              {kw.official_domain && (
+                <li>公式ドメイン: {kw.official_domain}</li>
+              )}
+            </ul>
+          </div>
+        )}
+
+        {/* 生成クエリ全体 vs 実行済み */}
+        {generated.length > 0 && (
+          <div>
+            <p className="font-semibold text-slate-700">
+              生成クエリ {generated.length} 件（うち実行 {executed.size} 件）
+            </p>
+            <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto">
+              {generated.map((q, i) => {
+                const ran = executed.has(q);
+                return (
+                  <li key={i} className="flex items-center gap-1">
+                    <span
+                      className={`rounded px-1 text-[10px] ${
+                        ran
+                          ? "bg-teal-100 text-teal-700"
+                          : "bg-slate-100 text-slate-400"
+                      }`}
+                    >
+                      {ran ? "実行" : "未実行"}
+                    </span>
+                    <code className="break-all text-slate-700">{q}</code>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* どのクエリで SNS を発見したか */}
+        <div>
+          <p className="font-semibold text-slate-700">SNS の発見状況</p>
+          {snsHits.length > 0 ? (
+            <ul className="mt-1 space-y-0.5 text-slate-600">
+              {snsHits.map((r, i) => (
+                <li key={i} className="break-all">
+                  <span className="mr-1 rounded bg-emerald-100 px-1 text-[10px] text-emerald-700">
+                    採用 {r.score}
+                  </span>
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-700 hover:underline"
+                  >
+                    {r.url}
+                  </a>
+                  {r.query && (
+                    <span className="text-slate-400"> ← {r.query}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-slate-500">
+              {socials.length > 0
+                ? "SNS は公式サイト内リンクから取得しました（検索結果からの採用はありません）。"
+                : "SNS は発見できませんでした（検索がブロックされたか、複合クエリで該当プロフィールが見つかりませんでした）。"}
+            </p>
+          )}
+        </div>
+
+        {/* 採用された検索結果（除外以外） */}
+        {results.filter((r) => r.adopted).length > 0 && (
+          <details className="text-slate-500">
+            <summary className="cursor-pointer">
+              採用した検索結果（{results.filter((r) => r.adopted).length}）
+            </summary>
+            <ul className="mt-1 space-y-0.5">
+              {results
+                .filter((r) => r.adopted)
+                .map((r, i) => (
+                  <li key={i} className="break-all">
+                    <span className="mr-1 rounded bg-slate-100 px-1 text-[10px]">
+                      {r.kind} {r.score}
+                    </span>
+                    {r.url}
+                    {r.reason && (
+                      <span className="text-slate-400"> — {r.reason}</span>
+                    )}
+                  </li>
+                ))}
+            </ul>
+          </details>
+        )}
+
+        {/* 除外した検索結果 */}
+        {excluded.length > 0 && (
+          <details className="text-slate-500">
+            <summary className="cursor-pointer">
+              除外した検索結果（{excluded.length}）
+            </summary>
+            <ul className="mt-1 space-y-0.5">
+              {excluded.map((r, i) => (
+                <li key={i} className="break-all">
+                  <span className="mr-1 rounded bg-red-50 px-1 text-[10px] text-red-600">
+                    除外
+                  </span>
+                  {r.url}
+                  {r.reason && (
+                    <span className="text-slate-400"> — {r.reason}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // AI Web Research Mode（検索エンジン＋公式サイト横断クロールの実調査）。
 function WebResearchSection({
   projectId,
@@ -825,6 +982,9 @@ function WebResearchSection({
               </ul>
             </div>
           )}
+
+          {/* 検索クエリ戦略（折りたたみ：キーワード・生成/実行・採用/除外理由） */}
+          <SearchStrategyDetails data={data} />
 
           {/* 検索クエリ */}
           {data.web_searched_queries && data.web_searched_queries.length > 0 && (

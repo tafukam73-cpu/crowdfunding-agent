@@ -148,6 +148,82 @@ def test_query_generation() -> None:
     check("filetype:pdf クエリを含む", any("filetype:pdf" in q for q in qs))
 
 
+def test_composite_query_generation() -> None:
+    """要件 2・3：複合クエリ（タイトル×SNS、site:、タイトル×メーカー）を生成する。"""
+    print("test_composite_query_generation")
+    qs = w.build_web_search_queries(FakeProject())
+    check('"Cool Lamp" Instagram を含む', '"Cool Lamp" Instagram' in qs)
+    check('"Cool Lamp" Facebook を含む', '"Cool Lamp" Facebook' in qs)
+    check('"Cool Lamp" LinkedIn を含む', '"Cool Lamp" LinkedIn' in qs)
+    check(
+        'タイトル×メーカー複合 Instagram を含む',
+        '"Cool Lamp" "BrandCo" Instagram' in qs,
+    )
+    check("site:instagram.com を含む", any("site:instagram.com" in q for q in qs))
+    check(
+        "site:linkedin.com/company を含む",
+        any("site:linkedin.com/company" in q for q in qs),
+    )
+    check("site:tiktok.com を含む", any("site:tiktok.com" in q for q in qs))
+    check('"BrandCo" Instagram を含む', '"BrandCo" Instagram' in qs)
+    check("SNS クエリが先頭付近（優先度）", any("Instagram" in q for q in qs[:6]))
+
+
+def test_sns_normalization() -> None:
+    """要件 5：SNS URL 正規化と除外。"""
+    print("test_sns_normalization")
+    check(
+        "Instagram プロフィール正規化",
+        w.normalize_instagram("https://instagram.com/brandco?hl=en")
+        == "https://www.instagram.com/brandco/",
+    )
+    check("Instagram /p/ は除外", w.normalize_instagram("https://www.instagram.com/p/abc/") is None)
+    check(
+        "Instagram /accounts/login は除外",
+        w.normalize_instagram("https://www.instagram.com/accounts/login/") is None,
+    )
+    check(
+        "Facebook ページ正規化",
+        w.normalize_facebook("https://www.facebook.com/BrandCo/photos")
+        == "https://www.facebook.com/BrandCo",
+    )
+    check("Facebook /sharer は除外", w.normalize_facebook("https://www.facebook.com/sharer/sharer.php?u=x") is None)
+    check("Facebook /login は除外", w.normalize_facebook("https://www.facebook.com/login") is None)
+    check(
+        "LinkedIn /company/ 採用",
+        w.normalize_linkedin("https://www.linkedin.com/company/brandco/about")
+        == "https://www.linkedin.com/company/brandco/",
+    )
+    check(
+        "LinkedIn /in/ 採用",
+        w.normalize_linkedin("https://linkedin.com/in/jane-doe")
+        == "https://www.linkedin.com/in/jane-doe/",
+    )
+    check("LinkedIn /feed は除外", w.normalize_linkedin("https://www.linkedin.com/feed/") is None)
+
+
+def test_result_scoring_excludes_platform_and_noise() -> None:
+    """要件 4：運営公式 SNS・share/login 等を除外し、本人 SNS を高評価する。"""
+    print("test_result_scoring_excludes_platform_and_noise")
+    pterms = w._terms("Cool Lamp")
+    mterms = w._terms("BrandCo", "brandco")
+
+    def sc(url, title=""):
+        return w.score_search_result(
+            url, title, "", project_terms=pterms, maker_terms=mterms,
+            official_domain="brandco.com",
+        )
+
+    s_ig, _ = sc("https://www.instagram.com/brandco/", "BrandCo Cool Lamp")
+    check("本人 Instagram は高評価", s_ig >= 30)
+    s_plat, r_plat = sc("https://www.instagram.com/kickstarter/")
+    check("運営公式 Instagram は除外", s_plat < 0 and "運営" in r_plat)
+    s_share, _ = sc("https://www.facebook.com/sharer/sharer.php?u=x")
+    check("share リンクは除外", s_share < 0)
+    s_login, _ = sc("https://www.instagram.com/accounts/login/")
+    check("login は除外", s_login < 0)
+
+
 def test_ddg_parse_excludes_engine() -> None:
     print("test_ddg_parse_excludes_engine")
     html = (
@@ -160,10 +236,43 @@ def test_ddg_parse_excludes_engine() -> None:
     check("検索エンジン自身の URL は除外", all("duckduckgo.com" not in u for u in out))
 
 
+def test_platform_social_not_adopted_end_to_end() -> None:
+    """要件 4：検索結果に運営公式 SNS が混ざっても採用しない。"""
+    print("test_platform_social_not_adopted_end_to_end")
+
+    def search_with_platform(query: str):
+        return [
+            {"url": "https://www.instagram.com/kickstarter/", "title": "Kickstarter", "snippet": ""},
+            {"url": "https://www.instagram.com/brandco/", "title": "BrandCo Cool Lamp", "snippet": "Official"},
+            {"url": "https://www.facebook.com/sharer/sharer.php?u=x", "title": "share", "snippet": ""},
+        ]
+
+    res = w.web_research(
+        FakeProject(), None, fetch_fn=fake_fetch, search_fn=search_with_platform
+    )
+    ig = res["discovered_socials"].get("instagram", "")
+    check("本人 Instagram を採用", ig == "https://www.instagram.com/brandco/")
+    check("運営 Instagram を採用しない", "kickstarter" not in ig)
+    check("検索結果に採用/除外の記録がある", len(res["search_results"]) > 0)
+    check(
+        "運営 SNS は除外理由つきで記録",
+        any(
+            r["url"].endswith("/kickstarter/") and r["adopted"] is False
+            for r in res["search_results"]
+        ),
+    )
+    check("生成クエリ全体を保持", len(res["generated_queries"]) >= len(res["searched_queries"]))
+    check("キーワード候補を保持", res["keyword_candidates"]["project_title"] == "Cool Lamp")
+
+
 def main() -> int:
     test_query_generation()
+    test_composite_query_generation()
+    test_sns_normalization()
+    test_result_scoring_excludes_platform_and_noise()
     test_ddg_parse_excludes_engine()
     test_web_research_end_to_end()
+    test_platform_social_not_adopted_end_to_end()
     test_graceful_when_search_empty()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0

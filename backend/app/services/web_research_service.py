@@ -9,21 +9,27 @@
 - メールは推測で作らない。すべて実際に取得したページ本文/mailto から抽出し、
   contact_discovery_service の既存除外フィルタ（platform / sentry / no-reply /
   postmaster / hash 等）を必ず通す。各メールは出典 URL（sources）を持つ。
+- 検索クエリは企業名単体に寄せず、商品名・プロジェクト名・ブランド名・公式ドメイン
+  ・SNS 名を複合的に組み合わせて生成する（手動 Google 検索で見つかる SNS を
+  ツールでも見つけられるようにする）。
+- 検索結果はスコアリングして採用/除外を判定し、SNS URL は正規化する。クラファン
+  運営（platform）自身の公式 SNS は誤採用しない。
 - 抽出・スコアリング・推奨判定は contact_discovery_service の純粋関数を再利用する。
-- ネットワークは fetch_fn（url->html|None）/ search_fn（query->[url]）として注入でき、
-  テストはネットワーク無しで検証できる。
+- ネットワークは fetch_fn（url->html|None）/ search_fn（query->[url]|[{url,...}]）と
+  して注入でき、テストはネットワーク無しで検証できる。
 - 安全設計：クエリ数・URL 数・タイムアウト・レート制限・重複排除・robots 配慮・
   ログインページ回避。失敗してもアプリは落とさない。
 
 結果は最新の ContactDiscovery 行の web_* カラムに分離保存する（自動抽出/AI 調査を
-無条件上書きしない）。
+無条件上書きしない）。デバッグ用に「生成キーワード候補・生成クエリ全体・実行クエリ
+・検索結果のスコアと採用/除外理由」も保存する。
 """
 from __future__ import annotations
 
 import logging
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from sqlalchemy.orm import Session
 
@@ -35,9 +41,11 @@ from app.services import contact_discovery_service as cds
 logger = logging.getLogger("web_research")
 
 # --- 安全設計のパラメータ ---
-MAX_QUERIES = 10            # 実行する検索クエリ数の上限
-MAX_RESULTS_PER_QUERY = 5   # 1 クエリあたり採用する検索結果 URL 数の上限
+MAX_QUERIES = 20            # 実行する検索クエリ数の上限（MVP: 上位 15〜25）
+MAX_RESULTS_PER_QUERY = 6   # 1 クエリあたり採用する検索結果 URL 数の上限
 MAX_URLS = 25               # クロールする URL 数の上限
+MAX_SEARCH_RESULTS_SAVED = 80   # デバッグ保存する検索結果レコード数の上限
+SOCIAL_ADOPT_MIN_SCORE = 30     # 検索結果由来の SNS を採用する最低スコア
 FETCH_TIMEOUT = 8.0         # 1 ページのタイムアウト（秒）
 SEARCH_TIMEOUT = 8.0        # 検索のタイムアウト（秒）
 RATE_LIMIT_SECONDS = 1.5    # ページ/検索の間隔（過度なアクセスを避ける）
@@ -82,34 +90,220 @@ _SKIP_URL_HINTS = (
 # 検索エンジンのドメイン（検索結果に紛れる自分自身を除外）
 _SEARCH_ENGINE_HOSTS = ("duckduckgo.com", "bing.com", "google.com", "yahoo.com")
 
+# 検索結果 URL のうち、本人アカウント/実ページではないため除外する語（要件 4・5）。
+_RESULT_EXCLUDE_RE = re.compile(
+    r"(sharer|/share|/intent|/dialog|/plugins|/tr\?|oauth|/login|/signin|"
+    r"/search|/hashtag|/explore/|/accounts/login|/p/|/reel/|/reels/|/stories/)",
+    re.IGNORECASE,
+)
 
-def build_web_search_queries(project: Project) -> list[str]:
-    """要件 3 の検索クエリ候補を生成する（重複排除・順序維持）。"""
-    name = (project.maker_name or "").strip()
+# クラファン運営（platform）の SNS ハンドル。運営自身の公式 SNS を誤採用しない。
+_PLATFORM_SOCIAL_HANDLES = frozenset(
+    {
+        "kickstarter",
+        "indiegogo",
+        "ulule",
+        "ululecom",
+        "makuake",
+        "wadiz",
+        "greenfunding",
+        "greenfundingjp",
+        "campfire",
+    }
+)
+
+# キーワード抽出時に落とすありふれた語（ブランド名候補のノイズ低減）。
+_STOPWORDS = frozenset(
+    {
+        "the", "and", "for", "with", "your", "you", "our", "are", "this", "that",
+        "from", "official", "brand", "new", "now", "pro", "max", "mini", "kit",
+        "ltd", "inc", "llc", "gmbh", "the", "all", "best", "get", "buy", "shop",
+        "store", "world", "first", "more", "make", "made", "design", "designed",
+        "project", "campaign", "kickstarter", "indiegogo", "ulule", "makuake",
+        "introducing", "meet", "smart", "ultimate", "premium",
+    }
+)
+
+
+# ---------------- キーワード候補（要件 1） ----------------
+_BRAND_TOKEN_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9&']+(?:\s[A-Z][A-Za-z0-9&']+){0,2})\b"
+)
+_TITLE_SUBTITLE_SPLIT = re.compile(r"\s[\-–—|｜:：]\s|[:：|｜–—]")
+_BRACKETS_RE = re.compile(r"[\(\（\[【].*?[\)\）\]】]")
+
+
+def _short_title(title: str) -> str:
+    """タイトルから記号・副題を除いた短縮名を作る（要件 1）。"""
+    if not title:
+        return ""
+    head = _TITLE_SUBTITLE_SPLIT.split(title, 1)[0]
+    head = _BRACKETS_RE.sub("", head)
+    head = re.sub(r"\s+", " ", head).strip(" -–—|｜:：")
+    return head.strip()
+
+
+def _extract_brand_names(text: str | None, limit: int = 4) -> list[str]:
+    """説明文・リサーチ要約から Title Case のブランド名候補を抽出する（要件 1）。"""
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _BRAND_TOKEN_RE.findall(text):
+        w = re.sub(r"\s+", " ", m).strip()
+        if len(w) < 3:
+            continue
+        # 1 語のみのときはありふれた語を落とす
+        if " " not in w and w.lower() in _STOPWORDS:
+            continue
+        key = w.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def build_keyword_candidates(
+    project: Project, research: CompanyResearch | None = None
+) -> dict:
+    """検索語の素材になるキーワード候補を構造化して返す（要件 1）。"""
     title = (project.title or "").strip()
+    short = _short_title(title)
+    maker = (project.maker_name or "").strip()
     official_domain = cds._domain_of(project.maker_url)
+    domain_name = official_domain.split(".")[0] if official_domain else ""
+    source_site = str(getattr(project, "source_site", "") or "")
+
+    brand_names: list[str] = []
+    seen_brand: set[str] = set()
+
+    def add_brand(name: str | None) -> None:
+        if not name:
+            return
+        name = name.strip()
+        key = name.lower()
+        if not name or key in seen_brand:
+            return
+        # タイトル/メーカー名そのものは別枠なので重複登録しない
+        if key in (title.lower(), maker.lower(), short.lower()):
+            return
+        seen_brand.add(key)
+        brand_names.append(name)
+
+    if research is not None:
+        for name in _extract_brand_names(getattr(research, "brand_summary", None)):
+            add_brand(name)
+        for name in _extract_brand_names(getattr(research, "product_summary", None)):
+            add_brand(name)
+        add_brand(getattr(research, "maker_name", None))
+    desc = (
+        getattr(project, "description_clean", None)
+        or getattr(project, "description", None)
+        or ""
+    )
+    for name in _extract_brand_names(desc[:1500]):
+        add_brand(name)
+
+    return {
+        "project_title": title,
+        "short_title": short if short and short != title else "",
+        "maker_name": maker,
+        "brand_names": brand_names[:4],
+        "official_domain": official_domain,
+        "domain_name": domain_name,
+        "source_site": source_site,
+    }
+
+
+def build_web_search_queries(
+    project: Project, research: CompanyResearch | None = None
+) -> list[str]:
+    """複合検索クエリを優先度順に生成する（要件 2・3）。
+
+    企業名単体に寄せず、商品名/プロジェクト名/ブランド名/公式ドメイン/SNS 名を
+    複合的に組み合わせる。SNS 発見を最優先に並べる。重複排除・順序維持。
+    """
+    kw = build_keyword_candidates(project, research)
+    title = kw["project_title"]
+    short = kw["short_title"]
+    maker = kw["maker_name"]
+    domain = kw["official_domain"]
+    brands = kw["brand_names"]
+    source_site = kw["source_site"]
 
     queries: list[str] = []
     seen: set[str] = set()
 
     def add(q: str) -> None:
-        q = q.strip()
+        q = re.sub(r"\s+", " ", q).strip()
         if q and q not in seen:
             seen.add(q)
             queries.append(q)
 
-    if name:
-        for kw in ("contact", "email", "partnership", "distributor", "wholesale", "press"):
-            add(f'"{name}" {kw}')
+    # 優先度1: タイトル × メーカー の複合 SNS（最も具体的）
+    if title and maker:
+        for kwd in ("Instagram", "Facebook", "LinkedIn"):
+            add(f'"{title}" "{maker}" {kwd}')
+
+    # 優先度2: タイトルの SNS / 公式
     if title:
-        add(f'"{title}" contact')
-        add(f'"{title}" official site')
-    if official_domain:
-        add(f"site:{official_domain} contact")
-        add(f"site:{official_domain} partnership")
-        add(f"site:{official_domain} wholesale")
-        add(f"site:{official_domain} distributor")
-        add(f"site:{official_domain} filetype:pdf")
+        for kwd in ("Instagram", "Facebook", "LinkedIn", "official Instagram",
+                    "official Facebook", "official", "brand"):
+            add(f'"{title}" {kwd}')
+
+    # 優先度3: メーカー名の SNS / 連絡先
+    if maker:
+        for kwd in ("Instagram", "Facebook", "LinkedIn", "official", "contact"):
+            add(f'"{maker}" {kwd}')
+
+    # 優先度4: site: 限定（プロフィール/企業ページを直接狙う）
+    if title:
+        add(f'site:instagram.com "{title}"')
+        add(f'site:facebook.com "{title}"')
+        add(f'site:youtube.com "{title}"')
+        add(f'site:tiktok.com "{title}"')
+    if maker:
+        add(f'site:linkedin.com/company "{maker}"')
+        add(f'site:linkedin.com/in "{maker}"')
+        add(f'site:instagram.com "{maker}"')
+        add(f'site:facebook.com "{maker}"')
+
+    # 優先度5: 短縮タイトル・ブランド名の SNS（副題で埋もれた本来名で探す）
+    if short:
+        for kwd in ("Instagram", "Facebook", "official website"):
+            add(f'"{short}" {kwd}')
+    for b in brands:
+        add(f'"{b}" Instagram')
+        add(f'"{b}" official')
+
+    # 優先度6: 公式サイト探索
+    if title:
+        add(f'"{title}" official website')
+        add(f'"{title}" brand official')
+    if maker:
+        add(f'"{maker}" official website')
+    if source_site and title:
+        add(f'"{source_site}" "{title}" official')
+
+    # 優先度7: 問い合わせ探索（メールは最後でよい＝要件 9）
+    if title:
+        for kwd in ("contact", "email", "support", "partnership", "distributor"):
+            add(f'"{title}" {kwd}')
+    if maker:
+        for kwd in ("contact", "email", "partnership", "wholesale", "distributor"):
+            add(f'"{maker}" {kwd}')
+
+    # 優先度8: ドメイン site: 限定（メール/PDF）
+    if domain:
+        add(f"site:{domain} contact")
+        add(f"site:{domain} partnership")
+        add(f"site:{domain} wholesale")
+        add(f"site:{domain} distributor")
+        add(f"site:{domain} distributor filetype:pdf")
+
     return queries
 
 
@@ -120,56 +314,194 @@ _DDG_UDDG_RE = re.compile(r"uddg=([^&\"'>]+)")
 _DDG_RESULT_A_RE = re.compile(
     r'class="result__a"[^>]*href="(https?://[^"]+)"', re.IGNORECASE
 )
+# 結果ブロック（タイトル/スニペットを拾えるとスコアリング精度が上がる）。
+_DDG_RESULT_BLOCK_RE = re.compile(
+    r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
+    r'(?:.*?class="result__snippet"[^>]*>(.*?)</a>)?',
+    re.IGNORECASE | re.DOTALL,
+)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_tags(s: str) -> str:
+    return re.sub(r"\s+", " ", _TAG_RE.sub("", s or "")).strip()
+
+
+def _decode_ddg_href(href: str) -> str | None:
+    """DDG のリダイレクト href から実 URL を取り出す。"""
+    href = (href or "").strip()
+    m = _DDG_UDDG_RE.search(href)
+    if m:
+        try:
+            return unquote(m.group(1))
+        except Exception:  # noqa: BLE001
+            return None
+    if href.startswith(("http://", "https://")):
+        return href
+    return None
+
+
+def parse_duckduckgo_detailed(html: str) -> list[dict]:
+    """DDG HTML から {url,title,snippet} を抽出する（重複排除・エンジン自身は除外）。"""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def keep(url: str) -> bool:
+        if not url.startswith(("http://", "https://")):
+            return False
+        host = urlparse(url).netloc.lower()
+        if any(h in host for h in _SEARCH_ENGINE_HOSTS):
+            return False
+        return url not in seen
+
+    for href, title, snippet in _DDG_RESULT_BLOCK_RE.findall(html or ""):
+        url = _decode_ddg_href(href)
+        if not url or not keep(url):
+            continue
+        seen.add(url)
+        out.append(
+            {"url": url, "title": _strip_tags(title), "snippet": _strip_tags(snippet)}
+        )
+    # ブロック正規表現が外れても URL だけは拾う（後方互換・堅牢性）
+    for enc in _DDG_UDDG_RE.findall(html or ""):
+        try:
+            url = unquote(enc)
+        except Exception:  # noqa: BLE001
+            continue
+        if keep(url):
+            seen.add(url)
+            out.append({"url": url, "title": "", "snippet": ""})
+    return out
 
 
 def parse_duckduckgo_results(html: str) -> list[str]:
     """DuckDuckGo HTML 検索結果から上位の外部 URL を抽出する（重複排除）。"""
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def add(url: str) -> None:
-        url = url.strip()
-        if not url.startswith(("http://", "https://")):
-            return
-        host = urlparse(url).netloc.lower()
-        if any(h in host for h in _SEARCH_ENGINE_HOSTS):
-            return
-        if url not in seen:
-            seen.add(url)
-            out.append(url)
-
-    for enc in _DDG_UDDG_RE.findall(html or ""):
-        try:
-            add(unquote(enc))
-        except Exception:  # noqa: BLE001  デコード失敗は無視
-            continue
-    for direct in _DDG_RESULT_A_RE.findall(html or ""):
-        add(direct)
-    return out
+    return [r["url"] for r in parse_duckduckgo_detailed(html)]
 
 
 def _default_search_fn():
-    """DuckDuckGo HTML を使った検索関数を返す（query -> [url]）。失敗時は []。"""
+    """DuckDuckGo HTML を使った検索関数を返す（query -> [{url,title,snippet}]）。"""
     from app.scrapers.http import HttpClient
 
     client = HttpClient(
         rate_limit_seconds=RATE_LIMIT_SECONDS, timeout=SEARCH_TIMEOUT, retries=0
     )
 
-    def search(query: str) -> list[str]:
+    def search(query: str) -> list[dict]:
         url = "https://html.duckduckgo.com/html/?q=" + quote_plus(query)
         try:
             html = client.get_text(url)
         except Exception as exc:  # noqa: BLE001  検索失敗は graceful に空で返す
             logger.info("web search failed (%s): %s", query, exc)
             return []
-        return parse_duckduckgo_results(html)
+        return parse_duckduckgo_detailed(html)
 
     search._client = client  # type: ignore[attr-defined]
     return search
 
 
-# ---------------- URL 分類 ----------------
+# ---------------- SNS 正規化（要件 5） ----------------
+def normalize_instagram(url: str) -> str | None:
+    """Instagram のプロフィール URL を https://www.instagram.com/{handle}/ に正規化。
+
+    /p/ /reel/ /explore/ /accounts/login 等は本人プロフィールではないため None。
+    """
+    p = urlparse(url)
+    if "instagram.com" not in p.netloc.lower():
+        return None
+    seg = [s for s in p.path.split("/") if s]
+    if not seg:
+        return None
+    first = seg[0].lower()
+    if first in (
+        "p", "reel", "reels", "explore", "accounts", "stories", "tv",
+        "about", "directory", "developer", "legal", "privacy",
+    ):
+        return None
+    handle = seg[0]
+    if not re.fullmatch(r"[A-Za-z0-9_.]+", handle):
+        return None
+    return f"https://www.instagram.com/{handle}/"
+
+
+def normalize_facebook(url: str) -> str | None:
+    """Facebook のページ URL を正規化する。/share /login /search /groups 等は除外。"""
+    p = urlparse(url)
+    if "facebook.com" not in p.netloc.lower():
+        return None
+    seg = [s for s in p.path.split("/") if s]
+    if not seg:
+        return None
+    first = seg[0].lower()
+    if first in (
+        "share", "sharer", "sharer.php", "login", "search", "groups", "watch",
+        "marketplace", "help", "policies", "privacy", "terms", "events",
+        "l.php", "tr", "dialog", "plugins", "story.php", "permalink.php",
+    ):
+        return None
+    if first == "profile.php":
+        pid = parse_qs(p.query).get("id", [""])[0]
+        return f"https://www.facebook.com/profile.php?id={pid}" if pid else None
+    if first == "pages" and len(seg) >= 2:
+        return "https://www.facebook.com/" + "/".join(seg[:3])
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", seg[0]):
+        return None
+    return f"https://www.facebook.com/{seg[0]}"
+
+
+def normalize_linkedin(url: str) -> str | None:
+    """LinkedIn の /company/ と /in/ のみ採用。/login /feed /search 等は除外。"""
+    p = urlparse(url)
+    if "linkedin.com" not in p.netloc.lower():
+        return None
+    seg = [s for s in p.path.split("/") if s]
+    if len(seg) < 2:
+        return None
+    kind = seg[0].lower()
+    if kind in ("company", "school", "showcase"):
+        return f"https://www.linkedin.com/company/{seg[1]}/"
+    if kind == "in":
+        return f"https://www.linkedin.com/in/{seg[1]}/"
+    return None
+
+
+_NORMALIZERS = {
+    "instagram": normalize_instagram,
+    "facebook": normalize_facebook,
+    "linkedin": normalize_linkedin,
+}
+
+
+def _normalize_social(platform: str, url: str) -> str | None:
+    """プラットフォーム別に SNS URL を正規化する（twitter/youtube は素通し）。"""
+    fn = _NORMALIZERS.get(platform)
+    if fn is not None:
+        return fn(url)
+    if cds._SOCIAL_EXCLUDE.search(url):
+        return None
+    return url
+
+
+def _social_handle(platform: str, url: str) -> str | None:
+    """正規化後の SNS URL から照合用ハンドル（小文字）を取り出す。"""
+    norm = _normalize_social(platform, url)
+    if not norm:
+        return None
+    seg = [s for s in urlparse(norm).path.split("/") if s]
+    if not seg:
+        return None
+    if platform == "linkedin":
+        return seg[1].lower() if len(seg) > 1 else None
+    return seg[0].lower()
+
+
+def _is_platform_social_handle(platform: str, url: str) -> bool:
+    """クラファン運営（platform）自身の公式 SNS かどうか（要件 4 の誤採用防止）。"""
+    handle = _social_handle(platform, url)
+    return bool(handle and handle in _PLATFORM_SOCIAL_HANDLES)
+
+
+# ---------------- URL 分類・スコアリング ----------------
 def _is_skip_url(url: str) -> bool:
     low = url.lower()
     return any(h in low for h in _SKIP_URL_HINTS)
@@ -190,9 +522,85 @@ def _social_platform(url: str) -> str | None:
 
 def _is_platform_domain(url: str) -> bool:
     host = cds._domain_of(url)
-    return any(
-        cds._domain_matches(host, d) for d in cds.PLATFORM_EMAIL_DOMAINS
-    )
+    return any(cds._domain_matches(host, d) for d in cds.PLATFORM_EMAIL_DOMAINS)
+
+
+def _terms(*texts: str) -> set[str]:
+    """検索語照合に使う有意トークン集合（3 文字以上・ストップワード除外）。"""
+    terms: set[str] = set()
+    for t in texts:
+        for tok in re.findall(r"[a-z0-9]+", (t or "").lower()):
+            if len(tok) >= 3 and tok not in _STOPWORDS:
+                terms.add(tok)
+    return terms
+
+
+def score_search_result(
+    url: str,
+    title: str,
+    snippet: str,
+    *,
+    project_terms: set[str],
+    maker_terms: set[str],
+    official_domain: str | None,
+) -> tuple[int, str]:
+    """検索結果 URL をスコアリングし、(score, reason) を返す（要件 4）。
+
+    score < 0 は除外（reason に理由）。0 以上は採用候補（reason に採用理由）。
+    """
+    low_url = url.lower()
+    plat = _social_platform(url)
+
+    # --- 除外（低評価） ---
+    if _RESULT_EXCLUDE_RE.search(low_url):
+        return -1, "excluded:share/login/search/hashtag等のURL"
+    if _is_platform_domain(url):
+        return -1, "excluded:クラファン運営ドメイン"
+    if plat and _is_platform_social_handle(plat, url):
+        return -1, f"excluded:運営自身の公式{plat}"
+
+    # --- 加点 ---
+    host = urlparse(url).netloc.lower()
+    path = urlparse(url).path.lower()
+    url_blob = host + " " + path.replace("/", " ").replace("-", " ").replace("_", " ")
+    text_blob = f"{title} {snippet}".lower()
+
+    score = 0
+    reasons: list[str] = []
+
+    if project_terms and any(t in url_blob for t in project_terms):
+        score += 30
+        reasons.append("URLにタイトル主要語")
+    if maker_terms and any(t in url_blob for t in maker_terms):
+        score += 25
+        reasons.append("URLにメーカー名")
+
+    has_proj_text = bool(project_terms) and any(t in text_blob for t in project_terms)
+    has_maker_text = bool(maker_terms) and any(t in text_blob for t in maker_terms)
+    if has_proj_text and has_maker_text:
+        score += 25
+        reasons.append("タイトル＋メーカー名が本文に")
+    elif has_proj_text or has_maker_text:
+        score += 10
+        reasons.append("関連語が本文に")
+
+    if official_domain and cds._same_domain(url, official_domain):
+        score += 30
+        reasons.append("公式ドメイン一致")
+
+    if plat == "instagram" and normalize_instagram(url):
+        score += 35
+        reasons.append("Instagramプロフィール")
+    elif plat == "facebook" and normalize_facebook(url):
+        score += 30
+        reasons.append("Facebookページ")
+    elif plat == "linkedin" and normalize_linkedin(url):
+        score += 35
+        reasons.append("LinkedIn企業/個人ページ")
+
+    if not reasons:
+        return 0, "弱い一致（採用しない）"
+    return score, ", ".join(reasons)
 
 
 def _page_type(url: str, official_domain: str | None) -> str:
@@ -240,6 +648,23 @@ def _seed_and_known_urls(project: Project, research: CompanyResearch | None) -> 
     return seeds
 
 
+def _as_result(item) -> dict | None:
+    """search_fn の戻り値（str か dict）を {url,title,snippet} に正規化する。"""
+    if isinstance(item, str):
+        url = item.strip()
+        return {"url": url, "title": "", "snippet": ""} if url else None
+    if isinstance(item, dict):
+        url = str(item.get("url") or "").strip()
+        if not url:
+            return None
+        return {
+            "url": url,
+            "title": str(item.get("title") or ""),
+            "snippet": str(item.get("snippet") or ""),
+        }
+    return None
+
+
 def web_research(
     project: Project,
     research: CompanyResearch | None = None,
@@ -249,49 +674,117 @@ def web_research(
 ) -> dict:
     """Web リサーチ本体（DB 非依存）。集計した結果 dict を返す。
 
-    fetch_fn(url)->html|None, search_fn(query)->[url] を注入できる（テスト用）。
-    未指定なら DuckDuckGo HTML 検索 + 既存 HTTP 基盤を使う。
+    fetch_fn(url)->html|None, search_fn(query)->[url]|[{url,title,snippet}] を注入
+    できる（テスト用）。未指定なら DuckDuckGo HTML 検索 + 既存 HTTP 基盤を使う。
     """
     official = project.maker_url or ""
     official_domain = cds._domain_of(official)
     site_domain = cds.source_site_email_domain(getattr(project, "source_site", None))
+
+    keywords = build_keyword_candidates(project, research)
+    project_terms = _terms(keywords["project_title"], keywords["short_title"])
+    maker_terms = _terms(
+        keywords["maker_name"], keywords["domain_name"], *keywords["brand_names"]
+    )
 
     own_fetcher = fetch_fn is None
     own_search = search_fn is None
     fetch = fetch_fn or _make_fetcher()
     search = search_fn or _default_search_fn()
 
-    queries = build_web_search_queries(project)
+    generated_queries = build_web_search_queries(project, research)
     searched_queries: list[str] = []
     search_failures = 0
 
-    # 1. 検索クエリを実行して候補 URL を集める（安全のため上限つき）
-    search_result_urls: list[str] = []
+    # 1. 検索クエリを実行 → 候補をスコアリングして採用/除外を判定（要件 3・4）
+    search_records: list[dict] = []          # デバッグ保存用（採用/除外理由つき）
+    socials: dict[str, str] = {}             # platform -> 正規化済み URL
+    social_debug: dict[str, dict] = {}       # platform -> {url, score, source}
+    pdfs: list[dict] = []
+    pdf_seen: set[str] = set()
+    page_candidates: list[tuple[int, str]] = []   # (score, url) クロール対象候補
     seen_results: set[str] = set()
+
+    def consider_social(platform: str, raw_url: str, score: int, source: str) -> bool:
+        norm = _normalize_social(platform, raw_url)
+        if not norm:
+            return False
+        if _is_platform_social_handle(platform, norm):
+            return False
+        cur = social_debug.get(platform)
+        if cur is None or score > cur["score"]:
+            socials[platform] = norm
+            social_debug[platform] = {"url": norm, "score": score, "source": source}
+        return True
+
     try:
-        for q in queries[:MAX_QUERIES]:
+        for q in generated_queries[:MAX_QUERIES]:
             searched_queries.append(q)
             try:
-                results = search(q) or []
+                raw = search(q) or []
             except Exception as exc:  # noqa: BLE001  個別失敗は無視
                 logger.info("search error (%s): %s", q, exc)
-                results = []
-            if not results:
+                raw = []
+            if not raw:
                 search_failures += 1
-            for u in results[:MAX_RESULTS_PER_QUERY]:
-                if u not in seen_results:
-                    seen_results.add(u)
-                    search_result_urls.append(u)
+            taken = 0
+            for item in raw:
+                if taken >= MAX_RESULTS_PER_QUERY:
+                    break
+                rec = _as_result(item)
+                if rec is None or rec["url"] in seen_results:
+                    continue
+                seen_results.add(rec["url"])
+                taken += 1
+                url = rec["url"]
+                score, reason = score_search_result(
+                    url, rec["title"], rec["snippet"],
+                    project_terms=project_terms, maker_terms=maker_terms,
+                    official_domain=official_domain or None,
+                )
+                kind = "excluded"
+                adopted = False
+                platform = _social_platform(url)
+                if score < 0:
+                    kind = "excluded"
+                elif platform:
+                    kind = "social"
+                    if score >= SOCIAL_ADOPT_MIN_SCORE:
+                        adopted = consider_social(
+                            platform, url, score, f"search:{q}"
+                        )
+                    if not adopted:
+                        reason = reason + "（スコア不足/正規化不可で不採用）" \
+                            if score >= 0 else reason
+                elif _is_pdf_url(url):
+                    kind = "pdf"
+                    if url not in pdf_seen:
+                        pdf_seen.add(url)
+                        name = urlparse(url).path.rsplit("/", 1)[-1] or "PDF"
+                        pdfs.append({"url": url, "label": name, "relevant": True})
+                        adopted = True
+                else:
+                    kind = "page"
+                    if not _is_skip_url(url):
+                        page_candidates.append((score, url))
+                        adopted = True
+                if len(search_records) < MAX_SEARCH_RESULTS_SAVED:
+                    search_records.append({
+                        "query": q,
+                        "url": url,
+                        "title": rec["title"][:200] or None,
+                        "score": score,
+                        "kind": kind,
+                        "adopted": adopted,
+                        "reason": reason,
+                    })
     finally:
         if own_search:
             client = getattr(search, "_client", None)
             if client is not None:
                 client.close()
 
-    # 2. クロール対象 URL を決める（公式サイト + 検索結果。social/pdf/login は除外）
-    socials: dict[str, str] = {}
-    pdfs: list[dict] = []
-    pdf_seen: set[str] = set()
+    # 2. クロール対象 URL を決める（公式サイト優先 → スコア高い検索結果ページ）
     crawl_urls: list[str] = []
     crawl_seen: set[str] = set()
 
@@ -302,28 +795,14 @@ def web_research(
             return
         if _is_skip_url(u):
             return
+        if _is_platform_domain(u) and u != (project.source_url or ""):
+            return
         crawl_seen.add(u)
         crawl_urls.append(u)
 
-    # 公式サイト・案件ページ・代表パスを優先
     for u in _seed_and_known_urls(project, research):
         add_crawl(u)
-
-    # 検索結果の振り分け
-    for u in search_result_urls:
-        platform = _social_platform(u)
-        if platform:
-            socials.setdefault(platform, u)
-            continue
-        if _is_pdf_url(u):
-            if u not in pdf_seen:
-                pdf_seen.add(u)
-                name = urlparse(u).path.rsplit("/", 1)[-1] or "PDF"
-                pdfs.append({"url": u, "label": name, "relevant": True})
-            continue
-        # 運営会社（プラットフォーム）のページは案件ページ以外はクロールしない
-        if _is_platform_domain(u) and u != (project.source_url or ""):
-            continue
+    for _score, u in sorted(page_candidates, key=lambda t: t[0], reverse=True):
         add_crawl(u)
 
     # 3. クロールして抽出
@@ -331,7 +810,6 @@ def web_research(
     candidate_pages: list[dict] = []
     email_map: dict[str, dict] = {}
     forms: list[str] = []
-    official_checked = False
 
     try:
         for url in crawl_urls:
@@ -340,8 +818,6 @@ def web_research(
             html = fetch(url)
             searched.append(url)
             candidate_pages.append({"url": url, "type": _page_type(url, official_domain)})
-            if official_domain and cds._same_domain(url, official_domain):
-                official_checked = True
             if not html:
                 continue
 
@@ -365,15 +841,14 @@ def web_research(
                     if score > rec["score"]:
                         rec["score"], rec["tier"] = score, tier
 
-            # SNS
+            # SNS（ページ内リンク。正規化 + 運営 SNS 除外）
             for platform, link in cds.extract_socials(html, url).items():
-                socials.setdefault(platform, link)
+                consider_social(platform, link, 20, f"page:{url}")
 
             # 問い合わせフォーム
             if cds._is_contact_url(url) and url not in forms:
                 forms.append(url)
-            links = cds.extract_links(html, url)
-            for link in links:
+            for link in cds.extract_links(html, url):
                 if official_domain and cds._same_domain(link, official_domain):
                     if cds._is_contact_url(link) and link not in forms:
                         forms.append(link)
@@ -420,9 +895,10 @@ def web_research(
     evidence = cds.build_evidence_summary(emails, forms, socials, "")
 
     notes_bits = [
-        f"{len(searched_queries)} query(ies)",
+        f"{len(searched_queries)}/{len(generated_queries)} query(ies) run",
         f"{len(searched)} url(s)",
         f"{len(emails)} email(s)",
+        f"{len(socials)} social(s)",
         f"score {score}",
     ]
     if search_failures:
@@ -430,13 +906,16 @@ def web_research(
             f"{search_failures} search(es) returned no results "
             "(engine may be blocking or rate-limiting)"
         )
-    if not search_result_urls:
+    if not any(r["kind"] != "excluded" for r in search_records):
         notes_bits.append(
             "no search-engine results were usable; relied on official-site crawl"
         )
 
     return {
+        "keyword_candidates": keywords,
+        "generated_queries": generated_queries,
         "searched_queries": searched_queries,
+        "search_results": search_records,
         "searched_urls": searched,
         "candidate_pages": candidate_pages,
         "discovered_emails": emails,
@@ -491,7 +970,10 @@ def run_web_research(
         result = web_research(project, research, fetch_fn=fetch_fn, search_fn=search_fn)
         row.web_researched = True
         row.web_researched_at = now
+        row.web_keyword_candidates = result["keyword_candidates"] or None
+        row.web_generated_queries = result["generated_queries"] or None
         row.web_searched_queries = result["searched_queries"] or None
+        row.web_search_results = result["search_results"] or None
         row.web_searched_urls = result["searched_urls"] or None
         row.web_candidate_pages = result["candidate_pages"] or None
         row.web_discovered_emails = result["discovered_emails"] or None
