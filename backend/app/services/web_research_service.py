@@ -528,8 +528,9 @@ def _social_platform(url: str) -> str | None:
 
 
 def _is_platform_domain(url: str) -> bool:
-    host = cds._domain_of(url)
-    return any(cds._domain_matches(host, d) for d in cds.PLATFORM_EMAIL_DOMAINS)
+    # クラファン/集約プラットフォーム（kickstarter/indiegogo/ulule/makuake/
+    # camp-fire/greenfunding/readyfor 等）を網羅判定する。
+    return cds.is_platform_url(url)
 
 
 def _terms(*texts: str) -> set[str]:
@@ -666,6 +667,7 @@ _NON_OFFICIAL_HOST_HINTS = (
     "wikipedia.", "blogspot.", "wordpress.com", "notion.so", "notion.site",
     "kickstarter.", "indiegogo.", "ulule.", "makuake.", "greenfunding.",
     "wadiz.", "gofundme.", "patreon.", "crunchbase.",
+    "camp-fire.jp", "campfire.jp", "readyfor.jp", "machi-ya.jp", "for-good.net",
     "news", "press", "magazine", "review", "blog.",
 )
 
@@ -743,31 +745,11 @@ def extract_official_from_page(
       - ドメイン名がメーカー名/タイトル主要語を含む
     を手掛かりにスコアリングし、十分な根拠があるものだけ返す（無ければ None）。
     """
-    base_domain = cds._domain_of(base_url)
-    terms = (maker_terms | project_terms) or set()
-    best: str | None = None
-    best_score = 0
-    for url, text in extract_links_with_text(html, base_url):
-        host = urlparse(url).netloc.lower()
-        if any(h in host for h in _NON_OFFICIAL_HOST_HINTS):
-            continue
-        if _is_platform_domain(url) or _social_platform(url):
-            continue
-        dom = cds._domain_of(url)
-        if not dom or dom == base_domain:
-            continue
-        low = text.lower()
-        score = 0
-        if any(h in low for h in _OFFICIAL_TEXT_HINTS):
-            score += 50
-        dom_token = dom.split(".")[0]
-        if dom_token and any(t in dom_token or dom_token in t for t in terms):
-            score += 40
-        # 根拠（テキスト/ドメイン一致）が無いリンクは公式とみなさない
-        if score >= 40 and score > best_score:
-            best_score = score
-            best = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
-    return best
+    # プラットフォーム/SNS 除外・アンカーテキスト判定は cds の共通ロジックに委譲する
+    # （kickstarter/profile 等を公式として採用しないため）。
+    return cds.extract_official_link(
+        html, base_url, (maker_terms | project_terms) or set()
+    )
 
 
 def build_fallback_queries(
@@ -826,7 +808,10 @@ def web_research(
     fetch_fn(url)->html|None, search_fn(query)->[url]|[{url,title,snippet}] を注入
     できる（テスト用）。未指定なら DuckDuckGo HTML 検索 + 既存 HTTP 基盤を使う。
     """
-    official = project.maker_url or ""
+    # maker_url がクラファン/集約プラットフォーム（kickstarter/profile 等）なら
+    # 公式サイトとして採用しない。実際の外部公式サイトはクラファン/プロフィール
+    # ページの本文リンクから推定する（要件）。
+    official = cds.official_site_or_none(project.maker_url) or ""
     official_domain = cds._domain_of(official)
     site_domain = cds.source_site_email_domain(getattr(project, "source_site", None))
 
@@ -991,13 +976,16 @@ def web_research(
     # 3. クロール待ち行列（クロール中に動的拡張する）
     crawl_urls: list[str] = []
     crawl_seen: set[str] = set()
+    # 案件ページとメーカープロフィール（kickstarter.com/profile/... 等）は、外部の
+    # 公式サイトリンクを抽出するために、プラットフォームでも巡回を許可する。
+    _platform_seed_ok = {project.source_url or "", project.maker_url or ""}
 
     def add_crawl(u: str, *, front_at: int | None = None) -> bool:
         if u in crawl_seen or not u.startswith(("http://", "https://")):
             return False
         if _is_skip_url(u):
             return False
-        if _is_platform_domain(u) and u != (project.source_url or ""):
+        if _is_platform_domain(u) and u not in _platform_seed_ok:
             return False
         crawl_seen.add(u)
         if front_at is not None:
@@ -1255,6 +1243,8 @@ def web_research(
 
     return {
         "search_provider": provider,
+        # 確定/推定した公式サイト（プラットフォーム URL は採用しない）。未発見なら None。
+        "official_site_url": cds.official_site_or_none(effective_official),
         "keyword_candidates": keywords,
         "generated_queries": generated_queries,
         "searched_queries": searched_queries,
@@ -1366,6 +1356,12 @@ def run_web_research(
         row.web_evidence_summary = result["evidence_summary"]
         row.web_notes = result["notes"]
         row.web_research_error = None
+        # 表示用の公式サイトが未設定/プラットフォームのままなら、Web 調査が推定した
+        # 実際の企業ドメインで更新する（kickstarter/profile は採用しない）。
+        if not cds.official_site_or_none(row.official_site_url) and result.get(
+            "official_site_url"
+        ):
+            row.official_site_url = result["official_site_url"]
     except Exception as exc:  # noqa: BLE001  失敗してもアプリは落とさない
         logger.warning("web research failed (project=%s): %s", project.id, exc)
         row.web_researched = True

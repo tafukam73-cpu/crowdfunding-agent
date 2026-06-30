@@ -596,6 +596,119 @@ def _domain_of(url: str | None) -> str:
     return net[4:] if net.startswith("www.") else net
 
 
+# ---------------- 公式サイト判定（プラットフォーム URL を公式として採用しない） ----------------
+# クラウドファンディング/集約プラットフォームのドメイン。これらは「企業の公式サイト」
+# ではないため official_site_url に採用しない（例: kickstarter.com/profile/xxx）。
+NON_OFFICIAL_PLATFORM_DOMAINS = (
+    "kickstarter.com",
+    "indiegogo.com",
+    "ulule.com",
+    "makuake.com",
+    "camp-fire.jp",
+    "campfire.jp",
+    "greenfunding.jp",
+    "readyfor.jp",
+    "wadiz.kr",
+    "wadiz.co.kr",
+    "gofundme.com",
+    "patreon.com",
+    "crowdfunder.co.uk",
+    "fundrazr.com",
+    "machi-ya.jp",
+    "machiya.jp",
+    "for-good.net",
+)
+
+# 公式サイト推定時に除外する SNS / マーケット / 集約サイトのホスト断片。
+_NON_OFFICIAL_LINK_HINTS = (
+    "facebook.", "instagram.", "twitter.", "x.com", "linkedin.", "youtube.",
+    "youtu.be", "tiktok.", "pinterest.", "reddit.", "medium.com", "linktr.ee",
+    "amazon.", "ebay.", "etsy.", "aliexpress.", "wikipedia.", "crunchbase.",
+    "apps.apple.com", "play.google.com",
+)
+
+# 「公式サイト」を示すアンカーテキスト（英・仏・日）。
+_OFFICIAL_TEXT_HINTS = (
+    "official website", "official site", "officialsite", "website", "web site",
+    "visit website", "visit site", "our website", "company website",
+    "site officiel", "公式サイト", "公式", "ウェブサイト", "homepage", "home page",
+    "official", "external link", "visit us", "shop now", "learn more",
+)
+
+_ANCHOR_TEXT_RE = re.compile(
+    r'<a\s[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*?>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_TAGSTRIP_RE = re.compile(r"<[^>]+>")
+
+
+def is_platform_url(url: str | None) -> bool:
+    """URL がクラファン/集約プラットフォーム（= 企業の公式サイトではない）か。"""
+    if not url:
+        return False
+    host = _domain_of(url)
+    return any(_domain_matches(host, d) for d in NON_OFFICIAL_PLATFORM_DOMAINS)
+
+
+def official_site_or_none(url: str | None) -> str | None:
+    """公式サイト候補。プラットフォーム URL（kickstarter/profile 等）なら None。"""
+    if not url or not str(url).startswith(("http://", "https://")):
+        return None
+    return None if is_platform_url(url) else url
+
+
+def significant_terms(*texts: str) -> set[str]:
+    """ドメイン照合用の有意トークン（3 文字以上の英数字）。"""
+    terms: set[str] = set()
+    for t in texts:
+        for tok in re.findall(r"[a-z0-9]+", (t or "").lower()):
+            if len(tok) >= 3:
+                terms.add(tok)
+    return terms
+
+
+def extract_official_link(
+    html: str, base_url: str, terms: set[str] | None = None
+) -> str | None:
+    """クラファン/プロフィールページ等の HTML から、外部の公式サイト URL(root) を推定。
+
+    外部リンク（プラットフォーム/SNS/マーケット/集約サイト・自ドメインを除く）のうち、
+      - アンカーテキストが「Official Website / Website / 公式サイト / External Link」等
+      - ドメイン名がメーカー名/タイトル主要語を含む
+    を手掛かりにスコアリングし、十分な根拠があるものだけ返す（無ければ None）。
+    """
+    base_domain = _domain_of(base_url)
+    terms = terms or set()
+    best: str | None = None
+    best_score = 0
+    for href, text in _ANCHOR_TEXT_RE.findall(html or ""):
+        href = (href or "").strip()
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+        absu = urljoin(base_url, href).split("#", 1)[0]
+        if not absu.startswith(("http://", "https://")):
+            continue
+        host = urlparse(absu).netloc.lower()
+        if is_platform_url(absu):
+            continue
+        if any(h in host for h in _NON_OFFICIAL_LINK_HINTS):
+            continue
+        dom = _domain_of(absu)
+        if not dom or dom == base_domain:
+            continue
+        txt = re.sub(r"\s+", " ", _TAGSTRIP_RE.sub("", text)).strip().lower()
+        score = 0
+        if any(h in txt for h in _OFFICIAL_TEXT_HINTS):
+            score += 50
+        dom_token = dom.split(".")[0]
+        if dom_token and any(t in dom_token or dom_token in t for t in terms):
+            score += 40
+        if score >= 40 and score > best_score:
+            best_score = score
+            best = f"{urlparse(absu).scheme}://{urlparse(absu).netloc}"
+    return best
+
+
 # ---------------- Contact Intelligence（評価・推奨） ----------------
 def _email_flags(emails: list[dict]) -> tuple[bool, bool, bool]:
     """メールのティア有無（high / mid(=mid,other) / low）を返す。"""
@@ -861,11 +974,13 @@ def _seed_urls(project: Project, research: CompanyResearch | None) -> list[str]:
 
 def _candidate_urls(
     project: Project, research: CompanyResearch | None
-) -> tuple[list[str], str]:
-    """探索する URL リスト（上限 MAX_URLS）と公式ドメインを返す。"""
+) -> tuple[list[str], str, str]:
+    """探索する URL リスト（上限 MAX_URLS）・公式サイト URL・公式ドメインを返す。"""
     seeds = _seed_urls(project, research)
-    official = project.maker_url or next(
-        (s for s in seeds if _domain_of(s) and "kickstarter" not in s and "indiegogo" not in s),
+    # maker_url がプラットフォーム（kickstarter/profile 等）なら公式扱いしない。
+    # 公式が不明なら、プラットフォームでない seed（research.sources の外部URL等）を使う。
+    official = official_site_or_none(project.maker_url) or next(
+        (s for s in seeds if _domain_of(s) and not is_platform_url(s)),
         "",
     )
     official_domain = _domain_of(official)
@@ -885,7 +1000,7 @@ def _candidate_urls(
         root = f"{urlparse(official).scheme}://{urlparse(official).netloc}"
         for path in KNOWN_PATHS:
             add(root + path)
-    return urls[:MAX_URLS], official_domain
+    return urls[:MAX_URLS], official, official_domain
 
 
 def _robots_disallows(client, root: str) -> list[str]:
@@ -941,7 +1056,7 @@ def discover(
 
     fetch_fn は url->html|None。未指定なら既存 HTTP 基盤を使う（テストでは差し替え）。
     """
-    urls, official_domain = _candidate_urls(project, research)
+    urls, official, official_domain = _candidate_urls(project, research)
     # 案件の収集元プラットフォーム（運営会社）のメールドメイン。営業候補から除外する。
     site_domain = source_site_email_domain(getattr(project, "source_site", None))
     own_fetcher = fetch_fn is None
@@ -969,6 +1084,10 @@ def discover(
     press_page: str | None = None
     wholesale_page: str | None = None
     official_checked = False
+    # maker_url がプラットフォームで公式が未確定なら、クラファン/プロフィールページの
+    # 本文リンクから外部公式サイトを推定する（要件）。
+    terms = significant_terms(project.title, project.maker_name)
+    inferred_official: str | None = None
 
     def _consider_page_category(u: str) -> None:
         nonlocal press_page, wholesale_page
@@ -1033,6 +1152,13 @@ def discover(
                 if p["url"] not in pdf_seen:
                     pdf_seen.add(p["url"])
                     pdfs.append(p)
+
+            # 公式サイト未確定なら、このページ（クラファン/プロフィール）本文から推定
+            if not official and inferred_official is None:
+                cand = extract_official_link(html, url, terms)
+                if cand:
+                    inferred_official = cand
+                    official_domain = _domain_of(cand)
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)
@@ -1043,7 +1169,10 @@ def discover(
     emails = sorted(email_map.values(), key=lambda e: e["score"], reverse=True)
     primary_email = emails[0]["email"] if emails else None
     primary_form = forms[0] if forms else None
-    has_official_site = bool(project.maker_url)
+    # 公式サイト：maker_url（非プラットフォーム）または本文から推定した外部ドメイン。
+    # プラットフォーム URL（kickstarter/profile 等）は公式として採用しない。
+    official_site_url = official or inferred_official or None
+    has_official_site = bool(official_site_url)
 
     # confidence（後方互換）: メールが最有力。なければフォーム/SNS の有無で段階評価。
     if emails:
@@ -1056,7 +1185,7 @@ def discover(
         confidence = 0
 
     result: dict = {
-        "official_site_url": project.maker_url,
+        "official_site_url": official_site_url,
         "primary_email": primary_email,
         "primary_contact_form_url": primary_form,
         "instagram_url": socials.get("instagram"),
@@ -1143,7 +1272,8 @@ def run_discovery(
         project_id=project.id,
         maker_id=project.maker_id,
         status=DiscoveryStatus.pending.value,
-        official_site_url=project.maker_url,
+        # プラットフォーム URL（kickstarter/profile 等）は公式として保存しない
+        official_site_url=official_site_or_none(project.maker_url),
     )
     db.add(row)
     try:
@@ -1231,7 +1361,7 @@ def _build_research_context(
         source_url=project.source_url or "",
         maker_name=project.maker_name or "",
         official_site_url=(row.official_site_url if row else None)
-        or project.maker_url
+        or official_site_or_none(project.maker_url)
         or "",
         company_sources=company_sources,
         searched_urls=(row.searched_urls if row else None) or [],
@@ -1332,7 +1462,9 @@ def run_ai_research(
         # 土台が無ければ先に自動探索を実行（要件の流れ：探索→AI 調査）
         row = run_discovery(db, project)
 
-    official_domain = _domain_of(row.official_site_url or project.maker_url)
+    official_domain = _domain_of(
+        row.official_site_url or official_site_or_none(project.maker_url)
+    )
     site_domain = source_site_email_domain(getattr(project, "source_site", None))
 
     ctx = _build_research_context(project, research, row)

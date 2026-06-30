@@ -1630,6 +1630,24 @@ export default function ContactDiscoveryPanel({
             }
           />
 
+          {/* 公式サイト（実際の企業ドメイン。クラファン/プロフィールURLは表示しない）。
+              取得できない場合は「公式サイト未発見」と表示する。 */}
+          <div className="text-xs">
+            <span className="font-semibold text-slate-500">公式サイト：</span>{" "}
+            {data.official_site_url ? (
+              <a
+                href={data.official_site_url}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-blue-700 hover:underline"
+              >
+                {data.official_site_url.replace(/^https?:\/\//, "")}
+              </a>
+            ) : (
+              <span className="text-slate-400">公式サイト未発見</span>
+            )}
+          </div>
+
           {/* 外部連絡先へのクイックリンク（短文を生成→コピー→そのまま開いて貼り付け）。
               URL が無いSNS/フォームはブランド名・案件名での検索ボタンを表示する。 */}
           <QuickContactLinks data={data} searchKeyword={searchKeyword} />
