@@ -60,8 +60,13 @@ class EmailGenerator(ABC):
         tone: EmailTone = DEFAULT_TONE,
         research: dict | None = None,
         japan_sales: dict | None = None,
+        contact: dict | None = None,
     ) -> list[EmailDraftResult]:
         """案件に対し 3 種別の下書きを生成して返す。
+
+        contact は Contact Hunter が見つけた担当者（任意）。氏名があれば冒頭挨拶を
+        "Dear {名}," に、部署のみなら "Dear {部署} Team," にする。None なら
+        メーカー名から "Hello {Maker} Team," にフォールバックする。
 
         ctx は差出人/会社情報（メール設定）。None の場合は .env フォールバックを
         使い、設定未登録でも生成が動くようにする。本文末尾には署名を連結する。

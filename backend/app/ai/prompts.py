@@ -112,7 +112,11 @@ def build_greeting(
     if person_name and person_name.strip():
         return f"Dear {person_name.strip()},"
     if department and department.strip():
-        return f"Dear {department.strip()},"
+        # 役職/部署のみ → "Dear Business Development Team," のように Team を付ける
+        dept = department.strip()
+        if not dept.lower().endswith("team"):
+            dept = f"{dept} Team"
+        return f"Dear {dept},"
     if maker_name and maker_name.strip():
         return f"Hello {maker_name.strip()} Team,"
     return "Hello Team,"
@@ -323,13 +327,15 @@ def build_email_prompt(
     personalization: dict | None = None,
     research: dict | None = None,
     japan_sales: dict | None = None,
+    contact: dict | None = None,
 ) -> str:
     """本文生成用のユーザープロンプトを組み立てる。
 
     personalization は personalization.build_personalization() の出力（任意）。
     research は企業リサーチ結果（任意）。japan_sales は日本販売状況チェックの
-    メール文脈（任意）。いずれも渡された場合はプロンプトに含め、商品・企業ごとに
-    本文を具体化する。
+    メール文脈（任意）。contact は Contact Hunter が見つけた担当者（任意。氏名/部署で
+    冒頭挨拶を Dear {名}, / Dear {部署} Team, にする）。いずれも渡された場合はプロンプト
+    に含め、商品・企業ごとに本文を具体化する。
     """
     profile = trim_company_profile(ctx.company_profile)
     sender_line = ", ".join(
@@ -339,8 +345,14 @@ def build_email_prompt(
     ) or settings.sender_company
     category = getattr(project, "category", None)
     emphasis = emphasis_for(category)
-    # 冒頭挨拶は規則に従って決定し、本文の先頭で必ずこの行を使わせる
-    greeting = build_greeting(maker_name=getattr(project, "maker_name", None))
+    # 冒頭挨拶は規則に従って決定し、本文の先頭で必ずこの行を使わせる。
+    # 担当者が見つかっていれば氏名（無ければ部署）で Dear を作る。
+    contact = contact or {}
+    greeting = build_greeting(
+        maker_name=getattr(project, "maker_name", None),
+        person_name=contact.get("name"),
+        department=contact.get("department"),
+    )
 
     lines = [
         f"Write a sales email of type '{type_label}'.",

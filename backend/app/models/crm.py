@@ -85,7 +85,11 @@ class Contact(Base):
     )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # role は役職（例: Head of Business Development）。
     role: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # 部署分類（Business Development / Partnership / Sales ...）と LinkedIn
+    department: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    linkedin_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(60), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

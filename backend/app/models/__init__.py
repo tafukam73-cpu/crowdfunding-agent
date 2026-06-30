@@ -6,6 +6,7 @@ from app.models.availability import (
 )
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
+from app.models.contact_person import ContactPerson
 from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivity
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.email_settings import EmailSettings
@@ -50,6 +51,7 @@ __all__ = [
     "ResearchStatus",
     "ContactDiscovery",
     "DiscoveryStatus",
+    "ContactPerson",
     "ReplyAssistant",
     "ReplyStatus",
     "UsageLog",

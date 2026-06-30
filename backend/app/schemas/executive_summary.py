@@ -21,5 +21,11 @@ class ExecutiveSummaryOut(BaseModel):
     japan_distributor_status: str
     contact_status: str
     japan_market_fit: str
+    # Contact Hunter（担当者発見）
+    contact_person_found: bool = False
+    contact_person_name: str | None = None
+    contact_person_title: str | None = None
+    contact_person_department: str | None = None
+    contact_person_priority: int | None = None
     reasons: list[str]
     cautions: list[str]

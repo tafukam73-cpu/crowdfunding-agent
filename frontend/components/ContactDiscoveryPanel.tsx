@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 
 import {
   type AiCandidateEmail,
+  applyContactPersonToCrm,
   applyDiscoveryToCrm,
   type ContactDiscovery,
+  type ContactPerson,
   fetchContactDiscovery,
+  fetchContactPeople,
   fetchOutreachMessage,
   formatDateTime,
   type OutreachMessage,
   runAiContactResearch,
   runContactDiscovery,
+  runContactHunter,
   runWebResearch,
 } from "@/lib/api";
 
@@ -898,6 +902,187 @@ function WebResearchSection({
   );
 }
 
+// 営業優先度バンドの色（高=緑 / 中=琥珀 / 低=灰）。
+function priorityClass(priority: number | null): string {
+  const p = priority ?? 0;
+  if (p >= 85) return "bg-emerald-100 text-emerald-700";
+  if (p >= 70) return "bg-amber-100 text-amber-700";
+  if (p <= 40) return "bg-slate-200 text-slate-500";
+  return "bg-sky-100 text-sky-700";
+}
+
+// 👤 Contact Hunter（営業担当者の発見）。会社ではなく「誰に送るか」を出典付きで特定。
+function ContactHunterSection({
+  projectId,
+  onChanged,
+}: {
+  projectId: number;
+  onChanged?: () => void;
+}) {
+  const [people, setPeople] = useState<ContactPerson[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchContactPeople(projectId)
+      .then(setPeople)
+      .catch((e) => setError(String(e)));
+  }, [projectId]);
+
+  async function onRun() {
+    setBusy(true);
+    setError(null);
+    setMsg(null);
+    try {
+      setPeople(await runContactHunter(projectId));
+      onChanged?.();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onAddToCrm(p: ContactPerson) {
+    setMsg(null);
+    try {
+      const r = await applyContactPersonToCrm(projectId, p.id);
+      setMsg(`CRMに担当者を追加しました：${r.name ?? "(無名)"}`);
+      onChanged?.();
+    } catch (e) {
+      setMsg(`CRM反映に失敗しました：${String(e)}`);
+    }
+  }
+
+  function onUseAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setMsg(`「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`);
+  }
+
+  const hasRun = people !== null;
+
+  return (
+    <div className="rounded-md border border-rose-300 bg-rose-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-rose-900">
+            👤 Contact Hunter（営業担当者の発見）
+          </p>
+          <p className="mt-0.5 text-xs text-rose-700">
+            会社ではなく「誰に送るか」を特定します。Business Development / Partnership /
+            Export / Sales / Founder などを、公式サイトのTeam・About・Leadership・
+            LinkedInから出典付きで探します（推測の人名は作りません）。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="rounded bg-rose-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-600 disabled:opacity-50"
+        >
+          {busy ? "担当者を調査中…" : hasRun ? "担当者を再調査" : "担当者を探す"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {msg && <p className="mt-2 text-xs font-medium text-blue-700">{msg}</p>}
+
+      {hasRun && people.length === 0 && !error && (
+        <p className="mt-3 text-xs text-rose-700">
+          担当者は特定できませんでした（公式サイトのチーム/会社情報やLinkedInが非公開の
+          可能性）。推測の人名は作成していません。メール・フォーム・SNS（上のセクション）で
+          営業先を確保してください。
+        </p>
+      )}
+
+      {hasRun && people.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {people.map((p) => (
+            <li
+              key={p.id}
+              className="rounded border border-rose-200 bg-white p-3 text-sm"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`rounded px-2 py-0.5 text-xs font-semibold ${priorityClass(
+                    p.priority
+                  )}`}
+                >
+                  優先度 {p.priority ?? 0}
+                </span>
+                {p.department && (
+                  <span className="rounded bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
+                    {p.department}
+                  </span>
+                )}
+                <span className="font-semibold text-slate-900">
+                  {p.name ?? "(氏名不明)"}
+                </span>
+                {p.title && (
+                  <span className="text-xs text-slate-600">{p.title}</span>
+                )}
+                {p.confidence != null && (
+                  <span className="text-xs text-slate-400">
+                    信頼度 {p.confidence}
+                  </span>
+                )}
+              </div>
+
+              {p.email && (
+                <p className="mt-1 text-xs text-slate-700">
+                  メール: <span className="font-medium">{p.email}</span>
+                </p>
+              )}
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {p.linkedin_url && (
+                  <a
+                    href={p.linkedin_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                  >
+                    LinkedInを開く ↗
+                  </a>
+                )}
+                {p.email && <CopyButton text={p.email} label="メールをコピー" />}
+                {p.email && (
+                  <button
+                    onClick={() => onUseAsGmailTo(p.email as string)}
+                    className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                  >
+                    Gmail宛先
+                  </button>
+                )}
+                <button
+                  onClick={() => onAddToCrm(p)}
+                  className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                >
+                  CRMへ追加
+                </button>
+                {p.source_url && (
+                  <a
+                    href={p.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-slate-500 hover:underline"
+                  >
+                    出典 ↗
+                  </a>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -1013,8 +1198,10 @@ export default function ContactDiscoveryPanel({
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
-      {/* AI連絡先リサーチ（自動抽出とは区別して表示。data が無くても実行可能） */}
+      {/* Contact Hunter（誰に送るか）＋ AI連絡先リサーチ ＋ AI Web調査。
+          自動抽出 / AI調査 / Web調査 / 担当者 を区別して表示する。 */}
       <div className="mt-3 space-y-3">
+        <ContactHunterSection projectId={projectId} onChanged={onChanged} />
         <AiResearchSection
           projectId={projectId}
           data={data}

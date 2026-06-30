@@ -70,6 +70,7 @@ class ClaudeEmailGenerator(EmailGenerator):
         personalization: dict,
         research: dict | None,
         japan_sales: dict | None,
+        contact: dict | None,
     ) -> tuple[EmailDraftResult, object]:
         prompt = build_email_prompt(
             project,
@@ -80,6 +81,7 @@ class ClaudeEmailGenerator(EmailGenerator):
             personalization=personalization,
             research=research,
             japan_sales=japan_sales,
+            contact=contact,
         )
         resp = self._client.messages.create(
             model=self.model,
@@ -123,6 +125,7 @@ class ClaudeEmailGenerator(EmailGenerator):
         tone: EmailTone = DEFAULT_TONE,
         research: dict | None = None,
         japan_sales: dict | None = None,
+        contact: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         # 商品・メーカーごとの個別化材料を先に作る（全種別で共有）
@@ -136,7 +139,7 @@ class ClaudeEmailGenerator(EmailGenerator):
         in_tokens = out_tokens = 0
         for t in EMAIL_TYPES:
             result, usage = self._generate_one(
-                project, t, ctx, tone, personalization, research, japan_sales
+                project, t, ctx, tone, personalization, research, japan_sales, contact
             )
             in_tokens += usage.input_tokens
             out_tokens += usage.output_tokens

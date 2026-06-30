@@ -15,14 +15,21 @@ from sqlalchemy.orm import Session
 
 from app.ai.outreach import OUTREACH_CHANNELS
 from app.db.session import get_db
+from app.models.contact_person import ContactPerson
 from app.schemas.contact_discovery import (
     ApplyToCrmRequest,
     ApplyToCrmResult,
     ContactDiscoveryOut,
     OutreachMessageOut,
 )
+from app.schemas.contact_person import (
+    ApplyPersonToCrmRequest,
+    ApplyPersonToCrmResult,
+    ContactPersonOut,
+)
 from app.services import (
     contact_discovery_service,
+    contact_hunter_service,
     email_service,
     project_service,
     web_research_service,
@@ -110,6 +117,61 @@ def get_web_research(project_id: int, db: Session = Depends(get_db)):
     if row is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     return row
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/contact-people",
+    response_model=list[ContactPersonOut],
+)
+def run_contact_hunter(
+    project_id: int, db: Session = Depends(get_db)
+) -> list[ContactPersonOut]:
+    """Contact Hunter AI を実行し、営業担当者候補を発見・保存して返す（同期）。
+
+    会社ではなく「誰に送るか（Business Development / Partnership / Founder 等）」を
+    出典 URL 付きで特定する。人名は推測せず、出典のある人物のみ保存。Claude 未設定
+    時は決定的な HTML 抽出（モック）で動作する。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return contact_hunter_service.run_hunt(db, project)
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/contact-people",
+    response_model=list[ContactPersonOut],
+)
+def list_contact_people(
+    project_id: int, db: Session = Depends(get_db)
+) -> list[ContactPersonOut]:
+    """案件の担当者候補を営業優先度順で返す（未実行なら空配列）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return contact_hunter_service.get_people(db, project_id)
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/contact-people/apply-to-crm",
+    response_model=ApplyPersonToCrmResult,
+)
+def apply_contact_person_to_crm(
+    project_id: int,
+    payload: ApplyPersonToCrmRequest,
+    db: Session = Depends(get_db),
+) -> ApplyPersonToCrmResult:
+    """担当者を CRM の Contact として追加する（氏名・役職・部署・LinkedIn・メール）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    person = db.get(ContactPerson, payload.contact_person_id)
+    if person is None or person.project_id != project_id:
+        raise HTTPException(status_code=404, detail="担当者が見つかりません")
+    maker_id, contact_id = contact_hunter_service.apply_to_crm(db, project, person)
+    return ApplyPersonToCrmResult(
+        maker_id=maker_id, contact_id=contact_id, name=person.name, recorded=True
+    )
 
 
 @router.get(

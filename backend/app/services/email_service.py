@@ -16,10 +16,27 @@ from app.models.email_draft import EmailDraft
 from app.models.project import Project
 from app.services import (
     company_research_service,
+    contact_hunter_service,
     email_settings_service,
     japan_sales_service,
     usage_service,
 )
+
+
+def _greeting_contact(db: Session, project_id: int) -> dict | None:
+    """冒頭挨拶用の担当者（氏名は first name に短縮）を返す。
+
+    Contact Hunter の最優先担当者を使い、"Dear {名}," を可能にする。氏名が無く部署
+    だけのときは "Dear {部署} Team," 用に department を返す。担当者が無ければ None。
+    """
+    top = contact_hunter_service.get_top_person(db, project_id)
+    if top is None:
+        return None
+    first_name = None
+    if top.name:
+        parts = top.name.split()
+        first_name = parts[0] if parts else None
+    return {"name": first_name, "department": top.department}
 
 
 def generate_drafts(
@@ -47,8 +64,10 @@ def generate_drafts(
     japan_sales = japan_sales_service.to_email_context(
         japan_sales_service.get_latest_completed(db, project.id)
     )
+    # Contact Hunter が担当者を見つけていれば、冒頭挨拶を担当者名/部署にする
+    contact = _greeting_contact(db, project.id)
     results = generator.generate(
-        project, ctx, tone, research=research, japan_sales=japan_sales
+        project, ctx, tone, research=research, japan_sales=japan_sales, contact=contact
     )
 
     drafts: list[EmailDraft] = []

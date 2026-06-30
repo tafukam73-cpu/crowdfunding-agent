@@ -12,6 +12,8 @@ from app.models.crm import ActivityKind, CrmStatus
 class ContactBase(BaseModel):
     name: str = Field(..., max_length=255)
     role: str | None = None
+    department: str | None = None
+    linkedin_url: str | None = None
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
@@ -24,6 +26,8 @@ class ContactCreate(ContactBase):
 class ContactUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     role: str | None = None
+    department: str | None = None
+    linkedin_url: str | None = None
     email: str | None = None
     phone: str | None = None
     notes: str | None = None

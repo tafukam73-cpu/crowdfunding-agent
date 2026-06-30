@@ -133,6 +133,22 @@ export default function ExecutiveSummaryPanel({
         <InfoRow label="日本販売状況" value={data.japan_sales_status} />
         <InfoRow label="日本代理店" value={data.japan_distributor_status} />
         <InfoRow label="連絡先取得状況" value={data.contact_status} />
+        <InfoRow
+          label="担当者発見"
+          value={
+            data.contact_person_found
+              ? `YES${
+                  data.contact_person_department
+                    ? ` ・ ${data.contact_person_department}`
+                    : ""
+                }${
+                  data.contact_person_priority != null
+                    ? `（営業優先度 ${data.contact_person_priority}）`
+                    : ""
+                }`
+              : "未発見（Contact Hunterで担当者を探せます）"
+          }
+        />
       </div>
 
       {/* 理由・注意点 */}

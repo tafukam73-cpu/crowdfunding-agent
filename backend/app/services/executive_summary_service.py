@@ -29,6 +29,7 @@ from app.models.project import Project, SalesStatus
 from app.services import (
     company_research_service,
     contact_discovery_service,
+    contact_hunter_service,
     japan_sales_service,
 )
 
@@ -199,6 +200,20 @@ def _score(sig: dict) -> int:
     else:
         score -= 5
 
+    # Contact Hunter（担当者発見）：役職の営業優先度で加点/減点（要件のランキング規則）
+    #   Business Development / Partnership 等（>=85）→ +10
+    #   Founder / CEO / Marketing 等（70〜84）       → +5
+    #   Support 等（<=40）                            → -10
+    if sig.get("contact_person_found"):
+        cp = sig.get("contact_person_priority")
+        if cp is not None:
+            if cp >= 85:
+                score += 10
+            elif cp >= 70:
+                score += 5
+            elif cp <= 40:
+                score -= 10
+
     # 企業リサーチ
     if sig.get("research_japan_fit"):
         score += 4
@@ -292,6 +307,11 @@ def _reasons(sig: dict, contact_text: str, fit_label: str) -> list[str]:
         or sig.get("has_linkedin")
     ):
         out.append(f"連絡先が見つかっている（{contact_text}）")
+    if sig.get("contact_person_found") and (sig.get("contact_person_priority") or 0) >= 70:
+        dept = sig.get("contact_person_department") or "担当者"
+        out.append(
+            f"営業担当者を特定（{dept}・優先度{sig.get('contact_person_priority')}）"
+        )
     if sig.get("latest_score") is not None and sig["latest_score"] >= 70:
         out.append(f"AI評価が高い（{sig['latest_score']}/100）")
     st = sig.get("similarity_top")
@@ -357,6 +377,12 @@ def synthesize(sig: dict) -> dict:
         ),
         "contact_status": contact_text,
         "japan_market_fit": fit_label,
+        # Contact Hunter（担当者発見）
+        "contact_person_found": bool(sig.get("contact_person_found")),
+        "contact_person_name": sig.get("contact_person_name"),
+        "contact_person_title": sig.get("contact_person_title"),
+        "contact_person_department": sig.get("contact_person_department"),
+        "contact_person_priority": sig.get("contact_person_priority"),
         "reasons": _reasons(sig, contact_text, fit_label),
         "cautions": _cautions(sig),
     }
@@ -392,6 +418,9 @@ def _gather_signals(db: Session, project: Project) -> dict:
     # 連絡先探索（Contact Intelligence）
     cd = contact_discovery_service.get_latest(db, project.id)
     contact_checked = cd is not None
+
+    # Contact Hunter（担当者発見）の最優先担当者
+    top_person = contact_hunter_service.get_top_person(db, project.id)
 
     # 企業リサーチ
     cr = company_research_service.get_latest_completed(db, project.id)
@@ -429,6 +458,11 @@ def _gather_signals(db: Session, project: Project) -> dict:
         "has_facebook": bool(cd and cd.facebook_url),
         "contactability_score": cd.contactability_score if cd else None,
         "contact_recommended_channel": cd.recommended_channel if cd else None,
+        "contact_person_found": top_person is not None,
+        "contact_person_name": top_person.name if top_person else None,
+        "contact_person_title": top_person.title if top_person else None,
+        "contact_person_department": top_person.department if top_person else None,
+        "contact_person_priority": top_person.priority if top_person else None,
         "research_japan_fit": (cr.japan_market_fit or "") if cr else "",
         "similarity_top": similarity_top,
         "is_ulule": is_ulule,

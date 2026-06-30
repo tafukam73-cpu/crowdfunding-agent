@@ -246,11 +246,17 @@ class MockEmailGenerator(EmailGenerator):
         tone: EmailTone = DEFAULT_TONE,
         research: dict | None = None,
         japan_sales: dict | None = None,
+        contact: dict | None = None,
     ) -> list[EmailDraftResult]:
         ctx = ctx or SenderContext.fallback()
         title = project.title
         # 冒頭挨拶（担当者名／部署／メーカー名の有無で切り替え）
-        greeting = build_greeting(maker_name=project.maker_name)
+        contact = contact or {}
+        greeting = build_greeting(
+            maker_name=project.maker_name,
+            person_name=contact.get("name"),
+            department=contact.get("department"),
+        )
         # 商品・メーカーごとの個別化材料を先に作る
         p = build_personalization(project)
         # 企業リサーチがあれば、より具体的な称賛・強み・日本市場適合性で上書き

@@ -1033,6 +1033,74 @@ export async function runWebResearch(
   return res.json();
 }
 
+// ===== Contact Hunter AI（担当者発見） =====
+export type ContactPerson = {
+  id: number;
+  project_id: number;
+  name: string | null;
+  title: string | null;
+  department: string | null;
+  linkedin_url: string | null;
+  email: string | null;
+  email_source: string | null;
+  source_url: string | null;
+  confidence: number | null;
+  priority: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApplyPersonToCrmResult = {
+  maker_id: number;
+  contact_id: number;
+  name: string | null;
+  recorded: boolean;
+};
+
+// 担当者ハントを実行（同期）。会社ではなく「誰に送るか」を出典付きで特定する。
+// Claude 未設定時は決定的な HTML 抽出（モック）で動作する。
+export async function runContactHunter(id: number): Promise<ContactPerson[]> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/contact-people`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// 最新の担当者候補を営業優先度順で取得（未実行なら空配列）。
+export async function fetchContactPeople(id: number): Promise<ContactPerson[]> {
+  const res = await apiFetch(
+    `/projects/${id}/contact-discovery/contact-people`
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 担当者を CRM の Contact として追加（氏名・役職・部署・LinkedIn・メール）。
+export async function applyContactPersonToCrm(
+  id: number,
+  contactPersonId: number
+): Promise<ApplyPersonToCrmResult> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/contact-people/apply-to-crm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact_person_id: contactPersonId }),
+    }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // 問い合わせフォーム / SNS DM 用の短文アウトリーチ文。
 export type OutreachMessage = {
   channel: string;
@@ -1102,6 +1170,12 @@ export type ExecutiveSummary = {
   japan_distributor_status: string;
   contact_status: string;
   japan_market_fit: string;
+  // Contact Hunter（担当者発見）
+  contact_person_found: boolean;
+  contact_person_name: string | null;
+  contact_person_title: string | null;
+  contact_person_department: string | null;
+  contact_person_priority: number | null;
   reasons: string[];
   cautions: string[];
 };
