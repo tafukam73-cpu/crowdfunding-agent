@@ -101,6 +101,45 @@ class HttpClient:
         resp = self.get(url, params=params, headers={"Accept": "application/json"})
         return resp.json()
 
+    def post_json(
+        self, url: str, *, json: dict, headers: dict | None = None
+    ) -> dict:
+        """JSON を POST して JSON を受け取る（検索 API の POST 方式用）。
+
+        get() と同じくレート制限・リトライ（429/5xx/接続エラー）を適用する。
+        """
+        last_exc: Exception | None = None
+        self.last_attempts = 0
+        self.last_status = None
+        req_headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if headers:
+            req_headers.update(headers)
+
+        for attempt in range(self.retries + 1):
+            self.last_attempts = attempt + 1
+            self._respect_rate_limit()
+            try:
+                resp = self._client.post(url, json=json, headers=req_headers)
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                logger.warning("HTTP POST error (attempt %d): %s", attempt + 1, exc)
+                self._backoff(attempt)
+                continue
+
+            self.last_status = resp.status_code
+            if resp.status_code in RETRYABLE_STATUS:
+                last_exc = httpx.HTTPStatusError(
+                    f"{resp.status_code} for {url}", request=resp.request, response=resp
+                )
+                self._backoff(attempt)
+                continue
+
+            resp.raise_for_status()
+            return resp.json()
+
+        assert last_exc is not None
+        raise last_exc
+
     def get_text(self, url: str) -> str:
         return self.get(url).text
 

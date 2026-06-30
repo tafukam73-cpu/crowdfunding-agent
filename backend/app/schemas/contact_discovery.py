@@ -133,6 +133,7 @@ class ContactDiscoveryOut(BaseModel):
 
     # --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
     web_researched: bool = False
+    web_search_provider: str | None = None
     web_keyword_candidates: WebKeywordCandidates | None = None
     web_generated_queries: list[str] | None = None
     web_search_results: list[WebSearchResult] | None = None

@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     # 自動収集の 1 サイトあたり取得上限
     scrape_daily_limit: int = 20
 
+    # --- Web Research 検索プロバイダー ---
+    # 検索 API の切り替え： "none" | "brave" | "serpapi" | "tavily" | "google_cse"
+    # API キーが無い場合は自動的に DuckDuckGo HTML（手動検索クエリ方式）にフォールバック。
+    search_provider: str = "none"
+    # 各プロバイダーの API キー（設定したものだけ使用可能になる）
+    brave_search_api_key: str = ""
+    serpapi_api_key: str = ""
+    tavily_api_key: str = ""
+    google_cse_api_key: str = ""
+    # Google Custom Search のエンジン ID（cx）。google_cse には key と cx の両方が必要。
+    google_cse_cx: str = ""
+    # 1 クエリあたり取得する検索結果の上限
+    search_max_results: int = 10
+
     # --- 取得アラート通知（構造変化・成功率低下） ---
     # Slack Incoming Webhook URL。設定時のみ Slack 通知を行う（未設定なら何もしない）。
     slack_webhook_url: str = ""

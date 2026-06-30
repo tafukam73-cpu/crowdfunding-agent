@@ -124,6 +124,9 @@ class ContactDiscovery(Base):
     web_researched: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # 実際に使用した検索プロバイダー（brave / serpapi / tavily / google_cse /
+    # duckduckgo）。UI で「何で検索したか」を表示する。
+    web_search_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # 生成したキーワード候補（project_title / short_title / maker_name /
     # brand_names / official_domain など。検索戦略のデバッグ表示用）
     web_keyword_candidates: Mapped[dict | None] = mapped_column(JSON, nullable=True)

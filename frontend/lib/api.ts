@@ -976,6 +976,7 @@ export type ContactDiscovery = {
   ai_researched_at: string | null;
   // --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
   web_researched: boolean;
+  web_search_provider: string | null;
   web_keyword_candidates: WebKeywordCandidates | null;
   web_generated_queries: string[] | null;
   web_search_results: WebSearchResult[] | null;

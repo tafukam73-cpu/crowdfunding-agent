@@ -299,9 +299,11 @@ def build_web_search_queries(
     # 優先度8: ドメイン site: 限定（メール/PDF）
     if domain:
         add(f"site:{domain} contact")
+        add(f"site:{domain} email")
         add(f"site:{domain} partnership")
         add(f"site:{domain} wholesale")
         add(f"site:{domain} distributor")
+        add(f"site:{domain} filetype:pdf")
         add(f"site:{domain} distributor filetype:pdf")
 
     return queries
@@ -690,7 +692,14 @@ def web_research(
     own_fetcher = fetch_fn is None
     own_search = search_fn is None
     fetch = fetch_fn or _make_fetcher()
-    search = search_fn or _default_search_fn()
+    if own_search:
+        from app.services import search_providers
+
+        search = search_providers.get_search_fn()
+        provider = getattr(search, "provider", "duckduckgo")
+    else:
+        search = search_fn
+        provider = getattr(search_fn, "provider", "injected")
 
     generated_queries = build_web_search_queries(project, research)
     searched_queries: list[str] = []
@@ -895,6 +904,7 @@ def web_research(
     evidence = cds.build_evidence_summary(emails, forms, socials, "")
 
     notes_bits = [
+        f"provider {provider}",
         f"{len(searched_queries)}/{len(generated_queries)} query(ies) run",
         f"{len(searched)} url(s)",
         f"{len(emails)} email(s)",
@@ -912,6 +922,7 @@ def web_research(
         )
 
     return {
+        "search_provider": provider,
         "keyword_candidates": keywords,
         "generated_queries": generated_queries,
         "searched_queries": searched_queries,
@@ -970,6 +981,7 @@ def run_web_research(
         result = web_research(project, research, fetch_fn=fetch_fn, search_fn=search_fn)
         row.web_researched = True
         row.web_researched_at = now
+        row.web_search_provider = result["search_provider"]
         row.web_keyword_candidates = result["keyword_candidates"] or None
         row.web_generated_queries = result["generated_queries"] or None
         row.web_searched_queries = result["searched_queries"] or None

@@ -611,6 +611,7 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
   const results = data.web_search_results ?? [];
 
   const hasAnything =
+    !!data.web_search_provider ||
     kw ||
     generated.length > 0 ||
     (data.web_searched_queries ?? []).length > 0 ||
@@ -629,6 +630,20 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
       </summary>
 
       <div className="mt-2 space-y-3">
+        {/* 使用した検索プロバイダー */}
+        <p className="text-slate-600">
+          使用した検索プロバイダー:{" "}
+          <span className="font-semibold text-indigo-700">
+            {data.web_search_provider ?? "（未記録）"}
+          </span>
+          {data.web_search_provider === "duckduckgo" && (
+            <span className="text-slate-400">
+              {" "}
+              （検索API未設定のためフォールバック）
+            </span>
+          )}
+        </p>
+
         {/* キーワード候補 */}
         {kw && (
           <div>
@@ -842,6 +857,11 @@ function WebResearchSection({
 
           {/* 確度 & 推奨チャネル */}
           <div className="flex flex-wrap items-center gap-2">
+            {data.web_search_provider && (
+              <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                検索: {data.web_search_provider}
+              </span>
+            )}
             <span className="rounded bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
               Web確度: {data.web_confidence_score ?? 0} / 100
             </span>
