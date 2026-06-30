@@ -694,6 +694,77 @@ def _infer_official_url(
     return ""
 
 
+# <a href="...">テキスト</a> から (絶対URL, アンカーテキスト小文字) を取り出す。
+_ANCHOR_RE = re.compile(
+    r'<a\s[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*?>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+# 「公式サイト」を示すアンカーテキスト（英・仏・日）。
+_OFFICIAL_TEXT_HINTS = (
+    "official website", "official site", "officialsite", "official",
+    "website", "web site", "visit website", "visit site", "our website",
+    "site officiel", "公式サイト", "公式", "ウェブサイト", "homepage", "home page",
+    "company website", "shop now", "visit us",
+)
+
+
+def extract_links_with_text(html: str, base_url: str) -> list[tuple[str, str]]:
+    """HTML の <a> から (絶対URL, アンカーテキスト) を返す（http/https のみ・重複可）。"""
+    out: list[tuple[str, str]] = []
+    from urllib.parse import urljoin
+
+    for href, text in _ANCHOR_RE.findall(html or ""):
+        href = href.strip()
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+        absu = urljoin(base_url, href)
+        if not absu.startswith(("http://", "https://")):
+            continue
+        absu = absu.split("#", 1)[0]
+        out.append((absu, _strip_tags(text)))
+    return out
+
+
+def extract_official_from_page(
+    html: str,
+    base_url: str,
+    project_terms: set[str],
+    maker_terms: set[str],
+) -> str | None:
+    """クラファンページ等の HTML から公式サイト URL（root）を推定する（要件1・3）。
+
+    外部リンク（運営/SNS/マーケットプレイス/集約サイトを除く）のうち、
+      - アンカーテキストが「Official Website / Website / 公式サイト」等
+      - ドメイン名がメーカー名/タイトル主要語を含む
+    を手掛かりにスコアリングし、十分な根拠があるものだけ返す（無ければ None）。
+    """
+    base_domain = cds._domain_of(base_url)
+    terms = (maker_terms | project_terms) or set()
+    best: str | None = None
+    best_score = 0
+    for url, text in extract_links_with_text(html, base_url):
+        host = urlparse(url).netloc.lower()
+        if any(h in host for h in _NON_OFFICIAL_HOST_HINTS):
+            continue
+        if _is_platform_domain(url) or _social_platform(url):
+            continue
+        dom = cds._domain_of(url)
+        if not dom or dom == base_domain:
+            continue
+        low = text.lower()
+        score = 0
+        if any(h in low for h in _OFFICIAL_TEXT_HINTS):
+            score += 50
+        dom_token = dom.split(".")[0]
+        if dom_token and any(t in dom_token or dom_token in t for t in terms):
+            score += 40
+        # 根拠（テキスト/ドメイン一致）が無いリンクは公式とみなさない
+        if score >= 40 and score > best_score:
+            best_score = score
+            best = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+    return best
+
+
 def _as_result(item) -> dict | None:
     """search_fn の戻り値（str か dict）を {url,title,snippet} に正規化する。"""
     if isinstance(item, str):
@@ -861,53 +932,68 @@ def web_research(
 
     # 2. 公式サイトを確定（maker_url 未登録でも検索結果から推定）。代表パスを展開して
     #    クロール深度を確保する（要件 4：最低 10〜20 ページ）。
-    inferred_official = _infer_official_url(
+    # 検索ベースの公式サイト候補（補助）。確定はクロール中（クラファンページからの
+    # 推定を優先）に行う。検索が 0 件でも探索は終了しない（要件 3・6）。
+    search_inferred_official = _infer_official_url(
         page_candidates, project, project_terms, maker_terms, official_domain
     )
-    effective_official = official or inferred_official
-    effective_domain = official_domain or cds._domain_of(inferred_official)
-    if inferred_official and not official:
-        logger.info(
-            "web_research[%s] inferred official site from search: %s",
-            getattr(project, "id", "?"), inferred_official,
-        )
 
-    # 3. クロール対象 URL を決める（公式サイト＋代表パス優先 → 検索結果ページ）
+    # maker_url が登録済みならそれを公式として確定。無ければクロール中に推定する。
+    effective_official = official
+    effective_domain = official_domain
+
+    # 3. クロール待ち行列（クロール中に動的拡張する）
     crawl_urls: list[str] = []
     crawl_seen: set[str] = set()
 
-    def add_crawl(u: str) -> None:
-        if len(crawl_urls) >= MAX_URLS or u in crawl_seen:
-            return
-        if not u.startswith(("http://", "https://")):
-            return
+    def add_crawl(u: str, *, front_at: int | None = None) -> bool:
+        if u in crawl_seen or not u.startswith(("http://", "https://")):
+            return False
         if _is_skip_url(u):
-            return
+            return False
         if _is_platform_domain(u) and u != (project.source_url or ""):
-            return
+            return False
         crawl_seen.add(u)
-        crawl_urls.append(u)
+        if front_at is not None:
+            crawl_urls.insert(front_at, u)
+        else:
+            crawl_urls.append(u)
+        return True
 
-    # 公式サイト・案件ページ・company_research の出典
+    def expand_official(root_url: str, insert_at: int) -> None:
+        """確定した公式サイトに代表パスを展開してクロール待ち行列の先頭側に差し込む。"""
+        nonlocal effective_official, effective_domain
+        p = urlparse(root_url)
+        root = f"{p.scheme}://{p.netloc}"
+        effective_official = root
+        effective_domain = cds._domain_of(root)
+        pos = insert_at
+        if add_crawl(root, front_at=pos):
+            pos += 1
+        for path in WEB_KNOWN_PATHS:
+            if add_crawl(root + path, front_at=pos):
+                pos += 1
+        logger.info(
+            "web_research[%s] official site set: %s (+%d known paths)",
+            getattr(project, "id", "?"), root, len(WEB_KNOWN_PATHS),
+        )
+
+    # クラファンページ・公式サイト（既知なら）・research.sources を最優先で巡回
     for u in _seed_and_known_urls(project, research):
         add_crawl(u)
-    # 確定/推定した公式ドメインに代表パス（Contact/About/Press/Wholesale 等）を展開
-    if effective_official:
-        p = urlparse(effective_official)
-        root = f"{p.scheme}://{p.netloc}"
-        add_crawl(root)
-        for path in WEB_KNOWN_PATHS:
-            add_crawl(root + path)
-    # 検索結果ページ（スコア順）
+    # 既知の公式サイトは即展開
+    if official:
+        expand_official(official, len(crawl_urls))
+    # 検索結果ページ（スコア順）も候補に追加（補助）
     for _score, u in sorted(page_candidates, key=lambda t: t[0], reverse=True):
         add_crawl(u)
 
     logger.info(
-        "web_research[%s] crawl plan: %d url(s) (official=%s)",
-        getattr(project, "id", "?"), len(crawl_urls), effective_domain or "-",
+        "web_research[%s] crawl start: %d url(s) queued (official=%s)",
+        getattr(project, "id", "?"), len(crawl_urls), effective_domain or "未確定",
     )
 
-    # 4. クロールして抽出
+    # 4. クロールして抽出（待ち行列を動的に消化。公式サイトを途中で発見したら拡張）
     searched: list[str] = []
     candidate_pages: list[dict] = []
     email_map: dict[str, dict] = {}
@@ -915,19 +1001,21 @@ def web_research(
     ok_count = 0
     fail_count = 0
     email_pages_count = 0
+    pid = getattr(project, "id", "?")
 
     try:
-        for url in crawl_urls:
-            if len(searched) >= MAX_URLS:
-                break
+        i = 0
+        while i < len(crawl_urls) and len(searched) < MAX_URLS:
+            url = crawl_urls[i]
+            i += 1
             html = fetch(url)
             searched.append(url)
-            page = {"url": url, "type": _page_type(url, effective_domain), "ok": bool(html), "emails": 0}
+            page = {"url": url, "type": _page_type(url, effective_domain),
+                    "ok": bool(html), "emails": 0}
             candidate_pages.append(page)
             if not html:
                 fail_count += 1
-                logger.info("web_research[%s] fetch FAIL: %s",
-                            getattr(project, "id", "?"), url)
+                logger.info("web_research[%s] fetch FAIL: %s", pid, url)
                 continue
             ok_count += 1
 
@@ -955,14 +1043,18 @@ def web_research(
             page["emails"] = page_emails
             if page_emails:
                 email_pages_count += 1
-            logger.info(
-                "web_research[%s] fetch ok: %s (%d chars, %d email(s))",
-                getattr(project, "id", "?"), url, len(html), page_emails,
-            )
+            logger.info("web_research[%s] fetch ok: %s (%d chars, %d email(s))",
+                        pid, url, len(html), page_emails)
 
-            # SNS（ページ内リンク。正規化 + 運営 SNS 除外）
-            for platform, link in cds.extract_socials(html, url).items():
-                consider_social(platform, link, 20, f"page:{url}")
+            # SNS（ページ内の全リンクを走査。運営 SNS は除外、メーカー名一致を優先）。
+            # 検索エンジンに頼らず HTML から取得する（要件 5）。
+            for link in cds.extract_links(html, url):
+                plat = _social_platform(link)
+                if not plat:
+                    continue
+                handle = _social_handle(plat, link) or ""
+                sc = 25 + (15 if any(t in handle for t in maker_terms) else 0)
+                consider_social(plat, link, sc, f"page:{url}")
 
             # 問い合わせフォーム
             if cds._is_contact_url(url) and url not in forms:
@@ -977,6 +1069,17 @@ def web_research(
                 if p["url"] not in pdf_seen:
                     pdf_seen.add(p["url"])
                     pdfs.append(p)
+
+            # 公式サイト未確定なら、このページ（クラファンページ等）内のリンクから推定
+            # して代表パスを展開する（要件 1・3・4）。検索結果が 0 件でも機能する。
+            if not effective_official:
+                cand = extract_official_from_page(
+                    html, url, project_terms, maker_terms
+                ) or search_inferred_official
+                if cand:
+                    logger.info("web_research[%s] inferred official from %s -> %s",
+                                pid, url, cand)
+                    expand_official(cand, i)
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)

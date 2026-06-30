@@ -130,6 +130,57 @@ def brave_parsed_search(query: str):
 brave_parsed_search.provider = "brave"  # type: ignore[attr-defined]
 
 
+def _run_campaign_page_path() -> bool:
+    """要件8の中核：検索0件でも Indiegogo ページ本文から公式サイト・SNSを取得する。"""
+    print("\n=== 検索0件 → クラファンページ本文から発見（要件1〜6・8）===")
+    cf_url = Vitesy.source_url
+    cf_html = (
+        '<html><body>'
+        '<h1>Vitesy Fruit Bowl</h1>'
+        '<a href="https://vitesy.com">Official Website</a>'
+        '<a href="https://www.instagram.com/indiegogo/">Indiegogo</a>'  # 運営→除外
+        '<a href="https://www.instagram.com/vitesy/">Instagram</a>'
+        '<a href="https://www.facebook.com/vitesy">Facebook</a>'
+        '<a href="https://www.linkedin.com/company/vitesy/">LinkedIn</a>'
+        '<a href="https://www.youtube.com/@vitesy">YouTube</a>'
+        '</body></html>'
+    )
+    local_pages = dict(PAGES)
+    local_pages[cf_url] = cf_html
+
+    def fetch_cf(url: str):
+        return local_pages.get(url.rstrip("/")) or local_pages.get(url)
+
+    def no_search(query: str):
+        return []
+
+    no_search.provider = "duckduckgo"  # type: ignore[attr-defined]
+
+    res = w.web_research(Vitesy(), None, fetch_fn=fetch_cf, search_fn=no_search)
+    soc = res["discovered_socials"]
+    dc = res["debug_counts"]
+    print(f"  検索結果件数: {dc['results']}（0件） / 巡回URL: {dc['crawled']}")
+    print(f"  フロー: {res['research_flow']}")
+    print(f"  公式: {res.get('primary_contact_form_url') or ''} 巡回に vitesy.com 含む: "
+          f"{any('vitesy.com' in u for u in res['searched_urls'])}")
+    for plat in ("facebook", "instagram", "linkedin", "youtube"):
+        print(f"  {plat}: {soc.get(plat)}")
+    checks = [
+        ("検索0件でも公式サイト発見", any("vitesy.com" in u for u in res["searched_urls"])),
+        ("Contact まで巡回", any("contact" in u.lower() and "vitesy.com" in u for u in res["searched_urls"])),
+        ("Facebook 取得", soc.get("facebook") == "https://www.facebook.com/vitesy"),
+        ("Instagram 取得", soc.get("instagram") == "https://www.instagram.com/vitesy/"),
+        ("LinkedIn 取得", soc.get("linkedin") == "https://www.linkedin.com/company/vitesy/"),
+        ("運営SNS(indiegogo)誤採用なし", "indiegogo" not in (soc.get("instagram") or "")),
+        ("メール取得", bool(res["discovered_emails"])),
+    ]
+    ok = True
+    for label, cond in checks:
+        print(f"  [{'OK' if cond else 'NG'}] {label}")
+        ok = ok and cond
+    return ok
+
+
 def _run_brave_path() -> bool:
     print("\n=== Brave レスポンス → parse_brave_results → web_research（要件8）===")
     parsed = sp.parse_brave_results(BRAVE_PAYLOAD)
@@ -214,6 +265,7 @@ def main() -> int:
         print(f"  [{'OK' if cond else 'NG'}] {label}")
         ok = ok and cond
 
+    ok = _run_campaign_page_path() and ok
     ok = _run_brave_path() and ok
 
     print("\n" + ("すべて期待どおり（巡回1件問題は解消）" if ok else "未達あり"))

@@ -303,6 +303,7 @@ SOCIAL_PATTERNS = {
     "twitter": re.compile(r"(?:twitter\.com|x\.com)", re.IGNORECASE),
     "linkedin": re.compile(r"linkedin\.com", re.IGNORECASE),
     "youtube": re.compile(r"(?:youtube\.com|youtu\.be)", re.IGNORECASE),
+    "tiktok": re.compile(r"tiktok\.com", re.IGNORECASE),
 }
 # 共有/インテント等は本人アカウントではないので除外
 _SOCIAL_EXCLUDE = re.compile(

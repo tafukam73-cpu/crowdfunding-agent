@@ -335,6 +335,54 @@ def test_infers_official_site_and_expands_crawl() -> None:
           "公式サイト" in res["research_flow"] and "メール" in res["research_flow"])
 
 
+def test_discovers_from_crowdfunding_page_without_search() -> None:
+    """要件1〜6：検索0件でも、クラファンページ本文から公式サイト・SNSを取得する。"""
+    print("test_discovers_from_crowdfunding_page_without_search")
+
+    cf_url = "https://www.indiegogo.com/projects/vitesy-fruit-bowl"
+    # クラファンページ：Official Website リンク・本人SNS・運営SNS（除外対象）を含む
+    cf_html = (
+        '<html><body>'
+        '<a href="https://vitesy.com">Official Website</a>'
+        '<a href="https://www.instagram.com/indiegogo/">Indiegogo IG</a>'  # 運営→除外
+        '<a href="https://www.instagram.com/vitesy/">Instagram</a>'
+        '<a href="https://www.facebook.com/vitesy">Facebook</a>'
+        '<a href="https://www.linkedin.com/company/vitesy/">LinkedIn</a>'
+        '<a href="https://www.tiktok.com/@vitesy">TikTok</a>'
+        '</body></html>'
+    )
+    pages = {
+        cf_url: cf_html,
+        "https://vitesy.com": (
+            '<html><body><a href="/pages/contact">Contact</a>'
+            '<a href="/about">About</a></body></html>'
+        ),
+        "https://vitesy.com/pages/contact": (
+            '<html><body><a href="mailto:partnership@vitesy.com">partner</a></body></html>'
+        ),
+        "https://vitesy.com/about": "<html><body>About Vitesy</body></html>",
+    }
+
+    def fetch(url: str):
+        return pages.get(url.rstrip("/")) or pages.get(url)
+
+    # 検索エンジンは 0 件（ブロック相当）。それでも探索を継続する。
+    res = w.web_research(FakeProjectNoSite(), None, fetch_fn=fetch, search_fn=lambda q: [])
+
+    soc = res["discovered_socials"]
+    check("検索0件でも公式サイト vitesy.com を巡回",
+          any("vitesy.com" in u for u in res["searched_urls"]))
+    check("公式サイトの代表パス(Contact)まで巡回",
+          any("contact" in u.lower() and "vitesy.com" in u for u in res["searched_urls"]))
+    check("クラファンページから Facebook 取得", soc.get("facebook") == "https://www.facebook.com/vitesy")
+    check("クラファンページから Instagram 取得", soc.get("instagram") == "https://www.instagram.com/vitesy/")
+    check("クラファンページから LinkedIn 取得", soc.get("linkedin") == "https://www.linkedin.com/company/vitesy/")
+    check("TikTok も取得", bool(soc.get("tiktok")))
+    check("運営SNS(indiegogo)は誤採用しない", "indiegogo" not in (soc.get("instagram") or ""))
+    check("公式サイトからメール取得", any(e["email"] == "partnership@vitesy.com" for e in res["discovered_emails"]))
+    check("巡回URLが増える(>=5)", len(res["searched_urls"]) >= 5)
+
+
 def main() -> int:
     test_query_generation()
     test_composite_query_generation()
@@ -344,6 +392,7 @@ def main() -> int:
     test_web_research_end_to_end()
     test_platform_social_not_adopted_end_to_end()
     test_infers_official_site_and_expands_crawl()
+    test_discovers_from_crowdfunding_page_without_search()
     test_graceful_when_search_empty()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
