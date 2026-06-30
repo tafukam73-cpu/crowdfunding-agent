@@ -3,14 +3,22 @@
 import { useEffect, useState } from "react";
 
 import {
+  type AiCandidateEmail,
   applyDiscoveryToCrm,
   type ContactDiscovery,
   fetchContactDiscovery,
   fetchOutreachMessage,
   formatDateTime,
   type OutreachMessage,
+  runAiContactResearch,
   runContactDiscovery,
 } from "@/lib/api";
+
+// EmailDraftPanel と共有する「Gmail 下書きの宛先候補」セッションキー。
+// AI 候補メールを「Gmail宛先に使用」したとき、メール作成画面の宛先に引き継ぐ。
+export function gmailToKey(projectId: number): string {
+  return `cf:gmailTo:${projectId}`;
+}
 
 // 短文アウトリーチ文を出す対象チャネル（メールアドレスが無い場合の代替手段）
 const SHORT_OUTREACH_CHANNELS = [
@@ -291,6 +299,297 @@ function ShortOutreach({
   );
 }
 
+const CONFIDENCE_LABELS: Record<string, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+
+// AI 候補メールのカード（コピー / CRM反映 / Gmail宛先に使用）。
+function AiEmailRow({
+  cand,
+  onApply,
+  onUseAsGmailTo,
+}: {
+  cand: AiCandidateEmail;
+  onApply: (email: string) => void;
+  onUseAsGmailTo: (email: string) => void;
+}) {
+  return (
+    <li className="rounded border border-fuchsia-200 bg-white p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-700">
+          {cand.confidence
+            ? `信頼度 ${CONFIDENCE_LABELS[cand.confidence] ?? cand.confidence}`
+            : "信頼度 —"}
+          {typeof cand.score === "number" ? ` ・ ${cand.score}` : ""}
+        </span>
+        <span className="font-medium text-slate-800">{cand.email}</span>
+        <CopyButton text={cand.email} label="コピー" />
+        <button
+          onClick={() => onApply(cand.email)}
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+        >
+          CRMに反映
+        </button>
+        <button
+          onClick={() => onUseAsGmailTo(cand.email)}
+          className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+        >
+          Gmail宛先に使用
+        </button>
+      </div>
+      {cand.reason && (
+        <p className="mt-1 text-xs text-slate-500">根拠: {cand.reason}</p>
+      )}
+      {cand.source_url && (
+        <a
+          href={cand.source_url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-0.5 inline-block break-all text-xs text-blue-700 hover:underline"
+        >
+          出典: {cand.source_url} ↗
+        </a>
+      )}
+    </li>
+  );
+}
+
+// AI 連絡先リサーチ（自動抽出の補完。出典付き候補・推奨チャネル・検索クエリ）。
+function AiResearchSection({
+  projectId,
+  data,
+  busy,
+  error,
+  onRun,
+  onApply,
+}: {
+  projectId: number;
+  data: ContactDiscovery | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onApply: (email: string) => void;
+}) {
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+
+  function onUseAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setGmailMsg(
+      `「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`
+    );
+  }
+
+  const researched = data?.ai_researched;
+  const candidates = data?.ai_candidate_emails ?? [];
+  const aiSocials: { label: string; url: string | null | undefined }[] = [
+    { label: "Instagram", url: data?.ai_instagram_url },
+    { label: "Facebook", url: data?.ai_facebook_url },
+    { label: "LinkedIn", url: data?.ai_linkedin_url },
+  ];
+
+  return (
+    <div className="rounded-md border border-fuchsia-200 bg-fuchsia-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-fuchsia-900">
+            🤖 AI連絡先リサーチ
+          </p>
+          <p className="mt-0.5 text-xs text-fuchsia-700">
+            自動抽出でメールが見つからない場合に、AIが公式サイト・SNS・検索クエリから
+            営業に使える連絡先を整理します（推測メールは作りません）。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="rounded bg-fuchsia-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-fuchsia-600 disabled:opacity-50"
+        >
+          {busy ? "AI調査中…" : researched ? "AIで再調査" : "AIで連絡先を調査"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {!researched && !error && (
+        <p className="mt-3 text-xs text-fuchsia-700">
+          まだAI調査は実行されていません。上のボタンで実行できます（Claude未設定時は
+          モックで動作）。
+        </p>
+      )}
+
+      {researched && data && (
+        <div className="mt-3 space-y-3 text-sm">
+          {/* 確度 & 推奨チャネル */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-fuchsia-100 px-2 py-0.5 text-xs font-medium text-fuchsia-800">
+              AI確度: {data.ai_confidence_score ?? 0} / 100
+            </span>
+            {data.ai_recommended_channel && (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                AI推奨チャネル:{" "}
+                {CHANNEL_LABELS[data.ai_recommended_channel] ??
+                  data.ai_recommended_channel}
+              </span>
+            )}
+            {data.ai_model && (
+              <span className="text-xs text-slate-400">{data.ai_model}</span>
+            )}
+          </div>
+
+          {/* 注意メモ */}
+          {data.ai_notes && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+              {data.ai_notes}
+            </div>
+          )}
+
+          {/* AI primary email */}
+          {data.ai_primary_email ? (
+            <div>
+              <p className="text-xs font-semibold text-fuchsia-700">
+                AI主要メール（出典付き・再検証済み）
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="font-medium text-slate-900">
+                  {data.ai_primary_email}
+                </span>
+                <CopyButton text={data.ai_primary_email} label="コピー" />
+                <button
+                  onClick={() => onApply(data.ai_primary_email as string)}
+                  className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  CRMに反映
+                </button>
+                <button
+                  onClick={() => onUseAsGmailTo(data.ai_primary_email as string)}
+                  className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                >
+                  Gmail宛先に使用
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              AIは出典付きの確実なメールを発見できませんでした。下記の推奨チャネル・
+              検索クエリで営業先を確保してください（推測メールは候補にしていません）。
+            </p>
+          )}
+
+          {gmailMsg && (
+            <p className="text-xs font-medium text-blue-700">{gmailMsg}</p>
+          )}
+
+          {/* 候補メール一覧 */}
+          {candidates.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-fuchsia-700">
+                AI候補メール（出典付き・優先度順）
+              </p>
+              <ul className="mt-1 space-y-1.5">
+                {candidates.map((c) => (
+                  <AiEmailRow
+                    key={c.email}
+                    cand={c}
+                    onApply={onApply}
+                    onUseAsGmailTo={onUseAsGmailTo}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* AIが見つけたフォーム / SNS */}
+          {(data.ai_contact_form_url ||
+            aiSocials.some((s) => s.url)) && (
+            <div className="flex flex-wrap gap-3">
+              {data.ai_contact_form_url && (
+                <a
+                  href={data.ai_contact_form_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  問い合わせフォーム ↗
+                </a>
+              )}
+              {aiSocials
+                .filter((s) => s.url)
+                .map((s) => (
+                  <a
+                    key={s.label}
+                    href={s.url as string}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-700 hover:underline"
+                  >
+                    {s.label} ↗
+                  </a>
+                ))}
+            </div>
+          )}
+
+          {/* AI検索クエリ */}
+          {data.ai_search_queries && data.ai_search_queries.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-fuchsia-700">
+                AI検索クエリ（手動リサーチ用）
+              </p>
+              <ul className="mt-1 space-y-1">
+                {data.ai_search_queries.map((q, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded bg-white px-1.5 py-0.5 text-xs text-slate-800">
+                      {q}
+                    </code>
+                    <CopyButton text={q} />
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(q)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      Googleで開く ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 出典 URL */}
+          {data.ai_sources && data.ai_sources.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">
+                AIが参照した出典（{data.ai_sources.length}）
+              </summary>
+              <ul className="mt-1 space-y-0.5">
+                {data.ai_sources.map((s, i) => (
+                  <li key={i} className="break-all">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 hover:underline"
+                    >
+                      {s.note ? `${s.note}: ` : ""}
+                      {s.url} ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -305,6 +604,8 @@ export default function ContactDiscoveryPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
@@ -323,6 +624,22 @@ export default function ContactDiscoveryPanel({
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onRunAi() {
+    setAiBusy(true);
+    setAiError(null);
+    setApplyMsg(null);
+    try {
+      // AI リサーチは最新の探索結果（ai_* 含む）を返す。土台が無ければサーバ側で
+      // 自動探索を先に実行する。
+      setData(await runAiContactResearch(projectId));
+      onChanged?.();
+    } catch (e) {
+      setAiError(String(e));
+    } finally {
+      setAiBusy(false);
     }
   }
 
@@ -370,9 +687,21 @@ export default function ContactDiscoveryPanel({
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
+      {/* AI連絡先リサーチ（自動抽出とは区別して表示。data が無くても実行可能） */}
+      <div className="mt-3">
+        <AiResearchSection
+          projectId={projectId}
+          data={data}
+          busy={aiBusy}
+          error={aiError}
+          onRun={onRunAi}
+          onApply={onApply}
+        />
+      </div>
+
       {!data && !error && (
         <p className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-400">
-          まだ探索されていません。「連絡先を探索」を押すと、営業可能な連絡手段を総合評価します。
+          まだ自動探索されていません。「連絡先を探索」を押すと、営業可能な連絡手段を総合評価します（上のAI連絡先リサーチは単独でも実行できます）。
         </p>
       )}
 
@@ -389,6 +718,9 @@ export default function ContactDiscoveryPanel({
         <div className="mt-3 space-y-4 rounded-lg border border-slate-200 bg-white p-5 text-sm">
           {/* スコア & 推奨 */}
           <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
+              自動抽出
+            </span>
             <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
               営業可能性スコア: {data.contactability_score ?? 0} / 100
             </span>

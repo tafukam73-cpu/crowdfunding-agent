@@ -26,6 +26,24 @@ class ApproachOption(BaseModel):
     reason: str | None = None
 
 
+class AiCandidateEmail(BaseModel):
+    """AI 連絡先リサーチが提示し、既存フィルタで再検証済みの候補メール。"""
+
+    email: str
+    score: int = 0
+    confidence: str | None = None
+    reason: str | None = None
+    source_url: str | None = None
+    # 所有者分類（maker / unknown など。platform は保存時点で除外済み）
+    email_owner: str | None = None
+
+
+class AiSource(BaseModel):
+    url: str
+    type: str | None = None
+    note: str | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -59,6 +77,23 @@ class ContactDiscoveryOut(BaseModel):
 
     notes: str | None = None
     error: str | None = None
+
+    # --- AI 連絡先リサーチ（自動抽出とは区別して表示） ---
+    ai_researched: bool = False
+    ai_primary_email: str | None = None
+    ai_contact_form_url: str | None = None
+    ai_instagram_url: str | None = None
+    ai_facebook_url: str | None = None
+    ai_linkedin_url: str | None = None
+    ai_candidate_emails: list[AiCandidateEmail] | None = None
+    ai_search_queries: list[str] | None = None
+    ai_sources: list[AiSource] | None = None
+    ai_confidence_score: int | None = None
+    ai_recommended_channel: str | None = None
+    ai_notes: str | None = None
+    ai_model: str | None = None
+    ai_researched_at: datetime | None = None
+
     created_at: datetime
     updated_at: datetime
 

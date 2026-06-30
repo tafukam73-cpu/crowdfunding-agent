@@ -11,16 +11,23 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.ai.contact_researcher import (
+    VALID_AI_CHANNELS,
+    ContactResearchContext,
+    ContactResearcher,
+    get_contact_researcher,
+)
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
 from app.models.crm import ActivityKind, Contact, SalesActivity
 from app.models.project import Project
-from app.services import crm_service
+from app.services import crm_service, usage_service
 
 logger = logging.getLogger("contact_discovery")
 
@@ -1046,6 +1053,208 @@ def get_latest(db: Session, project_id: int) -> ContactDiscovery | None:
         .limit(1)
     )
     return db.scalar(stmt)
+
+
+# ---------------- AI 連絡先リサーチ ----------------
+def _build_research_context(
+    project: Project,
+    research: CompanyResearch | None,
+    row: ContactDiscovery | None,
+) -> ContactResearchContext:
+    """AI 連絡先リサーチへ渡す入力を Project/Research/Discovery から組み立てる。"""
+    company_sources: list[str] = []
+    if research and research.sources:
+        company_sources = [str(s) for s in research.sources if s]
+
+    existing_emails: list[dict] = []
+    excluded: list[dict] = []
+    if row and row.discovered_emails:
+        for e in row.discovered_emails:
+            if not isinstance(e, dict):
+                continue
+            # 運営会社（platform）のメールは AI にも渡さない
+            if e.get("email_owner") == "platform":
+                excluded.append(
+                    {"email": e.get("email"), "reason": "platform_domain"}
+                )
+                continue
+            existing_emails.append(
+                {
+                    "email": e.get("email"),
+                    "score": e.get("score"),
+                    "tier": e.get("tier"),
+                    "sources": e.get("sources") or [],
+                }
+            )
+
+    return ContactResearchContext(
+        title=project.title or "",
+        description_clean=(project.description_clean or project.description or "")[:2000],
+        source_site=project.source_site or "",
+        source_url=project.source_url or "",
+        maker_name=project.maker_name or "",
+        official_site_url=(row.official_site_url if row else None)
+        or project.maker_url
+        or "",
+        company_sources=company_sources,
+        searched_urls=(row.searched_urls if row else None) or [],
+        search_queries=(row.search_queries if row else None) or [],
+        discovered_socials=(row.discovered_socials if row else None) or {},
+        primary_contact_form_url=(row.primary_contact_form_url if row else None) or "",
+        existing_candidate_emails=existing_emails,
+        excluded_emails=excluded,
+        platform_domain=source_site_email_domain(
+            getattr(project, "source_site", None)
+        )
+        or "",
+    )
+
+
+def validate_ai_candidate_emails(
+    candidates: list,
+    *,
+    official_domain: str | None,
+    source_site_domain: str | None,
+) -> list[dict]:
+    """AI が返した候補メールを既存フィルタで再検証する（捏造・運営会社を排除）。
+
+    採用条件（すべて満たすもののみ残す）：
+      - 出典 URL（source_url）がある（出典の無い＝推測メールは採用しない）
+      - email_exclusion_reason が None（運営会社/監視/no-reply/ハッシュ等でない）
+    重複は最初の 1 件のみ残す。所有者分類（email_owner）も付与する。
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for c in candidates:
+        # AiCandidateEmail / dict の両対応
+        email = str(getattr(c, "email", None) or (c.get("email") if isinstance(c, dict) else "")).strip()
+        source_url = str(
+            getattr(c, "source_url", None)
+            or (c.get("source_url") if isinstance(c, dict) else "")
+            or ""
+        ).strip()
+        if not email or "@" not in email:
+            continue
+        key = email.lower()
+        if key in seen:
+            continue
+        # 出典が無い候補は捏造の疑いがあるため採用しない
+        if not source_url:
+            continue
+        # 既存の除外ルールで再検証（運営会社/監視/no-reply/ハッシュ等）
+        if email_exclusion_reason(email, source_site_domain):
+            continue
+        seen.add(key)
+        confidence = str(
+            getattr(c, "confidence", None)
+            or (c.get("confidence") if isinstance(c, dict) else "")
+            or ""
+        )
+        reason = str(
+            getattr(c, "reason", None)
+            or (c.get("reason") if isinstance(c, dict) else "")
+            or ""
+        )
+        raw_score = getattr(c, "score", None)
+        if raw_score is None and isinstance(c, dict):
+            raw_score = c.get("score")
+        # スコア未指定/不正なら既存スコアリングで補完
+        try:
+            score = int(raw_score)
+        except (TypeError, ValueError):
+            score, _ = score_email(email, official_domain)
+        out.append(
+            {
+                "email": email,
+                "score": score,
+                "confidence": confidence,
+                "reason": reason,
+                "source_url": source_url,
+                "email_owner": classify_email_owner(
+                    email, official_domain, source_site_domain
+                ),
+            }
+        )
+    out.sort(key=lambda e: e["score"], reverse=True)
+    return out
+
+
+def run_ai_research(
+    db: Session, project: Project, researcher: ContactResearcher | None = None
+) -> ContactDiscovery:
+    """AI 連絡先リサーチを実行し、最新の探索結果（ContactDiscovery）に保存する。
+
+    既存の探索結果が無ければ先に HTML 探索を実行して土台を作る。AI 結果は ai_*
+    カラムに分離して保存し、自動抽出（primary_email など）は上書きしない。失敗時は
+    ai_notes にエラーを記録し、アプリは落とさない。
+    """
+    researcher = researcher or get_contact_researcher()
+    research = _latest_research(db, project.id)
+    row = get_latest(db, project.id)
+    if row is None:
+        # 土台が無ければ先に自動探索を実行（要件の流れ：探索→AI 調査）
+        row = run_discovery(db, project)
+
+    official_domain = _domain_of(row.official_site_url or project.maker_url)
+    site_domain = source_site_email_domain(getattr(project, "source_site", None))
+
+    ctx = _build_research_context(project, research, row)
+    try:
+        result = researcher.research(ctx)
+
+        # AI が返したメールを既存フィルタで再検証（捏造・運営会社を排除）
+        validated = validate_ai_candidate_emails(
+            result.candidate_emails,
+            official_domain=official_domain or None,
+            source_site_domain=site_domain,
+        )
+        validated_lookup = {e["email"].lower() for e in validated}
+
+        # primary_email は「再検証済みの候補に含まれるもの」だけ採用
+        primary = result.primary_email
+        if primary and primary.lower() not in validated_lookup:
+            # AI が出典なしや除外対象を primary にした場合は採用しない
+            if email_exclusion_reason(primary, site_domain):
+                primary = None
+        if not primary and validated:
+            primary = validated[0]["email"]
+
+        # 推奨チャネルの正規化
+        channel = result.recommended_channel
+        if channel not in VALID_AI_CHANNELS:
+            channel = "email" if primary else "manual_research"
+
+        row.ai_researched = True
+        row.ai_researched_at = datetime.now(timezone.utc)
+        row.ai_model = result.model or researcher.name
+        row.ai_primary_email = primary
+        row.ai_candidate_emails = validated or None
+        row.ai_contact_form_url = result.contact_form_url
+        row.ai_instagram_url = result.instagram_url
+        row.ai_facebook_url = result.facebook_url
+        row.ai_linkedin_url = result.linkedin_url
+        row.ai_recommended_channel = channel
+        row.ai_confidence_score = max(0, min(100, int(result.confidence_score or 0)))
+        row.ai_search_queries = result.search_queries or None
+        row.ai_sources = result.sources or None
+        row.ai_notes = result.notes or None
+
+        usage_service.record_usage(
+            db,
+            kind="contact_research",
+            model=row.ai_model,
+            usage=getattr(researcher, "last_usage", None),
+            project_id=project.id,
+        )
+    except Exception as exc:  # noqa: BLE001  失敗してもアプリは落とさない
+        logger.warning("ai contact research failed (project=%s): %s", project.id, exc)
+        row.ai_researched = True
+        row.ai_researched_at = datetime.now(timezone.utc)
+        row.ai_notes = f"AI 連絡先リサーチに失敗しました: {exc}"[:4000]
+
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def _crm_note(row: ContactDiscovery | None) -> str:

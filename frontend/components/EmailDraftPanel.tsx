@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { gmailToKey } from "@/components/ContactDiscoveryPanel";
 import {
   createProviderDraft,
   EMAIL_TONE_LABELS,
@@ -308,8 +309,10 @@ export default function EmailDraftPanel({
   const [tone, setTone] = useState<EmailTone>("professional");
   // 企業リサーチが反映可能か（completed が存在するか）
   const [researchApplied, setResearchApplied] = useState(false);
-  // 連絡先探索で見つかった宛先候補
+  // 連絡先探索で見つかった宛先候補（自動抽出）
   const [primaryEmail, setPrimaryEmail] = useState<string | null>(null);
+  // AI連絡先リサーチが見つけた宛先候補（出典付き・再検証済み）
+  const [aiPrimaryEmail, setAiPrimaryEmail] = useState<string | null>(null);
   // 連絡先探索の推奨チャネル（メール以外のとき Gmail 下書きを無効化する）
   const [recommendedChannel, setRecommendedChannel] = useState<string | null>(
     null
@@ -338,25 +341,46 @@ export default function EmailDraftPanel({
       .catch(() => setResearchApplied(false));
   }, [projectId, researchVersion]);
 
-  // 連絡先探索の primary_email を宛先候補として取得し、未編集なら自動入力
+  // 連絡先探索の宛先候補（自動抽出 primary_email / AI primary_email）を取得し、
+  // 未編集なら自動入力。AI側で「Gmail宛先に使用」した値があれば最優先で適用する。
   useEffect(() => {
     fetchContactDiscovery(projectId)
       .then((d) => {
-        const email = d?.primary_email ?? null;
-        setPrimaryEmail(email);
+        const auto = d?.primary_email ?? null;
+        const ai = d?.ai_primary_email ?? null;
+        setPrimaryEmail(auto);
+        setAiPrimaryEmail(ai);
         setRecommendedChannel(d?.recommended_channel ?? null);
-        if (email && !toEdited) setTo(email);
+
+        // ContactDiscoveryPanel の「Gmail宛先に使用」で選んだメール（一度きり適用）
+        let chosen: string | null = null;
+        try {
+          chosen = sessionStorage.getItem(gmailToKey(projectId));
+          if (chosen) sessionStorage.removeItem(gmailToKey(projectId));
+        } catch {
+          chosen = null;
+        }
+        if (chosen) {
+          setToEdited(true);
+          setTo(chosen);
+          return;
+        }
+        const fallback = auto ?? ai;
+        if (fallback && !toEdited) setTo(fallback);
       })
       .catch(() => {
         setPrimaryEmail(null);
+        setAiPrimaryEmail(null);
         setRecommendedChannel(null);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, discoveryVersion]);
 
-  // 探索済みでメールが無く、推奨チャネルがメール以外のとき Gmail 下書きは使えない
+  // 探索済みでメールが無く（自動・AI とも）、推奨チャネルがメール以外のとき
+  // Gmail 下書きは使えない
   const noEmailChannel =
     !primaryEmail &&
+    !aiPrimaryEmail &&
     recommendedChannel != null &&
     recommendedChannel !== "email";
 
@@ -448,7 +472,7 @@ export default function EmailDraftPanel({
       </div>
       {primaryEmail && (
         <p className="mt-1 text-xs text-slate-500">
-          連絡先探索の宛先候補:{" "}
+          自動抽出の宛先候補:{" "}
           <button
             onClick={() => {
               setToEdited(true);
@@ -459,6 +483,23 @@ export default function EmailDraftPanel({
             {primaryEmail}
           </button>{" "}
           {to === primaryEmail ? "（適用中・編集可）" : "（クリックで宛先に設定）"}
+        </p>
+      )}
+      {aiPrimaryEmail && aiPrimaryEmail !== primaryEmail && (
+        <p className="mt-1 text-xs text-slate-500">
+          AI調査の宛先候補:{" "}
+          <button
+            onClick={() => {
+              setToEdited(true);
+              setTo(aiPrimaryEmail);
+            }}
+            className="font-medium text-fuchsia-700 hover:underline"
+          >
+            {aiPrimaryEmail}
+          </button>{" "}
+          {to === aiPrimaryEmail
+            ? "（適用中・編集可）"
+            : "（クリックで宛先に設定）"}
         </p>
       )}
 

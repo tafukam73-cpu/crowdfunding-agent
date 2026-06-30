@@ -882,6 +882,22 @@ export type ApproachOption = {
   reason: string | null;
 };
 
+// AI 連絡先リサーチが提示し、既存フィルタで再検証済みの候補メール。
+export type AiCandidateEmail = {
+  email: string;
+  score: number;
+  confidence: string | null;
+  reason: string | null;
+  source_url: string | null;
+  email_owner: string | null;
+};
+
+export type AiSource = {
+  url: string;
+  type: string | null;
+  note: string | null;
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
@@ -909,6 +925,21 @@ export type ContactDiscovery = {
   evidence_summary: string | null;
   notes: string | null;
   error: string | null;
+  // --- AI 連絡先リサーチ（自動抽出とは区別して表示） ---
+  ai_researched: boolean;
+  ai_primary_email: string | null;
+  ai_contact_form_url: string | null;
+  ai_instagram_url: string | null;
+  ai_facebook_url: string | null;
+  ai_linkedin_url: string | null;
+  ai_candidate_emails: AiCandidateEmail[] | null;
+  ai_search_queries: string[] | null;
+  ai_sources: AiSource[] | null;
+  ai_confidence_score: number | null;
+  ai_recommended_channel: string | null;
+  ai_notes: string | null;
+  ai_model: string | null;
+  ai_researched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -938,6 +969,22 @@ export async function runContactDiscovery(
     method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// AI 連絡先リサーチを実行（同期）。Claude 未設定時はモックで動作。
+// 失敗時も ai_notes にエラーを記録して 200 で返る。
+export async function runAiContactResearch(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/ai-research`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

@@ -9,7 +9,16 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -79,6 +88,36 @@ class ContactDiscovery(Base):
 
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- AI 連絡先リサーチ（HTML 抽出で見つからない/低品質な場合の補完） ---
+    # AI リサーチを実行済みか
+    ai_researched: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # AI が最有力とした主要メール（既存フィルタで再検証済みのもののみ）
+    ai_primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI が見つけた問い合わせフォーム / 公式 SNS
+    ai_contact_form_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_instagram_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_facebook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_linkedin_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI 候補メール [{email, score, confidence, reason, source_url}]（再検証後）
+    ai_candidate_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # AI が提案する検索クエリ候補
+    ai_search_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # AI が参照した出典 [{url, type, note}]
+    ai_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # AI の総合確度（0〜100）
+    ai_confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # AI の推奨連絡チャネル
+    ai_recommended_channel: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # AI の補足メモ（メール未発見だがこのチャネルがおすすめ 等）
+    ai_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 生成エンジン（mock-contact-research-v1 / claude-...）
+    ai_model: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    ai_researched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
