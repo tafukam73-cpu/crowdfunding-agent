@@ -178,8 +178,66 @@ def test_resolution() -> None:
     _reset()
 
 
+def test_sanitize_and_utf8_url() -> None:
+    """要件：NFKC正規化＋スマートクォート変換、UTF-8 URLが ascii-safe（例外なし）。"""
+    print("test_sanitize_and_utf8_url")
+    # スマートクォート → ASCII
+    check("’ を ' に変換", sp.sanitize_query("AfriK’Ecotour") == "AfriK'Ecotour")
+    check("“ ” を \" に変換", sp.sanitize_query("“Smart”") == '"Smart"')
+    check("NFKC で全角→半角", sp.sanitize_query("Ｖｉｔｅｓｙ") == "Vitesy")
+    check("連続空白を1つに", sp.sanitize_query("a   b\tc") == "a b c")
+
+    # 非 ASCII を含むタイトルでも URL は ascii-safe（'ascii' codec エラーが起きない）
+    for title in [
+        "AfriK’Ecotour",
+        "Vitesy Fruit Bowl: Reinventing Fruit Freshness",
+        "“Smart” Café – Pro",
+        "日本語タイトル",
+    ]:
+        q = sp.sanitize_query(title)
+        url = sp._utf8_query_url(sp.BRAVE_ENDPOINT, {"q": q, "count": 10})
+        try:
+            url.encode("ascii")
+            ok = True
+        except UnicodeEncodeError:
+            ok = False
+        check(f"URLがascii-safe: {title[:14]}", ok)
+
+    # AfriK’Ecotour の ’ は percent-encode で %27（ASCII apostrophe）になる
+    url = sp._utf8_query_url(sp.BRAVE_ENDPOINT, {"q": sp.sanitize_query("AfriK’Ecotour")})
+    check("’→' が %27 で送られる", "AfriK%27Ecotour" in url)
+
+
+def test_fallback_queries() -> None:
+    """要件：短縮フォールバッククエリ（Vitesy → Vitesy Facebook → ...）。"""
+    print("test_fallback_queries")
+    from app.services.web_research_service import build_fallback_queries
+
+    class P:
+        title = "Vitesy Fruit Bowl: Reinventing Fruit Freshness"
+        maker_name = "Vitesy"
+        maker_url = None
+        source_site = "indiegogo"
+        description = ""
+        description_clean = ""
+
+    fb = build_fallback_queries(P())
+    check("先頭は短いベース語 Vitesy", fb[0] == "Vitesy")
+    check("Vitesy Facebook を含む", "Vitesy Facebook" in fb)
+    check("Vitesy Instagram を含む", "Vitesy Instagram" in fb)
+    check("Vitesy LinkedIn を含む", "Vitesy LinkedIn" in fb)
+
+    class P2(P):
+        maker_name = None  # メーカー名が無くてもタイトル先頭語から作る
+
+    fb2 = build_fallback_queries(P2())
+    check("メーカー名無しでも Vitesy ベース", fb2 and fb2[0] == "Vitesy")
+
+
 def main() -> int:
     test_parsers()
+    test_sanitize_and_utf8_url()
+    test_fallback_queries()
     test_brave_real_response()
     test_brave_fallback_when_structure_unexpected()
     test_resolution()

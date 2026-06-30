@@ -21,10 +21,44 @@ from __future__ import annotations
 
 import json
 import logging
+import unicodedata
+from urllib.parse import quote
 
 from app.config import settings
 
 logger = logging.getLogger("search_providers")
+
+# スマートクォート/特殊ダッシュ等 → ASCII 等価へ変換（検索クエリの正規化）。
+# 例: AfriK’Ecotour の ’（U+2019）→ '。NFKC では分解されないため明示的に置換する。
+_SMART_CHARS = {
+    "‘": "'", "’": "'", "‚": "'", "‛": "'", "ʼ": "'",
+    "′": "'", "´": "'", "`": "'",
+    "“": '"', "”": '"', "„": '"', "‟": '"', "″": '"',
+    "–": "-", "—": "-", "−": "-", "…": "...",
+    " ": " ", "　": " ",
+}
+
+
+def sanitize_query(query: str) -> str:
+    """検索クエリを正規化する（NFKC ＋ スマートクォート→ASCII ＋ 余白整理）。
+
+    検索 API へ送る前に必ず通す。ASCII へ落とすのではなく Unicode は維持し、
+    送信側で UTF-8 として percent-encode する（要件）。
+    """
+    q = unicodedata.normalize("NFKC", query or "")
+    for k, v in _SMART_CHARS.items():
+        q = q.replace(k, v)
+    return " ".join(q.split()).strip()
+
+
+def _utf8_query_url(endpoint: str, params: dict) -> str:
+    """params を UTF-8 で percent-encode して URL を組み立てる（ascii codec 回避）。
+
+    httpx の params に依存せず、quote(..., safe="") で UTF-8 バイト列を
+    percent-encode するため、非 ASCII でも 'ascii' codec エラーが起きない。
+    """
+    parts = [f"{quote(str(k), safe='')}={quote(str(v), safe='')}" for k, v in params.items()]
+    return endpoint + "?" + "&".join(parts)
 
 # 検索 API 呼び出しにはブラウザ偽装ヘッダー（Sec-Fetch-*, Accept: text/html 等）を
 # 付けない。これらが付くと一部 API（Brave 等）がリクエストを弾き、結果が 0 件に
@@ -225,16 +259,19 @@ def _brave_search_fn(count: int):
     client = _new_client()
 
     def search(query: str) -> list[dict]:
+        # クエリを正規化（NFKC ＋ スマートクォート）し、UTF-8 で percent-encode した
+        # URL を組み立てて送る（params に文字列を渡さず ascii codec エラーを回避）。
+        q = sanitize_query(query)
+        url = _utf8_query_url(BRAVE_ENDPOINT, {"q": q, "count": count})
         try:
             resp = client.get(
-                BRAVE_ENDPOINT,
-                params={"q": query, "count": count},
+                url,
                 headers={"X-Subscription-Token": settings.brave_search_api_key},
             )
         except Exception as exc:  # noqa: BLE001  ステータス・本文を必ずログに残す
             logger.warning(
                 "Brave search error '%s': %s | body=%s",
-                query, exc, _error_body(exc),
+                q, exc, _error_body(exc),
             )
             return []
         try:
@@ -242,13 +279,13 @@ def _brave_search_fn(count: int):
         except Exception as exc:  # noqa: BLE001  非 JSON はそのまま記録
             logger.warning(
                 "Brave non-JSON response '%s': status=%s body=%s",
-                query, resp.status_code, resp.text[:1000],
+                q, resp.status_code, resp.text[:1000],
             )
             return []
         results = parse_brave_results(payload)
         logger.info(
             "Brave search '%s': status=%s, %d result(s)",
-            query, resp.status_code, len(results),
+            q, resp.status_code, len(results),
         )
         # 0 件ならレスポンス JSON を丸ごと（先頭）ログに出して原因を可視化する
         if not results:
@@ -256,7 +293,7 @@ def _brave_search_fn(count: int):
                 raw = json.dumps(payload, ensure_ascii=False)[:2000]
             except Exception:  # noqa: BLE001
                 raw = str(payload)[:2000]
-            logger.warning("Brave 0 results '%s' raw=%s", query, raw)
+            logger.warning("Brave 0 results '%s' raw=%s", q, raw)
         return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
@@ -268,22 +305,19 @@ def _serpapi_search_fn(count: int):
     client = _new_client()
 
     def search(query: str) -> list[dict]:
+        q = sanitize_query(query)
+        url = _utf8_query_url(SERPAPI_ENDPOINT, {
+            "engine": "google", "q": q, "num": count,
+            "api_key": settings.serpapi_api_key,
+        })
         try:
-            payload = client.get_json(
-                SERPAPI_ENDPOINT,
-                params={
-                    "engine": "google",
-                    "q": query,
-                    "num": count,
-                    "api_key": settings.serpapi_api_key,
-                },
-            )
+            payload = client.get(url).json()
         except Exception as exc:  # noqa: BLE001
             logger.warning("SerpAPI search error '%s': %s | body=%s",
-                           query, exc, _error_body(exc))
+                           q, exc, _error_body(exc))
             return []
         results = parse_serpapi_results(payload)
-        logger.info("SerpAPI search '%s': %d result(s)", query, len(results))
+        logger.info("SerpAPI search '%s': %d result(s)", q, len(results))
         return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
@@ -295,22 +329,23 @@ def _tavily_search_fn(count: int):
     client = _new_client()
 
     def search(query: str) -> list[dict]:
+        q = sanitize_query(query)
         try:
             payload = client.post_json(
                 TAVILY_ENDPOINT,
                 json={
                     "api_key": settings.tavily_api_key,
-                    "query": query,
+                    "query": q,
                     "max_results": count,
                     "search_depth": "basic",
                 },
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Tavily search error '%s': %s | body=%s",
-                           query, exc, _error_body(exc))
+                           q, exc, _error_body(exc))
             return []
         results = parse_tavily_results(payload)
-        logger.info("Tavily search '%s': %d result(s)", query, len(results))
+        logger.info("Tavily search '%s': %d result(s)", q, len(results))
         return results[:count]
 
     search._client = client  # type: ignore[attr-defined]
@@ -322,22 +357,21 @@ def _google_cse_search_fn(count: int):
     client = _new_client()
 
     def search(query: str) -> list[dict]:
+        q = sanitize_query(query)
+        url = _utf8_query_url(GOOGLE_CSE_ENDPOINT, {
+            "key": settings.google_cse_api_key,
+            "cx": settings.google_cse_cx,
+            "q": q,
+            "num": min(count, 10),  # CSE は最大 10
+        })
         try:
-            payload = client.get_json(
-                GOOGLE_CSE_ENDPOINT,
-                params={
-                    "key": settings.google_cse_api_key,
-                    "cx": settings.google_cse_cx,
-                    "q": query,
-                    "num": min(count, 10),  # CSE は最大 10
-                },
-            )
+            payload = client.get(url).json()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Google CSE search error '%s': %s | body=%s",
-                           query, exc, _error_body(exc))
+                           q, exc, _error_body(exc))
             return []
         results = parse_google_cse_results(payload)
-        logger.info("Google CSE search '%s': %d result(s)", query, len(results))
+        logger.info("Google CSE search '%s': %d result(s)", q, len(results))
         return results[:count]
 
     search._client = client  # type: ignore[attr-defined]

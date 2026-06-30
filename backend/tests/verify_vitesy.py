@@ -181,6 +181,65 @@ def _run_campaign_page_path() -> bool:
     return ok
 
 
+def _run_unicode_fallback_path() -> bool:
+    """要件：Unicodeタイトルで例外なし＋長い件名が0件なら短縮クエリで発見する。"""
+    print("\n=== Unicode正規化 ＋ 短縮クエリ・フォールバック ===")
+    ok = True
+    # 1. Unicodeタイトルで sanitize → UTF-8 URL が ascii-safe（'ascii' codec 例外なし）
+    for t in ["AfriK’Ecotour", "Vitesy Fruit Bowl: Reinventing Fruit Freshness"]:
+        q = sp.sanitize_query(t)
+        url = sp._utf8_query_url(sp.BRAVE_ENDPOINT, {"q": q, "count": 10})
+        try:
+            url.encode("ascii")
+            safe = True
+        except UnicodeEncodeError:
+            safe = False
+        print(f"  sanitize {t!r} -> {q!r} : URL ascii-safe={safe}")
+        ok = ok and safe
+
+    # 2. 長い件名クエリは0件、短縮 "Vitesy ..." で SNS/公式が返る検索をシミュレート。
+    #    検索エンジン本体は web_research が build_web_search_queries（多くは引用符付き
+    #    の長いクエリ）を投げて 0 件 → フォールバックで短縮クエリを投げる流れを再現。
+    fb_results = {
+        "Vitesy": [
+            {"url": "https://vitesy.com/", "title": "Vitesy Official", "snippet": "Vitesy"},
+            {"url": "https://www.facebook.com/vitesy", "title": "Vitesy Facebook", "snippet": "Vitesy"},
+            {"url": "https://www.instagram.com/vitesy/", "title": "Vitesy IG", "snippet": "Vitesy"},
+            {"url": "https://www.linkedin.com/company/vitesy/", "title": "Vitesy LinkedIn", "snippet": "Vitesy"},
+        ],
+    }
+
+    def picky_search(query: str):
+        # 引用符付き/長い件名クエリは 0 件。短縮クエリだけ結果を返す。
+        return fb_results.get(query.strip(), [])
+
+    picky_search.provider = "brave"  # type: ignore[attr-defined]
+
+    # クラファンページHTMLは公式リンクを含めない（フォールバック検索で発見させる）
+    def fetch_no_official(url: str):
+        if url.rstrip("/") == Vitesy.source_url.rstrip("/"):
+            return "<html><body><h1>Vitesy Fruit Bowl</h1></body></html>"
+        return fetch(url)
+
+    res = w.web_research(Vitesy(), None, fetch_fn=fetch_no_official, search_fn=picky_search)
+    soc = res["discovered_socials"]
+    print(f"  フォールバック実行クエリ: {[q for q in res['searched_queries'] if not q.startswith(chr(34))][-5:]}")
+    print(f"  巡回URL: {res['debug_counts']['crawled']} / 公式: "
+          f"{any('vitesy.com' in u for u in res['searched_urls'])}")
+    for plat in ("facebook", "instagram", "linkedin"):
+        print(f"  {plat}: {soc.get(plat)}")
+    checks = [
+        ("短縮フォールバックで公式サイト発見", any("vitesy.com" in u for u in res["searched_urls"])),
+        ("Facebook 発見", bool(soc.get("facebook"))),
+        ("Instagram 発見", bool(soc.get("instagram"))),
+        ("LinkedIn 発見", bool(soc.get("linkedin"))),
+    ]
+    for label, cond in checks:
+        print(f"  [{'OK' if cond else 'NG'}] {label}")
+        ok = ok and cond
+    return ok
+
+
 def _run_brave_path() -> bool:
     print("\n=== Brave レスポンス → parse_brave_results → web_research（要件8）===")
     parsed = sp.parse_brave_results(BRAVE_PAYLOAD)
@@ -266,6 +325,7 @@ def main() -> int:
         ok = ok and cond
 
     ok = _run_campaign_page_path() and ok
+    ok = _run_unicode_fallback_path() and ok
     ok = _run_brave_path() and ok
 
     print("\n" + ("すべて期待どおり（巡回1件問題は解消）" if ok else "未達あり"))

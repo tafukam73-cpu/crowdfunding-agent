@@ -390,7 +390,12 @@ def _default_search_fn():
     )
 
     def search(query: str) -> list[dict]:
-        url = "https://html.duckduckgo.com/html/?q=" + quote_plus(query)
+        from app.services.search_providers import sanitize_query
+
+        # NFKC 正規化＋スマートクォート変換のうえ UTF-8 で percent-encode する
+        url = "https://html.duckduckgo.com/html/?q=" + quote_plus(
+            sanitize_query(query), encoding="utf-8"
+        )
         try:
             html = client.get_text(url)
         except Exception as exc:  # noqa: BLE001  検索失敗は graceful に空で返す
@@ -765,6 +770,33 @@ def extract_official_from_page(
     return best
 
 
+def build_fallback_queries(
+    project: Project, research: CompanyResearch | None = None
+) -> list[str]:
+    """検索が振るわない時の短縮フォールバッククエリ（要件）。
+
+    例: "Vitesy Fruit Bowl: Reinventing Fruit Freshness"
+        → "Vitesy" → "Vitesy Facebook" → "Vitesy Instagram" → "Vitesy LinkedIn"
+    メーカー名 → 短縮タイトル → タイトル先頭語 の順で短いベース語を決める。
+    """
+    kw = build_keyword_candidates(project, research)
+    base = (kw["maker_name"] or "").strip()
+    if not base:
+        # メーカー名が無ければ短縮タイトル（無ければ件名）の先頭語をブランド語とみなす
+        head = (kw["short_title"] or kw["project_title"] or "").strip()
+        base = head.split(" ")[0].strip() if head else ""
+    base = base.strip()
+    if not base:
+        return []
+    return [
+        base,
+        f"{base} Facebook",
+        f"{base} Instagram",
+        f"{base} LinkedIn",
+        f"{base} official website",
+    ]
+
+
 def _as_result(item) -> dict | None:
     """search_fn の戻り値（str か dict）を {url,title,snippet} に正規化する。"""
     if isinstance(item, str):
@@ -841,74 +873,88 @@ def web_research(
             social_debug[platform] = {"url": norm, "score": score, "source": source}
         return True
 
+    def run_query(q: str) -> None:
+        """1 クエリを検索し、結果をスコアリングして各構造に振り分ける。"""
+        nonlocal search_failures
+        searched_queries.append(q)
+        try:
+            raw = search(q) or []
+        except Exception as exc:  # noqa: BLE001  個別失敗は無視
+            logger.info("search error (%s): %s", q, exc)
+            raw = []
+        if not raw:
+            search_failures += 1
+        taken = 0
+        for item in raw:
+            if taken >= MAX_RESULTS_PER_QUERY:
+                break
+            rec = _as_result(item)
+            if rec is None or rec["url"] in seen_results:
+                continue
+            seen_results.add(rec["url"])
+            taken += 1
+            url = rec["url"]
+            score, reason = score_search_result(
+                url, rec["title"], rec["snippet"],
+                project_terms=project_terms, maker_terms=maker_terms,
+                official_domain=official_domain or None,
+            )
+            kind = "excluded"
+            adopted = False
+            platform = _social_platform(url)
+            if score < 0:
+                kind = "excluded"
+            elif platform:
+                kind = "social"
+                if score >= SOCIAL_ADOPT_MIN_SCORE:
+                    adopted = consider_social(platform, url, score, f"search:{q}")
+                if not adopted:
+                    reason = reason + "（スコア不足/正規化不可で不採用）" \
+                        if score >= 0 else reason
+            elif _is_pdf_url(url):
+                kind = "pdf"
+                if url not in pdf_seen:
+                    pdf_seen.add(url)
+                    name = urlparse(url).path.rsplit("/", 1)[-1] or "PDF"
+                    pdfs.append({"url": url, "label": name, "relevant": True})
+                    adopted = True
+            else:
+                kind = "page"
+                host = urlparse(url).netloc.lower()
+                non_official = any(h in host for h in _NON_OFFICIAL_HOST_HINTS)
+                if _is_skip_url(url):
+                    pass
+                elif non_official:
+                    # マーケットプレイス/SNS/ニュース等は巡回せず結果として記録のみ
+                    reason = reason + "（非公式ホストのため巡回対象外）"
+                else:
+                    page_candidates.append((score, url))
+                    adopted = True
+            if len(search_records) < MAX_SEARCH_RESULTS_SAVED:
+                search_records.append({
+                    "query": q,
+                    "url": url,
+                    "title": rec["title"][:200] or None,
+                    "score": score,
+                    "kind": kind,
+                    "adopted": adopted,
+                    "reason": reason,
+                })
+
     try:
         for q in generated_queries[:MAX_QUERIES]:
-            searched_queries.append(q)
-            try:
-                raw = search(q) or []
-            except Exception as exc:  # noqa: BLE001  個別失敗は無視
-                logger.info("search error (%s): %s", q, exc)
-                raw = []
-            if not raw:
-                search_failures += 1
-            taken = 0
-            for item in raw:
-                if taken >= MAX_RESULTS_PER_QUERY:
-                    break
-                rec = _as_result(item)
-                if rec is None or rec["url"] in seen_results:
+            run_query(q)
+        # フォールバック：公式サイト/SNS/巡回ページを全く拾えなかったら短縮クエリで
+        # 再検索する（フル件名 → メーカー名 → "<名> Facebook/Instagram/LinkedIn"）。
+        if not page_candidates and not socials:
+            for q in build_fallback_queries(project, research):
+                if q in searched_queries:
                     continue
-                seen_results.add(rec["url"])
-                taken += 1
-                url = rec["url"]
-                score, reason = score_search_result(
-                    url, rec["title"], rec["snippet"],
-                    project_terms=project_terms, maker_terms=maker_terms,
-                    official_domain=official_domain or None,
-                )
-                kind = "excluded"
-                adopted = False
-                platform = _social_platform(url)
-                if score < 0:
-                    kind = "excluded"
-                elif platform:
-                    kind = "social"
-                    if score >= SOCIAL_ADOPT_MIN_SCORE:
-                        adopted = consider_social(
-                            platform, url, score, f"search:{q}"
-                        )
-                    if not adopted:
-                        reason = reason + "（スコア不足/正規化不可で不採用）" \
-                            if score >= 0 else reason
-                elif _is_pdf_url(url):
-                    kind = "pdf"
-                    if url not in pdf_seen:
-                        pdf_seen.add(url)
-                        name = urlparse(url).path.rsplit("/", 1)[-1] or "PDF"
-                        pdfs.append({"url": url, "label": name, "relevant": True})
-                        adopted = True
-                else:
-                    kind = "page"
-                    host = urlparse(url).netloc.lower()
-                    non_official = any(h in host for h in _NON_OFFICIAL_HOST_HINTS)
-                    if _is_skip_url(url):
-                        pass
-                    elif non_official:
-                        # マーケットプレイス/SNS/ニュース等は巡回せず結果として記録のみ
-                        reason = reason + "（非公式ホストのため巡回対象外）"
-                    else:
-                        page_candidates.append((score, url))
-                        adopted = True
-                if len(search_records) < MAX_SEARCH_RESULTS_SAVED:
-                    search_records.append({
-                        "query": q,
-                        "url": url,
-                        "title": rec["title"][:200] or None,
-                        "score": score,
-                        "kind": kind,
-                        "adopted": adopted,
-                        "reason": reason,
-                    })
+                logger.info("web_research[%s] simplified-query fallback: %s",
+                            getattr(project, "id", "?"), q)
+                run_query(q)
+                if page_candidates or socials:
+                    break
     finally:
         if own_search:
             client = getattr(search, "_client", None)
