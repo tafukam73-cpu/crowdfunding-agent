@@ -9,6 +9,7 @@ HTML を与えればネットワーク無しで検証できるようにしてい
 """
 from __future__ import annotations
 
+import html as _html
 import logging
 import re
 from datetime import datetime, timezone
@@ -715,7 +716,100 @@ def extract_official_link(
         if score >= 40 and score > best_score:
             best_score = score
             best = f"{urlparse(absu).scheme}://{urlparse(absu).netloc}"
+    # <a> タグで見つからない場合、Kickstarter 等の埋め込み JSON
+    # （"websites":[{"url":...}]）からも公式サイトを探す（要件）。
+    if best is None:
+        emb = official_from_websites(extract_embedded_websites(html))
+        if emb:
+            return emb
     return best
+
+
+# ---------------- 埋め込み JSON の websites 配列（Kickstarter 等） ----------------
+# Kickstarter のプロジェクトページはクリエイターの公式サイトを <a> ではなく、
+# HTML エンティティ化された埋め込み JSON の "websites":[{"url":"https://..."}] に
+# 持つことがある。これをデコードして抽出する。
+
+# 公式サイトに採用しないインフラ/解析/CDN/決済ホスト（要件 4）。
+_INFRA_HOST_HINTS = (
+    "kck.st", "ksr.io", "ksr-static", "ksr-ugc", "cloudfront", "akamai",
+    "stripe.", "js.stripe", "segment.", "siftscience", "sk-diagnostics",
+    "tiktok.", "doubleclick", "googletagmanager", "google-analytics",
+    "gstatic", "mouseflow", "transcend-cdn", "simpli.fi", "trkn.us",
+    "redditstatic", "onetrust", "cookielaw", "fbcdn", "adsystem",
+    "ogp.me", "schema.org", "w3.org", "fonts.", "cdn.",
+)
+
+_WEBSITES_ARRAY_RE = re.compile(r'"websites"\s*:\s*\[(.*?)\]', re.DOTALL)
+_URL_IN_JSON_RE = re.compile(r'https?://[^\s"\'\\<>]+')
+
+
+def _is_excluded_official_host(url: str) -> bool:
+    """公式サイト候補から除外すべきホスト（プラットフォーム/SNS/CDN/解析）か。"""
+    host = urlparse(url).netloc.lower()
+    if is_platform_url(url):
+        return True
+    if any(h in host for h in _NON_OFFICIAL_LINK_HINTS):
+        return True
+    if any(h in host for h in _INFRA_HOST_HINTS):
+        return True
+    return False
+
+
+def extract_embedded_websites(html: str) -> list[str] | None:
+    """埋め込み JSON の "websites":[...] から URL 一覧を返す。
+
+    - 配列が 1 つも無ければ None（Kickstarter 以外/JSON 無し）。
+    - 配列はあるが URL が無ければ [] を返す（= 公式サイト未登録）。
+    HTML エンティティ（&quot; など）はデコードしてから解析する（要件 2）。
+    """
+    if not html:
+        return None
+    text = _html.unescape(html)
+    arrays = _WEBSITES_ARRAY_RE.findall(text)
+    if not arrays:
+        return None
+    urls: list[str] = []
+    seen: set[str] = set()
+    for arr in arrays:
+        for u in _URL_IN_JSON_RE.findall(arr):
+            u = u.rstrip('",\\').strip()
+            key = u.lower()
+            if u and key not in seen:
+                seen.add(key)
+                urls.append(u)
+    return urls
+
+
+def official_from_websites(urls: list[str] | None) -> str | None:
+    """websites 配列の URL から、外部公式サイトの root を 1 つ選ぶ（無ければ None）。
+
+    kickstarter.com / kck.st / stripe / analytics / CDN 等は除外する（要件 4）。
+    """
+    if not urls:  # None（配列無し）も []（未登録）も公式サイトは無い
+        return None
+    for u in urls:
+        if not u.startswith(("http://", "https://")):
+            continue
+        if _is_excluded_official_host(u):
+            continue
+        p = urlparse(u)
+        if not p.netloc:
+            continue
+        return f"{p.scheme}://{p.netloc}"
+    return None
+
+
+def embedded_websites_debug(html: str) -> dict:
+    """埋め込み websites 配列のデバッグ情報（UI 表示用）。
+
+    Returns: {present: 配列があるか, count: URL 件数, registered: 公式サイト登録あり}
+    """
+    urls = extract_embedded_websites(html)
+    if urls is None:
+        return {"present": False, "count": 0, "registered": False}
+    official = official_from_websites(urls)
+    return {"present": True, "count": len(urls), "registered": official is not None}
 
 
 # ---------------- Contact Intelligence（評価・推奨） ----------------

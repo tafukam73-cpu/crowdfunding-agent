@@ -1036,6 +1036,9 @@ def web_research(
     fail_count = 0
     email_pages_count = 0
     pid = getattr(project, "id", "?")
+    # Kickstarter 等の埋め込み JSON "websites":[...] のデバッグ情報（最初に見つけた
+    # 配列を採用）。present=配列あり / count=URL件数 / registered=公式サイト登録あり。
+    ks_websites: dict | None = None
 
     try:
         i = 0
@@ -1117,6 +1120,16 @@ def web_research(
                 sns_counts.get("tiktok", 0), len(official_links),
                 len(socials) - before_socials,
             )
+
+            # Kickstarter 等の埋め込み JSON "websites":[...] を確認（最初の1件を採用）
+            if ks_websites is None:
+                dbg = cds.embedded_websites_debug(html)
+                if dbg["present"]:
+                    ks_websites = dbg
+                    logger.info(
+                        "web_research[%s] embedded websites on %s: count=%d registered=%s",
+                        pid, url, dbg["count"], dbg["registered"],
+                    )
 
             # 問い合わせフォーム
             if cds._is_contact_url(url) and url not in forms:
@@ -1201,6 +1214,10 @@ def web_research(
         "failed": fail_count,
         "excluded": excluded_count,
         "email_pages": email_pages_count,
+        # Kickstarter 等の埋め込み websites 配列（要件 6）
+        "ks_websites_present": bool(ks_websites and ks_websites["present"]),
+        "ks_websites_count": (ks_websites["count"] if ks_websites else None),
+        "ks_websites_registered": bool(ks_websites and ks_websites["registered"]),
     }
 
     # 探索フローの要約（要件 5）。UI とログで「どこまで進んだか」が分かる。
@@ -1208,6 +1225,9 @@ def web_research(
     flow_bits.append(f"{len(search_records)}件取得")
     if effective_official:
         flow_bits.append(f"公式サイト({effective_domain})")
+    elif ks_websites and ks_websites["present"] and not ks_websites["registered"]:
+        # Kickstarter の埋め込み websites:[] = クリエイター未登録（公式サイト未発見の根拠）
+        flow_bits.append("公式サイト未登録(KS websites:[])")
     if any(p["type"] == "contact" for p in candidate_pages):
         flow_bits.append("Contact")
     if any(p["type"] == "about" for p in candidate_pages):

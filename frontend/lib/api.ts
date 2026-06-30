@@ -915,6 +915,10 @@ export type WebDebugCounts = {
   failed: number | null;
   excluded: number | null;
   email_pages: number | null;
+  // Kickstarter 等の埋め込み JSON "websites":[...]
+  ks_websites_present?: boolean | null;
+  ks_websites_count?: number | null;
+  ks_websites_registered?: boolean | null;
 };
 
 export type DiscoveredPdf = {

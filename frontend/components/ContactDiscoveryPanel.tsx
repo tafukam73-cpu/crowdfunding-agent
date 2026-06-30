@@ -1020,6 +1020,25 @@ function WebResearchSection({
             </div>
           )}
 
+          {/* Kickstarter 等の埋め込み websites 配列の状況（公式サイト未登録の根拠） */}
+          {data.web_debug_counts?.ks_websites_present && (
+            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs">
+              <span className="font-semibold text-slate-600">
+                Kickstarter websites 配列：
+              </span>{" "}
+              <span className="text-slate-700">
+                あり（{data.web_debug_counts.ks_websites_count ?? 0} 件）
+              </span>
+              {data.web_debug_counts.ks_websites_registered ? (
+                <span className="ml-1 text-emerald-700">公式サイト登録あり</span>
+              ) : (
+                <span className="ml-1 rounded bg-amber-50 px-1 text-amber-700">
+                  公式サイト未登録（クリエイターが外部サイトを登録していません）
+                </span>
+              )}
+            </div>
+          )}
+
           {data.web_evidence_summary && (
             <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
               {data.web_evidence_summary}

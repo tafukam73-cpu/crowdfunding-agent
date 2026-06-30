@@ -138,10 +138,59 @@ def test_not_found():
     check("discover: 未発見は None", d_off is None)
 
 
+def test_embedded_websites():
+    """要件7：Kickstarter 埋め込み JSON "websites":[...] からの公式サイト抽出。"""
+    print("test_embedded_websites")
+
+    # websites:[{url:"https://brand.com"}]（HTMLエンティティ化）→ brand.com を採用
+    enc = (
+        'x &quot;launchedProjects&quot;:{&quot;totalCount&quot;:1},'
+        '&quot;websites&quot;:[{&quot;url&quot;:&quot;https://brand.com&quot;,'
+        '&quot;type&quot;:&quot;web&quot;}]} y'
+    )
+    check("entity化 websites を抽出", cds.extract_embedded_websites(enc) == ["https://brand.com"])
+    check("brand.com を公式採用",
+          cds.official_from_websites(cds.extract_embedded_websites(enc)) == "https://brand.com")
+    # extract_official_link が <a> 無しでも JSON から拾う
+    check("extract_official_link が JSON フォールバック",
+          cds.extract_official_link(enc, "https://www.kickstarter.com/projects/x",
+                                    cds.significant_terms("X")) == "https://brand.com")
+
+    # websites:[] → None（公式サイト未登録）
+    empty = '&quot;websites&quot;:[]},&quot;description&quot;:&quot;app&quot;'
+    check("空配列は []", cds.extract_embedded_websites(empty) == [])
+    check("空配列は公式 None", cds.official_from_websites(cds.extract_embedded_websites(empty)) is None)
+    dbg = cds.embedded_websites_debug(empty)
+    check("デバッグ: present=True", dbg["present"] is True)
+    check("デバッグ: count=0", dbg["count"] == 0)
+    check("デバッグ: registered=False", dbg["registered"] is False)
+
+    # 配列が無い（Kickstarter 以外）→ None
+    check("配列無しは None", cds.extract_embedded_websites("<html>no json</html>") is None)
+    check("配列無しデバッグ present=False",
+          cds.embedded_websites_debug("<html>x</html>")["present"] is False)
+
+    # platform/CDN/analytics/stripe のみ → 除外して None
+    infra = (
+        '"websites":[{"url":"https://kck.st/abc"},{"url":"https://js.stripe.com/v3"},'
+        '{"url":"https://analytics.tiktok.com/x"},'
+        '{"url":"https://www.kickstarter.com/profile/y"},'
+        '{"url":"https://cdn.segment.com/a.js"}]'
+    )
+    check("インフラ/CDN/解析のみは公式 None",
+          cds.official_from_websites(cds.extract_embedded_websites(infra)) is None)
+
+    # 複数（CDN + 実ドメイン混在）→ 実ドメインを採用
+    mixed = '"websites":["https://js.stripe.com/v3","https://acme-gear.com"]'
+    check("CDNを飛ばして実ドメインを採用",
+          cds.official_from_websites(cds.extract_embedded_websites(mixed)) == "https://acme-gear.com")
+
+
 def main():
     test_platform_detection()
     test_cases_not_platform()
     test_not_found()
+    test_embedded_websites()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

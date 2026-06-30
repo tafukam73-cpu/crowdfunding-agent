@@ -94,6 +94,10 @@ class WebDebugCounts(BaseModel):
     failed: int | None = None         # 失敗 URL 数
     excluded: int | None = None       # 除外した検索結果 URL 数
     email_pages: int | None = None    # メールを抽出できたページ数
+    # Kickstarter 等の埋め込み JSON "websites":[...]（要件 6）
+    ks_websites_present: bool | None = None     # websites 配列が存在したか
+    ks_websites_count: int | None = None        # websites 配列の URL 件数
+    ks_websites_registered: bool | None = None  # 外部公式サイトが登録されていたか
 
 
 class WebKeywordCandidates(BaseModel):
