@@ -874,6 +874,34 @@ function WebResearchSection({
             )}
           </div>
 
+          {/* 探索フロー（要件5）＋ デバッグ集計（要件6） */}
+          {data.web_research_flow && (
+            <div className="rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">探索フロー:</span>{" "}
+              {data.web_research_flow}
+            </div>
+          )}
+          {data.web_debug_counts && (
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600 sm:grid-cols-4">
+              {(
+                [
+                  ["検索クエリ数", data.web_debug_counts.queries],
+                  ["検索結果件数", data.web_debug_counts.results],
+                  ["巡回URL数", data.web_debug_counts.crawled],
+                  ["成功URL数", data.web_debug_counts.ok],
+                  ["失敗URL数", data.web_debug_counts.failed],
+                  ["除外URL数", data.web_debug_counts.excluded],
+                  ["メール抽出対象", data.web_debug_counts.email_pages],
+                ] as [string, number | null][]
+              ).map(([label, val]) => (
+                <span key={label} className="flex items-center justify-between gap-1">
+                  <span className="text-slate-400">{label}</span>
+                  <span className="font-semibold text-slate-700">{val ?? 0}</span>
+                </span>
+              ))}
+            </div>
+          )}
+
           {data.web_evidence_summary && (
             <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
               {data.web_evidence_summary}
@@ -1042,9 +1070,23 @@ function WebResearchSection({
               <ul className="mt-1 space-y-0.5">
                 {data.web_candidate_pages.map((p, i) => (
                   <li key={i} className="break-all">
+                    <span
+                      className={`mr-1 rounded px-1 text-[10px] ${
+                        p.ok === false
+                          ? "bg-red-50 text-red-600"
+                          : "bg-emerald-50 text-emerald-600"
+                      }`}
+                    >
+                      {p.ok === false ? "失敗" : "成功"}
+                    </span>
                     {p.type && (
                       <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">
                         {p.type}
+                      </span>
+                    )}
+                    {typeof p.emails === "number" && p.emails > 0 && (
+                      <span className="mr-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">
+                        メール{p.emails}
                       </span>
                     )}
                     <a

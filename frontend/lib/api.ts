@@ -902,6 +902,19 @@ export type AiSource = {
 export type WebCandidatePage = {
   url: string;
   type: string | null;
+  ok?: boolean | null;
+  emails?: number | null;
+};
+
+// 探索処理の集計（どこまで進んだかの可視化）。
+export type WebDebugCounts = {
+  queries: number | null;
+  results: number | null;
+  crawled: number | null;
+  ok: number | null;
+  failed: number | null;
+  excluded: number | null;
+  email_pages: number | null;
 };
 
 export type DiscoveredPdf = {
@@ -977,6 +990,8 @@ export type ContactDiscovery = {
   // --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
   web_researched: boolean;
   web_search_provider: string | null;
+  web_debug_counts: WebDebugCounts | null;
+  web_research_flow: string | null;
   web_keyword_candidates: WebKeywordCandidates | null;
   web_generated_queries: string[] | null;
   web_search_results: WebSearchResult[] | null;

@@ -127,6 +127,11 @@ class ContactDiscovery(Base):
     # 実際に使用した検索プロバイダー（brave / serpapi / tavily / google_cse /
     # duckduckgo）。UI で「何で検索したか」を表示する。
     web_search_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # デバッグ集計（queries / results / crawled / ok / failed / excluded /
+    # email_pages）。探索処理がどこまで進んだかを可視化する。
+    web_debug_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 探索フローの要約（"brave検索 → 18件取得 → 公式サイト → Contact → ..."）
+    web_research_flow: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 生成したキーワード候補（project_title / short_title / maker_name /
     # brand_names / official_domain など。検索戦略のデバッグ表示用）
     web_keyword_candidates: Mapped[dict | None] = mapped_column(JSON, nullable=True)

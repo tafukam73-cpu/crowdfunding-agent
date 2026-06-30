@@ -265,6 +265,76 @@ def test_platform_social_not_adopted_end_to_end() -> None:
     check("キーワード候補を保持", res["keyword_candidates"]["project_title"] == "Cool Lamp")
 
 
+class FakeProjectNoSite:
+    """公式サイト未登録（maker_url=None）の案件。Vitesy のような実ケースを再現。"""
+
+    id = 2
+    title = "Vitesy Fruit Bowl"
+    maker_name = "Vitesy"
+    maker_url = None
+    source_url = "https://www.indiegogo.com/projects/vitesy-fruit-bowl"
+    source_site = "indiegogo"
+    description = "Vitesy Fruit Bowl keeps fruit fresh."
+    description_clean = description
+
+
+def test_infers_official_site_and_expands_crawl() -> None:
+    """要件4：maker_url 未登録でも検索結果から公式サイトを推定し巡回を増やす。"""
+    print("test_infers_official_site_and_expands_crawl")
+
+    vitesy_pages = {
+        "https://vitesy.com": (
+            '<html><body><a href="/pages/contact">Contact</a>'
+            '<a href="/about">About</a>'
+            '<a href="https://www.instagram.com/vitesy/">IG</a></body></html>'
+        ),
+        "https://vitesy.com/contact": (
+            '<html><body><a href="mailto:hello@vitesy.com">hello</a></body></html>'
+        ),
+        "https://vitesy.com/pages/contact": (
+            '<html><body><a href="mailto:partnership@vitesy.com">partner</a></body></html>'
+        ),
+        "https://vitesy.com/about": "<html><body>About Vitesy</body></html>",
+    }
+
+    def fetch(url: str):
+        return vitesy_pages.get(url.rstrip("/")) or vitesy_pages.get(url)
+
+    def search(query: str):
+        # Brave 相当：公式サイト・Contact・About・SNS＋ノイズ（>=20件）
+        out = [
+            {"url": "https://vitesy.com/", "title": "Vitesy – Official", "snippet": "Fruit Bowl"},
+            {"url": "https://vitesy.com/pages/contact", "title": "Contact Vitesy", "snippet": ""},
+            {"url": "https://vitesy.com/about", "title": "About Vitesy", "snippet": ""},
+            {"url": "https://www.instagram.com/vitesy/", "title": "Vitesy (@vitesy)", "snippet": "Fruit Bowl"},
+            {"url": "https://www.facebook.com/vitesy", "title": "Vitesy | Facebook", "snippet": ""},
+            {"url": "https://www.linkedin.com/company/vitesy/", "title": "Vitesy | LinkedIn", "snippet": ""},
+            {"url": "https://www.instagram.com/indiegogo/", "title": "Indiegogo", "snippet": "platform"},
+            {"url": "https://www.amazon.com/dp/B0XYZ", "title": "Amazon", "snippet": "buy"},
+            {"url": "https://www.youtube.com/watch?v=abc", "title": "YouTube", "snippet": ""},
+            {"url": "https://news.example.org/vitesy", "title": "news", "snippet": ""},
+        ]
+        # 件数を 20 以上に水増し（ユニーク URL）
+        for i in range(14):
+            out.append({"url": f"https://blog{i}.example.com/x", "title": "blog", "snippet": ""})
+        return out
+
+    res = w.web_research(FakeProjectNoSite(), None, fetch_fn=fetch, search_fn=search)
+
+    check("公式サイトを検索結果から推定（vitesy.com を巡回）",
+          any("vitesy.com" in u for u in res["searched_urls"]))
+    check("Contact ページまで巡回", any("contact" in u.lower() for u in res["searched_urls"]))
+    check("巡回URLが10件以上に増える", len(res["searched_urls"]) >= 10)
+    check("検索結果が20件以上記録される", len(res["search_results"]) >= 20)
+    check("実行クエリ10件以上", len(res["searched_queries"]) >= 10)
+    check("メールを抽出できる", any(e["email"].endswith("@vitesy.com") for e in res["discovered_emails"]))
+    check("Instagram を発見", res["discovered_socials"].get("instagram") == "https://www.instagram.com/vitesy/")
+    check("デバッグ集計を返す", res["debug_counts"]["crawled"] == len(res["searched_urls"]))
+    check("成功/失敗URL数を集計", res["debug_counts"]["ok"] + res["debug_counts"]["failed"] == len(res["searched_urls"]))
+    check("探索フローに公式サイト・メールが含まれる",
+          "公式サイト" in res["research_flow"] and "メール" in res["research_flow"])
+
+
 def main() -> int:
     test_query_generation()
     test_composite_query_generation()
@@ -273,6 +343,7 @@ def main() -> int:
     test_ddg_parse_excludes_engine()
     test_web_research_end_to_end()
     test_platform_social_not_adopted_end_to_end()
+    test_infers_official_site_and_expands_crawl()
     test_graceful_when_search_empty()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0

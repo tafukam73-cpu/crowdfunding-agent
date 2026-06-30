@@ -650,6 +650,50 @@ def _seed_and_known_urls(project: Project, research: CompanyResearch | None) -> 
     return seeds
 
 
+# 公式サイトとは見なさないホスト（マーケットプレイス/SNS/集約/ニュース等）。
+# maker_url 未登録時に検索結果から公式ドメインを推定する際、ここに該当する
+# ドメインは除外する。
+_NON_OFFICIAL_HOST_HINTS = (
+    "amazon.", "ebay.", "etsy.", "aliexpress.", "walmart.",
+    "youtube.", "youtu.be", "vimeo.",
+    "facebook.", "instagram.", "twitter.", "x.com", "linkedin.", "tiktok.",
+    "pinterest.", "reddit.", "medium.com", "substack.com", "linktr.ee",
+    "wikipedia.", "blogspot.", "wordpress.com", "notion.so", "notion.site",
+    "kickstarter.", "indiegogo.", "ulule.", "makuake.", "greenfunding.",
+    "wadiz.", "gofundme.", "patreon.", "crunchbase.",
+    "news", "press", "magazine", "review", "blog.",
+)
+
+
+def _infer_official_url(
+    page_candidates: list[tuple[int, str]],
+    project: Project,
+    project_terms: set[str],
+    maker_terms: set[str],
+    official_domain: str,
+) -> str:
+    """maker_url 未登録でも検索結果ページ群から公式サイト URL を推定する。
+
+    既に maker_url（official_domain）がある場合はそれを返す。無い場合は、検索結果
+    のうちマーケットプレイス/SNS/ニュース等でなく、ドメイン名がメーカー名/タイトル
+    主要語を含むページを公式サイトとみなす（スコア降順）。該当が無ければ "" を返す。
+    """
+    if official_domain:
+        return project.maker_url or ""
+    terms = (maker_terms | project_terms) or set()
+    for _score, url in sorted(page_candidates, key=lambda t: t[0], reverse=True):
+        host = urlparse(url).netloc.lower()
+        if any(h in host for h in _NON_OFFICIAL_HOST_HINTS):
+            continue
+        domain_token = cds._domain_of(url).split(".")[0]
+        if not domain_token:
+            continue
+        if any(t in domain_token or domain_token in t for t in terms):
+            p = urlparse(url)
+            return f"{p.scheme}://{p.netloc}"
+    return ""
+
+
 def _as_result(item) -> dict | None:
     """search_fn の戻り値（str か dict）を {url,title,snippet} に正規化する。"""
     if isinstance(item, str):
@@ -774,7 +818,14 @@ def web_research(
                         adopted = True
                 else:
                     kind = "page"
-                    if not _is_skip_url(url):
+                    host = urlparse(url).netloc.lower()
+                    non_official = any(h in host for h in _NON_OFFICIAL_HOST_HINTS)
+                    if _is_skip_url(url):
+                        pass
+                    elif non_official:
+                        # マーケットプレイス/SNS/ニュース等は巡回せず結果として記録のみ
+                        reason = reason + "（非公式ホストのため巡回対象外）"
+                    else:
                         page_candidates.append((score, url))
                         adopted = True
                 if len(search_records) < MAX_SEARCH_RESULTS_SAVED:
@@ -793,7 +844,35 @@ def web_research(
             if client is not None:
                 client.close()
 
-    # 2. クロール対象 URL を決める（公式サイト優先 → スコア高い検索結果ページ）
+    # 検索フェーズのサマリをログ（要件 1・2・3）
+    excluded_count = sum(1 for r in search_records if r["kind"] == "excluded")
+    logger.info(
+        "web_research[%s] provider=%s: ran %d/%d queries, %d results "
+        "(pages=%d, socials=%d, pdfs=%d, excluded=%d)",
+        getattr(project, "id", "?"), provider, len(searched_queries),
+        len(generated_queries), len(search_records), len(page_candidates),
+        len(socials), len(pdfs), excluded_count,
+    )
+    for kind in ("page", "social", "pdf"):
+        for r in search_records:
+            if r["kind"] == kind and r["adopted"]:
+                logger.info("web_research[%s] adopted %s: %s (score=%s)",
+                            getattr(project, "id", "?"), kind, r["url"], r["score"])
+
+    # 2. 公式サイトを確定（maker_url 未登録でも検索結果から推定）。代表パスを展開して
+    #    クロール深度を確保する（要件 4：最低 10〜20 ページ）。
+    inferred_official = _infer_official_url(
+        page_candidates, project, project_terms, maker_terms, official_domain
+    )
+    effective_official = official or inferred_official
+    effective_domain = official_domain or cds._domain_of(inferred_official)
+    if inferred_official and not official:
+        logger.info(
+            "web_research[%s] inferred official site from search: %s",
+            getattr(project, "id", "?"), inferred_official,
+        )
+
+    # 3. クロール対象 URL を決める（公式サイト＋代表パス優先 → 検索結果ページ）
     crawl_urls: list[str] = []
     crawl_seen: set[str] = set()
 
@@ -809,16 +888,33 @@ def web_research(
         crawl_seen.add(u)
         crawl_urls.append(u)
 
+    # 公式サイト・案件ページ・company_research の出典
     for u in _seed_and_known_urls(project, research):
         add_crawl(u)
+    # 確定/推定した公式ドメインに代表パス（Contact/About/Press/Wholesale 等）を展開
+    if effective_official:
+        p = urlparse(effective_official)
+        root = f"{p.scheme}://{p.netloc}"
+        add_crawl(root)
+        for path in WEB_KNOWN_PATHS:
+            add_crawl(root + path)
+    # 検索結果ページ（スコア順）
     for _score, u in sorted(page_candidates, key=lambda t: t[0], reverse=True):
         add_crawl(u)
 
-    # 3. クロールして抽出
+    logger.info(
+        "web_research[%s] crawl plan: %d url(s) (official=%s)",
+        getattr(project, "id", "?"), len(crawl_urls), effective_domain or "-",
+    )
+
+    # 4. クロールして抽出
     searched: list[str] = []
     candidate_pages: list[dict] = []
     email_map: dict[str, dict] = {}
     forms: list[str] = []
+    ok_count = 0
+    fail_count = 0
+    email_pages_count = 0
 
     try:
         for url in crawl_urls:
@@ -826,14 +922,21 @@ def web_research(
                 break
             html = fetch(url)
             searched.append(url)
-            candidate_pages.append({"url": url, "type": _page_type(url, official_domain)})
+            page = {"url": url, "type": _page_type(url, effective_domain), "ok": bool(html), "emails": 0}
+            candidate_pages.append(page)
             if not html:
+                fail_count += 1
+                logger.info("web_research[%s] fetch FAIL: %s",
+                            getattr(project, "id", "?"), url)
                 continue
+            ok_count += 1
 
             # メール（既存フィルタを必ず通す。出典 URL を付与）
+            page_emails = 0
             for addr in cds.extract_emails(html, site_domain):
-                score, tier = cds.score_email(addr, official_domain)
-                owner = cds.classify_email_owner(addr, official_domain, site_domain)
+                page_emails += 1
+                score, tier = cds.score_email(addr, effective_domain)
+                owner = cds.classify_email_owner(addr, effective_domain, site_domain)
                 key = addr.lower()
                 rec = email_map.get(key)
                 if rec is None:
@@ -849,6 +952,13 @@ def web_research(
                         rec["sources"].append(url)
                     if score > rec["score"]:
                         rec["score"], rec["tier"] = score, tier
+            page["emails"] = page_emails
+            if page_emails:
+                email_pages_count += 1
+            logger.info(
+                "web_research[%s] fetch ok: %s (%d chars, %d email(s))",
+                getattr(project, "id", "?"), url, len(html), page_emails,
+            )
 
             # SNS（ページ内リンク。正規化 + 運営 SNS 除外）
             for platform, link in cds.extract_socials(html, url).items():
@@ -858,7 +968,7 @@ def web_research(
             if cds._is_contact_url(url) and url not in forms:
                 forms.append(url)
             for link in cds.extract_links(html, url):
-                if official_domain and cds._same_domain(link, official_domain):
+                if effective_domain and cds._same_domain(link, effective_domain):
                     if cds._is_contact_url(link) and link not in forms:
                         forms.append(link)
 
@@ -873,6 +983,12 @@ def web_research(
             if client is not None:
                 client.close()
 
+    logger.info(
+        "web_research[%s] done: crawled=%d ok=%d fail=%d emails=%d socials=%d forms=%d",
+        getattr(project, "id", "?"), len(searched), ok_count, fail_count,
+        len(email_map), len(socials), len(forms),
+    )
+
     pdfs = pdfs[:8]
     # 運営会社（platform）のメールは営業候補に含めない
     emails = sorted(
@@ -882,7 +998,7 @@ def web_research(
     )
     primary_email = emails[0]["email"] if emails else None
     primary_form = forms[0] if forms else None
-    has_official_site = bool(project.maker_url)
+    has_official_site = bool(effective_official)
 
     score = cds.contactability_score(
         emails,
@@ -903,10 +1019,40 @@ def web_research(
     )
     evidence = cds.build_evidence_summary(emails, forms, socials, "")
 
+    debug_counts = {
+        "queries": len(searched_queries),
+        "results": len(search_records),
+        "crawled": len(searched),
+        "ok": ok_count,
+        "failed": fail_count,
+        "excluded": excluded_count,
+        "email_pages": email_pages_count,
+    }
+
+    # 探索フローの要約（要件 5）。UI とログで「どこまで進んだか」が分かる。
+    flow_bits = [f"{provider}検索"]
+    flow_bits.append(f"{len(search_records)}件取得")
+    if effective_official:
+        flow_bits.append(f"公式サイト({effective_domain})")
+    if any(p["type"] == "contact" for p in candidate_pages):
+        flow_bits.append("Contact")
+    if any(p["type"] == "about" for p in candidate_pages):
+        flow_bits.append("About")
+    for plat in ("instagram", "facebook", "linkedin"):
+        if socials.get(plat):
+            flow_bits.append(plat.capitalize())
+    if pdfs:
+        flow_bits.append(f"PDF{len(pdfs)}件")
+    flow_bits.append(f"メール{len(emails)}件抽出")
+    flow_bits.append("終了")
+    research_flow = " → ".join(flow_bits)
+    logger.info("web_research[%s] flow: %s", getattr(project, "id", "?"), research_flow)
+
     notes_bits = [
         f"provider {provider}",
         f"{len(searched_queries)}/{len(generated_queries)} query(ies) run",
-        f"{len(searched)} url(s)",
+        f"{len(search_records)} result(s)",
+        f"crawled {len(searched)} (ok {ok_count}/fail {fail_count})",
         f"{len(emails)} email(s)",
         f"{len(socials)} social(s)",
         f"score {score}",
@@ -938,6 +1084,8 @@ def web_research(
         "recommended_channel": channel,
         "confidence_score": score,
         "evidence_summary": evidence,
+        "debug_counts": debug_counts,
+        "research_flow": research_flow,
         "notes": ", ".join(notes_bits),
     }
 
@@ -982,6 +1130,8 @@ def run_web_research(
         row.web_researched = True
         row.web_researched_at = now
         row.web_search_provider = result["search_provider"]
+        row.web_debug_counts = result["debug_counts"] or None
+        row.web_research_flow = result["research_flow"] or None
         row.web_keyword_candidates = result["keyword_candidates"] or None
         row.web_generated_queries = result["generated_queries"] or None
         row.web_searched_queries = result["searched_queries"] or None

@@ -49,6 +49,20 @@ class WebCandidatePage(BaseModel):
 
     url: str
     type: str | None = None
+    ok: bool | None = None        # 取得成功したか
+    emails: int | None = None     # そのページで抽出したメール数
+
+
+class WebDebugCounts(BaseModel):
+    """探索処理の集計（どこまで進んだかの可視化）。"""
+
+    queries: int | None = None        # 実行した検索クエリ数
+    results: int | None = None        # 検索結果件数
+    crawled: int | None = None        # 巡回 URL 数
+    ok: int | None = None             # 成功 URL 数
+    failed: int | None = None         # 失敗 URL 数
+    excluded: int | None = None       # 除外した検索結果 URL 数
+    email_pages: int | None = None    # メールを抽出できたページ数
 
 
 class WebKeywordCandidates(BaseModel):
@@ -134,6 +148,8 @@ class ContactDiscoveryOut(BaseModel):
     # --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
     web_researched: bool = False
     web_search_provider: str | None = None
+    web_debug_counts: WebDebugCounts | None = None
+    web_research_flow: str | None = None
     web_keyword_candidates: WebKeywordCandidates | None = None
     web_generated_queries: list[str] | None = None
     web_search_results: list[WebSearchResult] | None = None
