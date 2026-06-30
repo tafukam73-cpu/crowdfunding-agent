@@ -3,9 +3,28 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.contact_discovery import DiscoveryStatus
+from app.services.contact_discovery_service import (
+    NON_OFFICIAL_PLATFORM_DOMAINS,
+    official_site_or_none,
+)
+
+
+def _drop_platform_queries(queries: list[str] | None) -> list[str] | None:
+    """Google 検索アシスト用クエリから site:<クラファンドメイン> を取り除く。
+
+    過去に保存した行（公式サイトをプラットフォーム URL と誤判定していた頃の
+    site:kickstarter.com など）が UI に出ないようにするための後方互換サニタイズ。
+    """
+    if not queries:
+        return queries
+    cleaned = [
+        q for q in queries
+        if not any(d in q for d in NON_OFFICIAL_PLATFORM_DOMAINS)
+    ]
+    return cleaned or None
 
 
 class DiscoveredEmail(BaseModel):
@@ -186,6 +205,20 @@ class ContactDiscoveryOut(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+    # --- 後方互換サニタイズ（古い行がプラットフォーム URL を保持していても出さない） ---
+    @field_validator("official_site_url")
+    @classmethod
+    def _no_platform_official(cls, v: str | None) -> str | None:
+        # 公式サイトとして kickstarter.com/profile/... 等は返さない。
+        return official_site_or_none(v) if v else v
+
+    @field_validator(
+        "search_queries", "web_searched_queries", "web_generated_queries"
+    )
+    @classmethod
+    def _no_platform_site_queries(cls, v: list[str] | None) -> list[str] | None:
+        return _drop_platform_queries(v)
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -703,6 +703,15 @@ def extract_official_link(
         dom_token = dom.split(".")[0]
         if dom_token and any(t in dom_token or dom_token in t for t in terms):
             score += 40
+        # アンカーテキストが URL/ドメイン自体（例: "lunohelmet.com" や
+        # "https://lunohelmet.com"）の場合、その外部サイトが本人の公式サイトである
+        # 強いシグナル（Kickstarter のクリエイタープロフィールの Website 表記など）。
+        txt_host = (
+            txt.replace("https://", "").replace("http://", "").replace("www.", "")
+            .strip().strip("/")
+        )
+        if txt_host and (txt_host == dom or txt_host.split("/")[0] == dom):
+            score += 45
         if score >= 40 and score > best_score:
             best_score = score
             best = f"{urlparse(absu).scheme}://{urlparse(absu).netloc}"
