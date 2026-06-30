@@ -945,11 +945,23 @@ export type WebSearchResult = {
   reason: string | null;
 };
 
+// 🏆 営業推奨連絡先（営業のしやすさで格付けしたメール）。
+export type SalesContact = {
+  email: string;
+  stars: number; // 1〜5（5が最適）
+  reason: string;
+  category: string | null;
+  score: number;
+  email_owner: string | null;
+  sources: string[];
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
   maker_id: number | null;
   status: DiscoveryStatus;
+  sales_contacts: SalesContact[];
   primary_email: string | null;
   primary_contact_form_url: string | null;
   official_site_url: string | null;
@@ -1211,6 +1223,10 @@ export type ExecutiveSummary = {
   japan_distributor_status: string;
   contact_status: string;
   japan_market_fit: string;
+  // 推奨送信先（営業推奨連絡先ランキングの最上位）
+  recommended_email: string | null;
+  recommended_email_reason: string | null;
+  recommended_email_stars: number | null;
   // Contact Hunter（担当者発見）
   contact_person_found: boolean;
   contact_person_name: string | null;

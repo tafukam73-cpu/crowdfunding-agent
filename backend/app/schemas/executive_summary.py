@@ -21,6 +21,10 @@ class ExecutiveSummaryOut(BaseModel):
     japan_distributor_status: str
     contact_status: str
     japan_market_fit: str
+    # 推奨送信先（営業推奨連絡先ランキングの最上位）
+    recommended_email: str | None = None
+    recommended_email_reason: str | None = None
+    recommended_email_stars: int | None = None
     # Contact Hunter（担当者発見）
     contact_person_found: bool = False
     contact_person_name: str | None = None

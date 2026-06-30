@@ -18,6 +18,18 @@ class DiscoveredEmail(BaseModel):
     sources: list[str] = []
 
 
+class SalesContact(BaseModel):
+    """営業のしやすさで格付けした連絡先（🏆 営業推奨連絡先）。"""
+
+    email: str
+    stars: int               # 1〜5（5 が最適）
+    reason: str
+    category: str | None = None
+    score: int = 0
+    email_owner: str | None = None
+    sources: list[str] = []
+
+
 class ApproachOption(BaseModel):
     channel: str
     label: str
@@ -115,6 +127,9 @@ class ContactDiscoveryOut(BaseModel):
     discovered_forms: list[str] | None = None
     discovered_socials: dict[str, str] | None = None
     searched_urls: list[str] | None = None
+
+    # 🏆 営業推奨連絡先ランキング（発見メールを営業のしやすさ順に格付け）
+    sales_contacts: list[SalesContact] = []
 
     confidence_score: int | None = None
     # Contact Intelligence

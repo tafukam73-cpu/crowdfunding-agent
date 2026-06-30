@@ -1,10 +1,9 @@
-"""AI 営業優先ランキングの検証（ネットワーク不要 / DB は in-memory SQLite）。
+"""営業推奨連絡先ランキングのオフライン検証（ネットワーク/DB 不要）。
 
-workflow_service.ranking() が Executive Summary を統合してスコア順に並べ、
-フィルタ（営業対象候補のみ / 未営業のみ / 連絡先ありのみ / 日本未販売のみ /
-Ulule のみ / サイト切替）が効くことを確認する。
+rank_sales_email（メール → 星評価・理由）と build_sales_contacts（全ソース統合・
+営業順ソート）を検証する。要件の期待値（hello=star5 / support<=star3 / cv/apply/
+authorities=star1）を満たすことを確認する。
 
-pytest 非依存で単体実行できる。
 実行（backend ディレクトリで）:
     python tests/test_sales_ranking.py
 """
@@ -15,19 +14,13 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-from sqlalchemy import create_engine, event  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
-
-from app.ai.japan_sales_checker import CHANNEL_KEYS, build_channels  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.models.contact_discovery import ContactDiscovery  # noqa: E402
-from app.models.japan_sales_check import JapanSalesCheck  # noqa: E402
-from app.models.project import Project  # noqa: E402
-from app.services import workflow_service  # noqa: E402
+from app.services.contact_discovery_service import (  # noqa: E402
+    build_sales_contacts,
+    rank_sales_email,
+)
 
 _passed = 0
 _failed = 0
@@ -43,145 +36,102 @@ def check(name: str, cond: bool) -> None:
         print(f"  FAIL- {name}")
 
 
-def _split_part(s, delim, n):
-    """Postgres の split_part 相当（本番は Postgres、テストの SQLite 用に登録する）。"""
-    if s is None:
-        return ""
-    parts = s.split(delim)
-    return parts[n - 1] if 1 <= n <= len(parts) else ""
+def test_rank_examples() -> None:
+    print("test_rank_examples")
+    expect = {
+        "hello@vitesy.com": 5,
+        "support@vitesy.com": 3,
+        "cv@vitesy.com": 1,
+        "apply@vitesy.com": 1,
+        "authorities@vitesy.com": 1,
+        "sales@x.com": 4,
+        "partnership@x.com": 4,
+        "business@x.com": 4,
+        "bd@x.com": 4,
+        "b2b@x.com": 4,
+        "distribution@x.com": 4,
+        "distributor@x.com": 4,
+        "wholesale@x.com": 4,
+        "export@x.com": 4,
+        "international@x.com": 4,
+        "contact@x.com": 5,
+        "info@x.com": 5,
+        "careers@x.com": 1,
+        "recruit@x.com": 1,
+        "recruitment@x.com": 1,
+        "privacy@x.com": 1,
+        "gdpr@x.com": 1,
+        "billing@x.com": 1,
+        "legal@x.com": 1,
+        "accounting@x.com": 1,
+        "help@x.com": 3,
+        "service@x.com": 3,
+        "press@x.com": 2,
+        "media@x.com": 2,
+    }
+    for email, exp in expect.items():
+        got = rank_sales_email(email)["stars"]
+        check(f"{email} -> star{exp}", got == exp)
+
+    check("reason present", bool(rank_sales_email("hello@x.com")["reason"]))
+    r = rank_sales_email("hello@x.com", email_owner="maker")
+    check("official-domain note", "公式ドメイン" in r["reason"] and r["stars"] == 5)
 
 
-def _session() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-
-    # _non_candidate_condition() が使う split_part を SQLite に登録（本番は Postgres）
-    @event.listens_for(engine, "connect")
-    def _register(dbapi_conn, _rec):  # noqa: ANN001
-        dbapi_conn.create_function("split_part", 3, _split_part)
-
-    Base.metadata.create_all(engine)
-    return Session(engine)
-
-
-def _add_unsold_check(db: Session, project_id: int) -> None:
-    statuses = {k: "not_found" for k in CHANNEL_KEYS}
-    db.add(
-        JapanSalesCheck(
-            project_id=project_id,
-            status="completed",
-            sales_value_stars=5,
-            channels=build_channels("p", "m", statuses),
-            ai_comment="未販売",
-            summary="未販売の可能性が高い",
-        )
-    )
+class FakeRow:
+    discovered_emails = [
+        {"email": "support@vitesy.com", "score": 30, "tier": "low", "email_owner": "maker", "sources": ["s1"]},
+        {"email": "hello@vitesy.com", "score": 60, "tier": "mid", "email_owner": "maker", "sources": ["s2"]},
+        {"email": "cv@vitesy.com", "score": 50, "tier": "other", "email_owner": "maker", "sources": ["s3"]},
+        {"email": "support@kickstarter.com", "score": 60, "tier": "mid", "email_owner": "platform", "sources": ["p"]},
+    ]
+    web_discovered_emails = [
+        {"email": "partnership@vitesy.com", "score": 90, "tier": "high", "email_owner": "maker", "sources": ["w"]},
+        {"email": "apply@vitesy.com", "score": 50, "tier": "other", "email_owner": "maker", "sources": ["w2"]},
+    ]
+    ai_candidate_emails = [
+        {"email": "authorities@vitesy.com", "score": 40, "source_url": "a", "email_owner": "maker"},
+        {"email": "hello@vitesy.com", "score": 55, "source_url": "a2", "email_owner": "maker"},
+    ]
 
 
-def _add_contact(db: Session, project_id: int) -> None:
-    db.add(
-        ContactDiscovery(
-            project_id=project_id,
-            status="completed",
-            primary_contact_form_url="https://example.com/contact",
-            instagram_url="https://instagram.com/brand",
-            contactability_score=80,
-            recommended_channel="instagram",
-        )
-    )
+def test_build_ranking() -> None:
+    print("test_build_ranking")
+    ranked = build_sales_contacts(FakeRow())
+    emails = [c["email"] for c in ranked]
+    star = {c["email"]: c["stars"] for c in ranked}
+
+    check("top is hello (star5)", emails[0] == "hello@vitesy.com" and star["hello@vitesy.com"] == 5)
+    check("hello deduped to 1", emails.count("hello@vitesy.com") == 1)
+    check("partnership star4", star["partnership@vitesy.com"] == 4)
+    check("support star3", star["support@vitesy.com"] == 3)
+    check("cv star1", star["cv@vitesy.com"] == 1)
+    check("apply star1", star["apply@vitesy.com"] == 1)
+    check("authorities star1", star["authorities@vitesy.com"] == 1)
+    check("platform email excluded", "support@kickstarter.com" not in emails)
+    star_seq = [c["stars"] for c in ranked]
+    check("stars descending", star_seq == sorted(star_seq, reverse=True))
+    check("hello > support > cv order",
+          emails.index("hello@vitesy.com") < emails.index("support@vitesy.com")
+          < emails.index("cv@vitesy.com"))
 
 
-def _seed() -> Session:
-    db = _session()
-    # A: 高評価（未販売 + 連絡先あり + 高AI評価 + 未営業）
-    a = Project(title="Eco Kitchen Tool", source_site="ulule", currency="EUR",
-                category="キッチン", description="sustainable kitchen reusable design",
-                latest_score=90, sales_status="not_started")
-    # B: 契約済み（営業価値はあるが優先度は下がる）
-    b = Project(title="Done Deal", source_site="kickstarter", currency="USD",
-                category="ガジェット", description="gadget", latest_score=88,
-                sales_status="won")
-    # C: 営業対象外 Ulule（非商品：ドキュメンタリー）
-    c = Project(title="Doc Film", source_site="ulule", currency="EUR",
-                category="映画", description="a documentary film about music festival",
-                latest_score=70, sales_status="not_started")
-    # D: 連絡先なし・チェックなし（中位）
-    d = Project(title="Plain Gadget", source_site="indiegogo", currency="USD",
-                category="ガジェット", description="gadget device", latest_score=60,
-                sales_status="not_started")
-    db.add_all([a, b, c, d])
-    db.commit()
-    for p in (a, b, c, d):
-        db.refresh(p)
-    _add_unsold_check(db, a.id)
-    _add_contact(db, a.id)
-    db.commit()
-    return db
+def test_empty() -> None:
+    print("test_empty")
 
+    class Empty:
+        discovered_emails = None
+        web_discovered_emails = None
+        ai_candidate_emails = None
 
-def test_default_ranking() -> None:
-    print("既定ランキング（スコア降順・営業対象候補のみ）")
-    db = _seed()
-    items = workflow_service.ranking(db, limit=20)
-    titles = [it["title"] for it in items]
-    check("営業対象外 Ulule（Doc Film）は除外", "Doc Film" not in titles)
-    check("先頭は高評価の Eco Kitchen Tool", items and items[0]["title"] == "Eco Kitchen Tool")
-    check("rank が 1 から振られる", items[0]["rank"] == 1)
-    # スコア降順
-    scores = [it["score"] for it in items]
-    check("スコア降順", scores == sorted(scores, reverse=True))
-    # 契約済み B は未営業 A より下
-    pos = {it["title"]: it["rank"] for it in items}
-    check("契約済みは高評価でも下位", pos.get("Done Deal", 99) > pos["Eco Kitchen Tool"])
-    # A の表示項目
-    top = items[0]
-    check("営業対象 yes", top["sales_target"] == "yes")
-    check("推奨チャネル instagram", top["recommended_channel"] == "instagram")
-    check("日本未販売テキスト", top["japan_sales_status"] == "未販売の可能性が高い")
-    check("理由が3件以上", len(top["reasons"]) >= 3)
-    db.close()
-
-
-def test_filters() -> None:
-    print("フィルタ")
-    db = _seed()
-
-    not_started = workflow_service.ranking(db, not_started_only=True)
-    check("未営業のみ → 契約済みを除外", all(it["title"] != "Done Deal" for it in not_started))
-
-    contact_only = workflow_service.ranking(db, contact_only=True)
-    check("連絡先ありのみ → Eco Kitchen Tool のみ",
-          [it["title"] for it in contact_only] == ["Eco Kitchen Tool"])
-
-    unsold = workflow_service.ranking(db, unsold_only=True)
-    check("日本未販売のみ → Eco Kitchen Tool のみ",
-          [it["title"] for it in unsold] == ["Eco Kitchen Tool"])
-
-    ulule = workflow_service.ranking(db, candidates_only=False, ulule_only=True)
-    titles = [it["title"] for it in ulule]
-    check("Ulule のみ → Ulule 案件だけ", set(titles) <= {"Eco Kitchen Tool", "Doc Film"})
-    check("Ulule のみ（対象外含む）に Doc Film が出る", "Doc Film" in titles)
-
-    site_ks = workflow_service.ranking(db, site="kickstarter", candidates_only=False)
-    check("サイト=kickstarter → Done Deal のみ",
-          [it["title"] for it in site_ks] == ["Done Deal"])
-    db.close()
-
-
-def test_sorts() -> None:
-    print("並び順")
-    db = _seed()
-    by_new = workflow_service.ranking(db, sort="created_at", candidates_only=False)
-    check("新着順で全件返る（4件）", len(by_new) == 4)
-    by_contact = workflow_service.ranking(db, sort="contact")
-    check("連絡先あり優先 → 先頭は Eco Kitchen Tool",
-          by_contact and by_contact[0]["title"] == "Eco Kitchen Tool")
-    db.close()
+    check("empty -> []", build_sales_contacts(Empty()) == [])
+    check("None -> []", build_sales_contacts(None) == [])
 
 
 def main() -> int:
-    test_default_ranking()
-    test_filters()
-    test_sorts()
+    test_rank_examples()
+    test_build_ranking()
+    test_empty()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

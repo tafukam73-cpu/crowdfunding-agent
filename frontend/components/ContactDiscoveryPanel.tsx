@@ -17,7 +17,22 @@ import {
   runContactDiscovery,
   runContactHunter,
   runWebResearch,
+  type SalesContact,
 } from "@/lib/api";
+
+// 営業推奨度の星表示（★★★★★〜★☆☆☆☆）。
+function stars(n: number): string {
+  const s = Math.max(0, Math.min(5, n));
+  return "★".repeat(s) + "☆".repeat(5 - s);
+}
+
+const STAR_COLORS: Record<number, string> = {
+  5: "text-amber-500",
+  4: "text-amber-500",
+  3: "text-slate-500",
+  2: "text-slate-400",
+  1: "text-slate-300",
+};
 
 // EmailDraftPanel と共有する「Gmail 下書きの宛先候補」セッションキー。
 // AI 候補メールを「Gmail宛先に使用」したとき、メール作成画面の宛先に引き継ぐ。
@@ -775,6 +790,109 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
   );
 }
 
+// 🏆 営業推奨連絡先（発見メールを営業のしやすさ順に格付け）。Contact Intelligence 最上部。
+function SalesRankingSection({
+  projectId,
+  contacts,
+  onApply,
+}: {
+  projectId: number;
+  contacts: SalesContact[];
+  onApply: (email: string) => void;
+}) {
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+
+  function useAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setGmailMsg(`「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`);
+  }
+
+  if (!contacts || contacts.length === 0) return null;
+  const top = contacts[0];
+
+  return (
+    <div className="rounded-md border-2 border-amber-300 bg-amber-50/70 p-4">
+      <p className="text-sm font-bold text-amber-900">🏆 営業推奨連絡先</p>
+      <p className="mt-0.5 text-xs text-amber-700">
+        発見したメールを「営業のしやすさ」で自動ランキングしました（最上位を推奨）。
+      </p>
+
+      {/* 最上位（推奨送信先） */}
+      <div className="mt-3 rounded-md border border-amber-300 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`text-base font-bold ${STAR_COLORS[top.stars]}`}>
+            {stars(top.stars)}
+          </span>
+          <span className="rounded bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">
+            推奨
+          </span>
+          <a
+            href={`mailto:${top.email}`}
+            className="font-semibold text-slate-900 hover:underline"
+          >
+            {top.email}
+          </a>
+          <CopyButton text={top.email} label="コピー" />
+        </div>
+        <p className="mt-1 text-xs text-slate-600">理由：{top.reason}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => useAsGmailTo(top.email)}
+            className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          >
+            Gmail宛先に使用（最上位）
+          </button>
+          <button
+            onClick={() => onApply(top.email)}
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+          >
+            CRMに反映
+          </button>
+        </div>
+      </div>
+
+      {gmailMsg && (
+        <p className="mt-2 text-xs font-medium text-blue-700">{gmailMsg}</p>
+      )}
+
+      {/* 残りの候補（順位つき） */}
+      {contacts.length > 1 && (
+        <ul className="mt-3 space-y-1">
+          {contacts.slice(1).map((c) => (
+            <li
+              key={c.email}
+              className="flex flex-wrap items-center gap-2 border-t border-amber-200 pt-1 text-sm"
+            >
+              <span className={`font-semibold ${STAR_COLORS[c.stars]}`}>
+                {stars(c.stars)}
+              </span>
+              <span className="text-slate-800">{c.email}</span>
+              <span className="text-xs text-slate-500">— {c.reason}</span>
+              <CopyButton text={c.email} />
+              <button
+                onClick={() => useAsGmailTo(c.email)}
+                className="rounded border border-blue-200 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50"
+              >
+                Gmail宛先
+              </button>
+              <button
+                onClick={() => onApply(c.email)}
+                className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                CRM
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // AI Web Research Mode（検索エンジン＋公式サイト横断クロールの実調査）。
 function WebResearchSection({
   projectId,
@@ -1419,6 +1537,17 @@ export default function ContactDiscoveryPanel({
       </p>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+
+      {/* 🏆 営業推奨連絡先（最上部）。発見メールを営業のしやすさ順に格付け。 */}
+      {data?.sales_contacts && data.sales_contacts.length > 0 && (
+        <div className="mt-3">
+          <SalesRankingSection
+            projectId={projectId}
+            contacts={data.sales_contacts}
+            onApply={onApply}
+          />
+        </div>
+      )}
 
       {/* Contact Hunter（誰に送るか）＋ AI連絡先リサーチ ＋ AI Web調査。
           自動抽出 / AI調査 / Web調査 / 担当者 を区別して表示する。 */}

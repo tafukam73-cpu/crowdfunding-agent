@@ -377,6 +377,10 @@ def synthesize(sig: dict) -> dict:
         ),
         "contact_status": contact_text,
         "japan_market_fit": fit_label,
+        # 推奨送信先（営業推奨連絡先ランキングの最上位。5秒判断用）
+        "recommended_email": sig.get("recommended_email"),
+        "recommended_email_reason": sig.get("recommended_email_reason"),
+        "recommended_email_stars": sig.get("recommended_email_stars"),
         # Contact Hunter（担当者発見）
         "contact_person_found": bool(sig.get("contact_person_found")),
         "contact_person_name": sig.get("contact_person_name"),
@@ -419,6 +423,12 @@ def _gather_signals(db: Session, project: Project) -> dict:
     cd = contact_discovery_service.get_latest(db, project.id)
     contact_checked = cd is not None
 
+    # 営業推奨連絡先ランキングの最上位（推奨送信先）
+    sales_contacts = (
+        contact_discovery_service.build_sales_contacts(cd) if cd else []
+    )
+    top_contact = sales_contacts[0] if sales_contacts else None
+
     # Contact Hunter（担当者発見）の最優先担当者
     top_person = contact_hunter_service.get_top_person(db, project.id)
 
@@ -458,6 +468,9 @@ def _gather_signals(db: Session, project: Project) -> dict:
         "has_facebook": bool(cd and cd.facebook_url),
         "contactability_score": cd.contactability_score if cd else None,
         "contact_recommended_channel": cd.recommended_channel if cd else None,
+        "recommended_email": top_contact["email"] if top_contact else None,
+        "recommended_email_reason": top_contact["reason"] if top_contact else None,
+        "recommended_email_stars": top_contact["stars"] if top_contact else None,
         "contact_person_found": top_person is not None,
         "contact_person_name": top_person.name if top_person else None,
         "contact_person_title": top_person.title if top_person else None,

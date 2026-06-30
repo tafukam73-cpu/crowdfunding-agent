@@ -297,6 +297,142 @@ LOW_PREFIXES = (
 )
 SCORE_HIGH, SCORE_MID, SCORE_LOW, SCORE_OTHER = 90, 60, 30, 50
 
+# ---------------- 営業向け連絡先ランキング（5 段階の星評価） ----------------
+# ローカル部の接頭辞 → (星, カテゴリ, 理由)。上から順に startswith で照合し、最初に
+# 一致したものを採用する（より具体的・営業価値の高いものを上に並べる）。
+# 星: 5=最適 / 4=営業窓口 / 3=一般・サポート / 2=広報 / 1=営業対象外。
+SALES_RANK_RULES: list[tuple[int, str, str, tuple[str, ...]]] = [
+    (
+        5, "general_contact",
+        "一般問い合わせ窓口。営業の最初の連絡先として最も適切",
+        ("hello", "hallo", "bonjour", "contact", "contactus", "contact-us",
+         "info", "information", "inquiry", "inquiries", "enquiry", "enquiries",
+         "hi", "hey", "ask"),
+    ),
+    (
+        4, "sales",
+        "営業・取引窓口（Sales / Partnership / Distribution など）",
+        ("sales", "sale", "partnership", "partnerships", "partner", "partners",
+         "business", "biz", "bd", "b2b", "distribution", "distributor",
+         "distributors", "wholesale", "export", "exports", "international",
+         "reseller", "resellers", "oem", "trade", "commercial"),
+    ),
+    (
+        3, "support",
+        "サポート/一般窓口（営業にも到達可能だが最適ではない）",
+        ("support", "help", "helpdesk", "service", "customer", "care",
+         "office", "team", "mail", "admin", "general", "shop", "store", "order"),
+    ),
+    (
+        2, "press",
+        "広報・メディア窓口（営業には間接的）",
+        ("press", "media", "pr", "marketing", "newsletter", "news",
+         "communications", "comms"),
+    ),
+    (
+        1, "non_sales",
+        "営業対象外（採用/法務/経理/自動送信など）",
+        ("career", "careers", "job", "jobs", "recruit", "recruitment",
+         "recruiting", "hr", "humanresources", "cv", "apply", "application",
+         "applications", "talent", "hiring", "authority", "authorities",
+         "privacy", "gdpr", "dpo", "dataprotection", "compliance",
+         "billing", "invoice", "invoices", "payment", "payments", "legal",
+         "accounting", "finance", "tax", "abuse", "security", "noreply",
+         "no-reply", "donotreply", "postmaster", "webmaster", "mailer-daemon"),
+    ),
+]
+# 接頭辞に一致しない個別アドレス（john@ など担当者の可能性）の既定評価。
+_SALES_RANK_DEFAULT = (3, "other", "個別アドレス（担当者の可能性。内容を確認のうえ利用）")
+
+
+def rank_sales_email(email: str, *, email_owner: str | None = None) -> dict:
+    """メールアドレスを「営業のしやすさ」で 1〜5 の星に格付けする（理由つき）。
+
+    ローカル部（@ の前）の接頭辞で判定する純粋関数。例：
+      hello@      → ★★★★★  partnership@ → ★★★★  support@ → ★★★
+      cv@/apply@/authorities@ → ★  （採用/法務など営業対象外）
+    email_owner が "maker"（公式ドメイン）なら理由に補足する（星は変えない）。
+    """
+    local = (email or "").split("@", 1)[0].strip().lower()
+    # 最長一致を採用する（"career" を "care" より優先し、採用系を 1★ に落とす等、
+    # 短い汎用接頭辞による誤判定を防ぐ）。
+    best_len = -1
+    stars, category, reason = _SALES_RANK_DEFAULT
+    for s, cat, rsn, prefixes in SALES_RANK_RULES:
+        for p in prefixes:
+            if (local == p or local.startswith(p)) and len(p) > best_len:
+                best_len = len(p)
+                stars, category, reason = s, cat, rsn
+    if email_owner == "maker" and stars >= 3:
+        reason = f"{reason}（公式ドメイン）"
+    return {"stars": stars, "category": category, "reason": reason}
+
+
+def _iter_source_emails(row: "ContactDiscovery") -> list[dict]:
+    """ContactDiscovery 行の全ソース（自動抽出/Web/AI）からメール候補を集める。"""
+    out: list[dict] = []
+
+    def add(email, score, owner, sources):
+        if not email or "@" not in str(email):
+            return
+        out.append({
+            "email": str(email),
+            "score": int(score) if isinstance(score, (int, float)) else 0,
+            "email_owner": owner,
+            "sources": sources or [],
+        })
+
+    for e in (row.discovered_emails or []):
+        if isinstance(e, dict):
+            add(e.get("email"), e.get("score", 0), e.get("email_owner"), e.get("sources"))
+    for e in (getattr(row, "web_discovered_emails", None) or []):
+        if isinstance(e, dict):
+            add(e.get("email"), e.get("score", 0), e.get("email_owner"), e.get("sources"))
+    for e in (getattr(row, "ai_candidate_emails", None) or []):
+        if isinstance(e, dict):
+            src = e.get("source_url")
+            add(e.get("email"), e.get("score", 0), e.get("email_owner"),
+                [src] if src else [])
+    return out
+
+
+def build_sales_contacts(row: "ContactDiscovery") -> list[dict]:
+    """営業推奨順に並べた連絡先ランキングを作る（星→スコア降順、重複排除）。
+
+    自動抽出 / Web 調査 / AI 候補のメールを統合し、運営・監視系を除外して
+    rank_sales_email で格付けする。Returns:
+      [{email, stars, reason, category, score, email_owner, sources}]
+    """
+    if row is None:
+        return []
+    best: dict[str, dict] = {}
+    for rec in _iter_source_emails(row):
+        owner = rec.get("email_owner")
+        if owner in ("platform", "monitoring"):
+            continue
+        # 営業に使えない候補（運営/監視/no-reply/ハッシュ等）は除外
+        if email_exclusion_reason(rec["email"]):
+            continue
+        key = rec["email"].lower()
+        cur = best.get(key)
+        if cur is None or rec["score"] > cur["score"]:
+            best[key] = rec
+    ranked: list[dict] = []
+    for rec in best.values():
+        rk = rank_sales_email(rec["email"], email_owner=rec.get("email_owner"))
+        ranked.append({
+            "email": rec["email"],
+            "stars": rk["stars"],
+            "reason": rk["reason"],
+            "category": rk["category"],
+            "score": rec["score"],
+            "email_owner": rec.get("email_owner"),
+            "sources": rec.get("sources") or [],
+        })
+    ranked.sort(key=lambda c: (c["stars"], c["score"], -len(c["email"])), reverse=True)
+    return ranked
+
+
 SOCIAL_PATTERNS = {
     "instagram": re.compile(r"instagram\.com", re.IGNORECASE),
     "facebook": re.compile(r"facebook\.com", re.IGNORECASE),
@@ -1307,6 +1443,30 @@ def apply_to_crm(
 
     contact_id: int | None = None
     if email:
+        # 営業推奨順位・理由を算出して CRM に残す（要件：営業推奨順位/理由も保存）
+        owner = None
+        if row is not None:
+            for e in (row.discovered_emails or []) + (
+                getattr(row, "web_discovered_emails", None) or []
+            ):
+                if isinstance(e, dict) and str(e.get("email", "")).lower() == email.lower():
+                    owner = e.get("email_owner")
+                    break
+        rank = rank_sales_email(email, email_owner=owner)
+        rank_note = (
+            f"営業推奨 {'★' * rank['stars']}{'☆' * (5 - rank['stars'])}"
+            f"（{rank['stars']}/5）: {rank['reason']}"
+        )
+        # 営業履歴にも推奨順位・理由を記録
+        db.add(
+            SalesActivity(
+                maker_id=maker.id,
+                project_id=project.id,
+                kind=ActivityKind.note.value,
+                summary=f"推奨送信先: {email} / {rank_note}"[:2000],
+            )
+        )
+
         existing = db.scalar(
             select(Contact).where(
                 Contact.maker_id == maker.id, Contact.email == email
@@ -1320,7 +1480,7 @@ def apply_to_crm(
                 name=f"{maker.name}（探索）",
                 role="discovered",
                 email=email,
-                notes="連絡先探索で発見",
+                notes=f"連絡先探索で発見 / {rank_note}",
             )
             db.add(contact)
             db.flush()

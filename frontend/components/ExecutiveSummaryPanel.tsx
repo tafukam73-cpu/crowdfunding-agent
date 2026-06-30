@@ -126,6 +126,32 @@ export default function ExecutiveSummaryPanel({
         </span>
       </div>
 
+      {/* 推奨送信先（営業推奨連絡先ランキングの最上位。5秒判断用） */}
+      {data.recommended_email && (
+        <div className="mt-4 rounded-md border border-amber-300 bg-amber-50/70 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-amber-900">🏆 推奨送信先</span>
+            {data.recommended_email_stars != null && (
+              <span className="text-sm font-bold text-amber-500">
+                {"★".repeat(data.recommended_email_stars)}
+                {"☆".repeat(5 - data.recommended_email_stars)}
+              </span>
+            )}
+            <a
+              href={`mailto:${data.recommended_email}`}
+              className="font-semibold text-slate-900 hover:underline"
+            >
+              {data.recommended_email}
+            </a>
+          </div>
+          {data.recommended_email_reason && (
+            <p className="mt-1 text-xs text-slate-600">
+              理由：{data.recommended_email_reason}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 主要指標 */}
       <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
         <InfoRow label="商品ジャンル" value={data.product_category} />

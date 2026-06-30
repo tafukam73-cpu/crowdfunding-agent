@@ -176,3 +176,11 @@ class ContactDiscovery(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # --- 営業推奨連絡先ランキング（DB 非保存。API が from_attributes で読む） ---
+    @property
+    def sales_contacts(self) -> list[dict]:
+        """発見メールを営業のしやすさ順（星評価＋理由）に並べたランキング。"""
+        from app.services.contact_discovery_service import build_sales_contacts
+
+        return build_sales_contacts(self)
