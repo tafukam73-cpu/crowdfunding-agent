@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import AvailabilityPanel from "@/components/AvailabilityPanel";
 import Collapsible from "@/components/Collapsible";
 import CompanyResearchPanel from "@/components/CompanyResearchPanel";
+import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
 import JapanSalesPanel from "@/components/JapanSalesPanel";
@@ -182,6 +183,21 @@ export default function ProjectDetail() {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             詳細情報（必要なときに開く）
           </h2>
+
+          {/* 連絡先（Contact Intelligence）。営業フローの STEP2 と同じ機能を、
+              フロー外でも常時開ける独立エントリとして提供する（AI連絡先リサーチ /
+              AI Web調査 / Contact Hunter の各ボタン・結果をここから実行できる）。 */}
+          <Collapsible
+            title="📇 連絡先（Contact Intelligence）"
+            hint="AIリサーチ / Web調査 / Contact Hunter"
+            defaultOpen
+          >
+            <ContactDiscoveryPanel
+              projectId={id}
+              searchKeyword={project.maker_name?.trim() || project.title}
+              onChanged={() => setDiscoveryVersion((v) => v + 1)}
+            />
+          </Collapsible>
 
           <Collapsible title="🧭 営業ワークフロー" hint="ステップ・チャネル・優先度">
             <WorkflowCard

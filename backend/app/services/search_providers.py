@@ -27,6 +27,14 @@ logger = logging.getLogger("search_providers")
 
 VALID_PROVIDERS = ("none", "brave", "serpapi", "tavily", "google_cse")
 
+# ログ表示用のプロバイダー名（例: "Brave Search API enabled"）
+_PROVIDER_LABELS = {
+    "brave": "Brave Search API",
+    "serpapi": "SerpAPI",
+    "tavily": "Tavily Search API",
+    "google_cse": "Google Custom Search API",
+}
+
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 TAVILY_ENDPOINT = "https://api.tavily.com/search"
@@ -254,11 +262,23 @@ def get_search_fn(count: int | None = None):
     factory = _FACTORIES.get(provider)
     if factory is not None:
         try:
-            return factory(count)
+            fn = factory(count)
+            logger.info("Using search provider: %s", provider)
+            logger.info("%s enabled", _PROVIDER_LABELS.get(provider, provider))
+            return fn
         except Exception as exc:  # noqa: BLE001  生成失敗時もフォールバック
             logger.warning("search provider %s init failed: %s", provider, exc)
 
     # フォールバック：既存の DuckDuckGo HTML 検索
+    configured = (settings.search_provider or "none").strip().lower()
+    if configured in _FACTORIES:
+        logger.info(
+            "Using search provider: duckduckgo "
+            "(SEARCH_PROVIDER=%s but API key/cx missing; falling back)",
+            configured,
+        )
+    else:
+        logger.info("Using search provider: duckduckgo (no search API configured)")
     from app.services.web_research_service import _default_search_fn
 
     fn = _default_search_fn()
