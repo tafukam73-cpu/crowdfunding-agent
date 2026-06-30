@@ -44,6 +44,19 @@ class AiSource(BaseModel):
     note: str | None = None
 
 
+class WebCandidatePage(BaseModel):
+    """AI Web Research が調査した候補ページ。"""
+
+    url: str
+    type: str | None = None
+
+
+class DiscoveredPdf(BaseModel):
+    url: str
+    label: str | None = None
+    relevant: bool | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -93,6 +106,24 @@ class ContactDiscoveryOut(BaseModel):
     ai_notes: str | None = None
     ai_model: str | None = None
     ai_researched_at: datetime | None = None
+
+    # --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
+    web_researched: bool = False
+    web_searched_queries: list[str] | None = None
+    web_searched_urls: list[str] | None = None
+    web_candidate_pages: list[WebCandidatePage] | None = None
+    web_discovered_emails: list[DiscoveredEmail] | None = None
+    web_discovered_forms: list[str] | None = None
+    web_discovered_socials: dict[str, str] | None = None
+    web_discovered_pdfs: list[DiscoveredPdf] | None = None
+    web_primary_email: str | None = None
+    web_primary_contact_form_url: str | None = None
+    web_recommended_channel: str | None = None
+    web_confidence_score: int | None = None
+    web_evidence_summary: str | None = None
+    web_notes: str | None = None
+    web_research_error: str | None = None
+    web_researched_at: datetime | None = None
 
     created_at: datetime
     updated_at: datetime

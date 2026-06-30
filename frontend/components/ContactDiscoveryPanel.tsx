@@ -12,6 +12,7 @@ import {
   type OutreachMessage,
   runAiContactResearch,
   runContactDiscovery,
+  runWebResearch,
 } from "@/lib/api";
 
 // EmailDraftPanel と共有する「Gmail 下書きの宛先候補」セッションキー。
@@ -590,6 +591,313 @@ function AiResearchSection({
   );
 }
 
+// Web調査の発見メール行（自動抽出と同じ DiscoveredEmail 形状）。
+type WebEmail = {
+  email: string;
+  score: number;
+  tier: string;
+  email_owner?: string | null;
+};
+
+// AI Web Research Mode（検索エンジン＋公式サイト横断クロールの実調査）。
+function WebResearchSection({
+  projectId,
+  data,
+  busy,
+  error,
+  onRun,
+  onApply,
+}: {
+  projectId: number;
+  data: ContactDiscovery | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onApply: (email: string) => void;
+}) {
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+
+  function onUseAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setGmailMsg(
+      `「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`
+    );
+  }
+
+  const researched = data?.web_researched;
+  const failed = !!data?.web_research_error;
+  // 運営会社（platform）のメールは営業先ではないため非表示
+  const emails = ((data?.web_discovered_emails ?? []) as WebEmail[]).filter(
+    (e) => e.email_owner !== "platform"
+  );
+  const socials = Object.entries(data?.web_discovered_socials ?? {});
+  const pdfs = data?.web_discovered_pdfs ?? [];
+
+  return (
+    <div className="rounded-md border border-teal-300 bg-teal-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-teal-900">
+            🌐 AI Web調査（Web Research Mode）
+          </p>
+          <p className="mt-0.5 text-xs text-teal-700">
+            検索エンジン（DuckDuckGo）＋公式サイト・Contact・About・Press・Wholesale・
+            SNS・PDFを横断調査し、実際に取得したページから連絡先を抽出します（推測
+            メールは作らず、出典付きのみ採用）。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="rounded bg-teal-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
+        >
+          {busy ? "Web調査中…" : researched ? "AI Web再調査" : "AI Web調査を実行"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {!researched && !error && (
+        <p className="mt-3 text-xs text-teal-700">
+          まだWeb調査は実行されていません。上のボタンで実行できます（検索エンジンに
+          ブロックされた場合は公式サイト探索のみで継続します）。
+        </p>
+      )}
+
+      {researched && data && (
+        <div className="mt-3 space-y-3 text-sm">
+          {failed && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              <p className="font-semibold">Web調査でエラーが発生しました。</p>
+              <p className="mt-1 whitespace-pre-wrap break-all">
+                {data.web_research_error}
+              </p>
+            </div>
+          )}
+
+          {/* 確度 & 推奨チャネル */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-800">
+              Web確度: {data.web_confidence_score ?? 0} / 100
+            </span>
+            {data.web_recommended_channel && (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                Web推奨チャネル:{" "}
+                {CHANNEL_LABELS[data.web_recommended_channel] ??
+                  data.web_recommended_channel}
+              </span>
+            )}
+          </div>
+
+          {data.web_evidence_summary && (
+            <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+              {data.web_evidence_summary}
+            </div>
+          )}
+          {data.web_notes && (
+            <p className="text-xs text-slate-500">{data.web_notes}</p>
+          )}
+
+          {/* Web primary email */}
+          {data.web_primary_email ? (
+            <div>
+              <p className="text-xs font-semibold text-teal-700">
+                Web主要メール（出典付き・再検証済み）
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="font-medium text-slate-900">
+                  {data.web_primary_email}
+                </span>
+                <CopyButton text={data.web_primary_email} label="コピー" />
+                <button
+                  onClick={() => onApply(data.web_primary_email as string)}
+                  className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  CRMに反映
+                </button>
+                <button
+                  onClick={() => onUseAsGmailTo(data.web_primary_email as string)}
+                  className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                >
+                  Gmail宛先に使用
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Web調査では出典付きの確実なメールを発見できませんでした。下記の推奨
+              チャネル・フォーム・SNS・検索クエリで営業先を確保してください。
+            </p>
+          )}
+
+          {gmailMsg && (
+            <p className="text-xs font-medium text-blue-700">{gmailMsg}</p>
+          )}
+
+          {/* 発見メール一覧 */}
+          {emails.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-teal-700">
+                発見メール（優先度順・出典付き）
+              </p>
+              <ul className="mt-1 space-y-1">
+                {emails.map((e) => (
+                  <li key={e.email} className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-medium ${
+                        TIER_COLORS[e.tier] ?? TIER_COLORS.other
+                      }`}
+                    >
+                      {e.tier} {e.score}
+                    </span>
+                    <span className="text-slate-800">{e.email}</span>
+                    <CopyButton text={e.email} />
+                    <button
+                      onClick={() => onApply(e.email)}
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      CRMに反映
+                    </button>
+                    <button
+                      onClick={() => onUseAsGmailTo(e.email)}
+                      className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      Gmail宛先に使用
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* フォーム / SNS */}
+          {(data.web_primary_contact_form_url || socials.length > 0) && (
+            <div className="flex flex-wrap items-center gap-3">
+              {data.web_primary_contact_form_url && (
+                <a
+                  href={data.web_primary_contact_form_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  問い合わせフォームを開く ↗
+                </a>
+              )}
+              {socials.map(([platform, url]) => (
+                <a
+                  key={platform}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  {platform} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
+          {/* PDF */}
+          {pdfs.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-teal-700">PDFリンク</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                {pdfs.map((p, i) => (
+                  <li key={i}>
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-all text-blue-700 hover:underline"
+                    >
+                      {p.label ?? p.url} ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 検索クエリ */}
+          {data.web_searched_queries && data.web_searched_queries.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-teal-700">
+                調査した検索クエリ
+              </p>
+              <ul className="mt-1 space-y-1">
+                {data.web_searched_queries.map((q, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded bg-white px-1.5 py-0.5 text-xs text-slate-800">
+                      {q}
+                    </code>
+                    <CopyButton text={q} />
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(q)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      Googleで開く ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* 調査した候補ページ */}
+          {data.web_candidate_pages && data.web_candidate_pages.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">
+                調査した候補ページ（{data.web_candidate_pages.length}）
+              </summary>
+              <ul className="mt-1 space-y-0.5">
+                {data.web_candidate_pages.map((p, i) => (
+                  <li key={i} className="break-all">
+                    {p.type && (
+                      <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">
+                        {p.type}
+                      </span>
+                    )}
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 hover:underline"
+                    >
+                      {p.url} ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {/* 探索した URL（出典） */}
+          {data.web_searched_urls && data.web_searched_urls.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">
+                探索した URL（{data.web_searched_urls.length}）
+              </summary>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {data.web_searched_urls.map((u, i) => (
+                  <li key={i} className="break-all">
+                    {u}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -606,6 +914,8 @@ export default function ContactDiscoveryPanel({
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [webBusy, setWebBusy] = useState(false);
+  const [webError, setWebError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
@@ -640,6 +950,22 @@ export default function ContactDiscoveryPanel({
       setAiError(String(e));
     } finally {
       setAiBusy(false);
+    }
+  }
+
+  async function onRunWeb() {
+    setWebBusy(true);
+    setWebError(null);
+    setApplyMsg(null);
+    try {
+      // Web 調査は最新の探索結果（web_* 含む）を返す。土台が無ければサーバ側で
+      // 自動探索を先に実行する。
+      setData(await runWebResearch(projectId));
+      onChanged?.();
+    } catch (e) {
+      setWebError(String(e));
+    } finally {
+      setWebBusy(false);
     }
   }
 
@@ -688,13 +1014,22 @@ export default function ContactDiscoveryPanel({
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
       {/* AI連絡先リサーチ（自動抽出とは区別して表示。data が無くても実行可能） */}
-      <div className="mt-3">
+      <div className="mt-3 space-y-3">
         <AiResearchSection
           projectId={projectId}
           data={data}
           busy={aiBusy}
           error={aiError}
           onRun={onRunAi}
+          onApply={onApply}
+        />
+        {/* AI Web調査（検索エンジン＋公式サイト横断クロール。自動抽出/AI調査と区別） */}
+        <WebResearchSection
+          projectId={projectId}
+          data={data}
+          busy={webBusy}
+          error={webError}
+          onRun={onRunWeb}
           onApply={onApply}
         />
       </div>

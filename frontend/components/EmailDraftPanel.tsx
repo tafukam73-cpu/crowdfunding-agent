@@ -313,6 +313,8 @@ export default function EmailDraftPanel({
   const [primaryEmail, setPrimaryEmail] = useState<string | null>(null);
   // AI連絡先リサーチが見つけた宛先候補（出典付き・再検証済み）
   const [aiPrimaryEmail, setAiPrimaryEmail] = useState<string | null>(null);
+  // AI Web調査が見つけた宛先候補（出典付き・再検証済み）
+  const [webPrimaryEmail, setWebPrimaryEmail] = useState<string | null>(null);
   // 連絡先探索の推奨チャネル（メール以外のとき Gmail 下書きを無効化する）
   const [recommendedChannel, setRecommendedChannel] = useState<string | null>(
     null
@@ -348,8 +350,10 @@ export default function EmailDraftPanel({
       .then((d) => {
         const auto = d?.primary_email ?? null;
         const ai = d?.ai_primary_email ?? null;
+        const web = d?.web_primary_email ?? null;
         setPrimaryEmail(auto);
         setAiPrimaryEmail(ai);
+        setWebPrimaryEmail(web);
         setRecommendedChannel(d?.recommended_channel ?? null);
 
         // ContactDiscoveryPanel の「Gmail宛先に使用」で選んだメール（一度きり適用）
@@ -365,12 +369,13 @@ export default function EmailDraftPanel({
           setTo(chosen);
           return;
         }
-        const fallback = auto ?? ai;
+        const fallback = auto ?? ai ?? web;
         if (fallback && !toEdited) setTo(fallback);
       })
       .catch(() => {
         setPrimaryEmail(null);
         setAiPrimaryEmail(null);
+        setWebPrimaryEmail(null);
         setRecommendedChannel(null);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,6 +386,7 @@ export default function EmailDraftPanel({
   const noEmailChannel =
     !primaryEmail &&
     !aiPrimaryEmail &&
+    !webPrimaryEmail &&
     recommendedChannel != null &&
     recommendedChannel !== "email";
 
@@ -502,6 +508,25 @@ export default function EmailDraftPanel({
             : "（クリックで宛先に設定）"}
         </p>
       )}
+      {webPrimaryEmail &&
+        webPrimaryEmail !== primaryEmail &&
+        webPrimaryEmail !== aiPrimaryEmail && (
+          <p className="mt-1 text-xs text-slate-500">
+            Web調査の宛先候補:{" "}
+            <button
+              onClick={() => {
+                setToEdited(true);
+                setTo(webPrimaryEmail);
+              }}
+              className="font-medium text-teal-700 hover:underline"
+            >
+              {webPrimaryEmail}
+            </button>{" "}
+            {to === webPrimaryEmail
+              ? "（適用中・編集可）"
+              : "（クリックで宛先に設定）"}
+          </p>
+        )}
 
       <div className="mt-3 space-y-3">
         {!hasAny && (

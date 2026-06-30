@@ -119,6 +119,38 @@ class ContactDiscovery(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- AI Web Research Mode（検索エンジン＋公式サイト横断クロールの実調査） ---
+    # 実行済みか
+    web_researched: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # 実行した検索クエリ / 探索した URL
+    web_searched_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    web_searched_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 調査した候補ページ [{url, type}]
+    web_candidate_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 発見した連絡先（既存フィルタ通過済み）
+    # [{email, score, tier, email_owner, sources:[url]}]
+    web_discovered_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    web_discovered_forms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    web_discovered_socials: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    web_discovered_pdfs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 代表値
+    web_primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    web_primary_contact_form_url: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    web_recommended_channel: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+    web_confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    web_evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    web_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    web_research_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    web_researched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

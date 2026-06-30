@@ -898,6 +898,18 @@ export type AiSource = {
   note: string | null;
 };
 
+// AI Web Research が調査した候補ページ。
+export type WebCandidatePage = {
+  url: string;
+  type: string | null;
+};
+
+export type DiscoveredPdf = {
+  url: string;
+  label: string | null;
+  relevant: boolean | null;
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
@@ -940,6 +952,23 @@ export type ContactDiscovery = {
   ai_notes: string | null;
   ai_model: string | null;
   ai_researched_at: string | null;
+  // --- AI Web Research Mode（検索エンジン＋公式サイト横断クロール） ---
+  web_researched: boolean;
+  web_searched_queries: string[] | null;
+  web_searched_urls: string[] | null;
+  web_candidate_pages: WebCandidatePage[] | null;
+  web_discovered_emails: DiscoveredEmail[] | null;
+  web_discovered_forms: string[] | null;
+  web_discovered_socials: Record<string, string> | null;
+  web_discovered_pdfs: DiscoveredPdf[] | null;
+  web_primary_email: string | null;
+  web_primary_contact_form_url: string | null;
+  web_recommended_channel: string | null;
+  web_confidence_score: number | null;
+  web_evidence_summary: string | null;
+  web_notes: string | null;
+  web_research_error: string | null;
+  web_researched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -979,6 +1008,22 @@ export async function runAiContactResearch(
 ): Promise<ContactDiscovery> {
   const res = await fetch(
     `${API_BASE}/projects/${id}/contact-discovery/ai-research`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// AI Web Research を実行（同期）。検索エンジン＋公式サイト横断クロールで連絡先を
+// 実調査する。失敗時も web_research_error を記録して 200 で返る。
+export async function runWebResearch(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/web-research`,
     { method: "POST" }
   );
   if (!res.ok) {

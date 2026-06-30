@@ -21,7 +21,12 @@ from app.schemas.contact_discovery import (
     ContactDiscoveryOut,
     OutreachMessageOut,
 )
-from app.services import contact_discovery_service, email_service, project_service
+from app.services import (
+    contact_discovery_service,
+    email_service,
+    project_service,
+    web_research_service,
+)
 
 logger = logging.getLogger("router.contact_discovery")
 
@@ -69,6 +74,42 @@ def run_ai_contact_research(
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
     return contact_discovery_service.run_ai_research(db, project)
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/web-research",
+    response_model=ContactDiscoveryOut,
+)
+def run_web_research(
+    project_id: int, db: Session = Depends(get_db)
+) -> ContactDiscoveryOut:
+    """AI Web Research を実行して最新の探索結果の web_* に保存する（同期）。
+
+    検索エンジン（DuckDuckGo HTML）の結果と公式サイトの代表パスを横断クロールし、
+    実際に取得したページからメール・フォーム・SNS・PDF を抽出する（既存の除外
+    フィルタを必ず通すため、推測メールや platform / sentry メールは候補に残らない）。
+    既存の探索結果が無ければ先に自動探索を実行する。失敗時も web_research_error に
+    記録し 200 で返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return web_research_service.run_web_research(db, project)
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/web-research",
+    response_model=ContactDiscoveryOut,
+)
+def get_web_research(project_id: int, db: Session = Depends(get_db)):
+    """最新の探索結果（web_* を含む）を返す。未実行なら 204。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    row = contact_discovery_service.get_latest(db, project_id)
+    if row is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return row
 
 
 @router.get(
