@@ -100,6 +100,18 @@ class WebDebugCounts(BaseModel):
     ks_websites_registered: bool | None = None  # 外部公式サイトが登録されていたか
 
 
+class WebSearchDiagnostic(BaseModel):
+    """1 検索クエリの診断（0件の原因究明用）。"""
+
+    query: str | None = None
+    provider: str | None = None
+    status: int | None = None
+    reason: str | None = None
+    results: int | None = None
+    fallback: str | None = None
+    urls: list[str] = []
+
+
 class WebKeywordCandidates(BaseModel):
     """検索語の素材になるキーワード候補（検索戦略のデバッグ表示用）。"""
 
@@ -231,6 +243,7 @@ class ContactDiscoveryOut(BaseModel):
     web_keyword_candidates: WebKeywordCandidates | None = None
     web_generated_queries: list[str] | None = None
     web_search_results: list[WebSearchResult] | None = None
+    web_search_diagnostics: list[WebSearchDiagnostic] | None = None
     web_searched_queries: list[str] | None = None
     web_searched_urls: list[str] | None = None
     web_candidate_pages: list[WebCandidatePage] | None = None

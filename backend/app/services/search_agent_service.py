@@ -389,9 +389,15 @@ def run_search_agent(
                 for item in results[:6]:
                     u = item.get("url") if isinstance(item, dict) else item
                     _add_candidate(state, str(u or ""))
+                # 検索の診断（provider/status/reason/fallback）をステップに記録
+                diag = (getattr(search, "diagnostics", None) or [{}])[-1]
                 steps.append({
                     "step": state.step, "action": "search", "query": q,
                     "results": len(results), "reason": plan.reason,
+                    "search_provider": diag.get("provider"),
+                    "search_status": diag.get("status"),
+                    "search_detail": diag.get("reason"),
+                    "search_fallback": diag.get("fallback"),
                 })
 
             # URL を取得して連絡先・候補リンクを抽出
@@ -456,9 +462,12 @@ def run_search_agent(
             if client is not None:
                 client.close()
         if own_search:
-            client = getattr(search, "_client", None)
-            if client is not None:
-                client.close()
+            if hasattr(search, "close"):
+                search.close()
+            else:
+                client = getattr(search, "_client", None)
+                if client is not None:
+                    client.close()
 
     db.commit()
     db.refresh(row)

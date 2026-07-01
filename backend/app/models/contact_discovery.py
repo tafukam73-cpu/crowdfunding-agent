@@ -140,6 +140,9 @@ class ContactDiscovery(Base):
     # 検索結果のスコアリング履歴
     # [{query, url, title, score, kind, adopted, reason}]
     web_search_results: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 各クエリの検索診断
+    # [{query, provider, status, reason, results, fallback, urls}]
+    web_search_diagnostics: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 実行した検索クエリ / 探索した URL
     web_searched_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
     web_searched_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)

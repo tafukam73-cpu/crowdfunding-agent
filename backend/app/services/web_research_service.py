@@ -97,7 +97,8 @@ _RESULT_EXCLUDE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# クラファン運営（platform）の SNS ハンドル。運営自身の公式 SNS を誤採用しない。
+# クラファン運営/集金代行（platform）の SNS ハンドル。運営自身の公式 SNS や
+# BackerKit 等のプレッジマネージャの SNS を「メーカーの SNS」として誤採用しない。
 _PLATFORM_SOCIAL_HANDLES = frozenset(
     {
         "kickstarter",
@@ -109,6 +110,13 @@ _PLATFORM_SOCIAL_HANDLES = frozenset(
         "greenfunding",
         "greenfundingjp",
         "campfire",
+        "gofundme",
+        "patreon",
+        "backerkit",
+        "pledgemanager",
+        "crowdox",
+        "gamefound",
+        "pledgebox",
     }
 )
 
@@ -312,6 +320,11 @@ def build_web_search_queries(
             add(f"{title} {creator_slug}")
             add(f"{creator_slug} {title}")
         for slug in [s for s in (creator_slug, project_slug) if s]:
+            # 短い bare / dash 変種も必ず試す（risefit-ai → "risefit ai" / "risefitai"）
+            add(slug)
+            if "-" in slug:
+                add(slug.replace("-", " "))
+                add(slug.replace("-", ""))
             for kwd in ("contact", "email", "Instagram", "Facebook",
                         "LinkedIn", "YouTube", "official website"):
                 add(f"{slug} {kwd}")
@@ -588,9 +601,16 @@ def _social_handle(platform: str, url: str) -> str | None:
 
 
 def _is_platform_social_handle(platform: str, url: str) -> bool:
-    """クラファン運営（platform）自身の公式 SNS かどうか（要件 4 の誤採用防止）。"""
+    """クラファン運営/集金代行（platform）自身の公式 SNS かどうか（誤採用防止）。
+
+    ハンドル一致（instagram.com/kickstarter）に加え、URL パスにプラットフォーム名を
+    含む運営アカウント（youtube.com/user/kickstarter, facebook.com/Backerkit 等）も除外。
+    """
     handle = _social_handle(platform, url)
-    return bool(handle and handle in _PLATFORM_SOCIAL_HANDLES)
+    if handle and handle in _PLATFORM_SOCIAL_HANDLES:
+        return True
+    path = urlparse(url).path.lower()
+    return any(h in path for h in _PLATFORM_SOCIAL_HANDLES)
 
 
 # ---------------- URL 分類・スコアリング ----------------
@@ -1039,9 +1059,15 @@ def web_research(
                     break
     finally:
         if own_search:
-            client = getattr(search, "_client", None)
-            if client is not None:
-                client.close()
+            if hasattr(search, "close"):
+                search.close()
+            else:
+                client = getattr(search, "_client", None)
+                if client is not None:
+                    client.close()
+
+    # 検索の診断（status/reason/fallback/URL）を収集（UI 表示・原因究明用）
+    search_diagnostics = list(getattr(search, "diagnostics", []) or [])
 
     # 検索フェーズのサマリをログ（要件 1・2・3）
     excluded_count = sum(1 for r in search_records if r["kind"] == "excluded")
@@ -1360,6 +1386,7 @@ def web_research(
 
     return {
         "search_provider": provider,
+        "search_diagnostics": search_diagnostics,
         # 確定/推定した公式サイト（プラットフォーム URL は採用しない）。未発見なら None。
         "official_site_url": cds.official_site_or_none(effective_official),
         "keyword_candidates": keywords,
@@ -1454,6 +1481,7 @@ def run_web_research(
         row.web_researched = True
         row.web_researched_at = now
         row.web_search_provider = result["search_provider"]
+        row.web_search_diagnostics = result["search_diagnostics"] or None
         row.web_debug_counts = result["debug_counts"] or None
         row.web_research_flow = result["research_flow"] or None
         row.web_keyword_candidates = result["keyword_candidates"] or None

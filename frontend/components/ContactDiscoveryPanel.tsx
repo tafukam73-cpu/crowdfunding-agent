@@ -620,6 +620,71 @@ type WebEmail = {
   email_owner?: string | null;
 };
 
+// 検索診断（Brave status/理由・成功/0件クエリ・DDGフォールバック・抽出URL件数）。
+function SearchDiagnostics({
+  diagnostics,
+}: {
+  diagnostics: NonNullable<ContactDiscovery["web_search_diagnostics"]>;
+}) {
+  const total = diagnostics.length;
+  const ok = diagnostics.filter((d) => (d.results ?? 0) > 0);
+  const zero = diagnostics.filter((d) => (d.results ?? 0) === 0);
+  const fellBack = diagnostics.filter((d) => d.fallback);
+  const urlCount = diagnostics.reduce((n, d) => n + (d.urls?.length ?? 0), 0);
+  // 代表的なエラー理由（最初の0件クエリの理由）
+  const firstReason = zero.find((d) => d.reason)?.reason;
+  const braveStatuses = Array.from(
+    new Set(diagnostics.map((d) => d.status).filter((s) => s != null))
+  );
+
+  return (
+    <div className="rounded-md border border-rose-200 bg-rose-50/50 p-2 text-slate-700">
+      <p className="font-semibold text-rose-800">🩺 検索診断</p>
+      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
+        <span>実行クエリ: {total}</span>
+        <span className="text-emerald-700">成功: {ok.length}</span>
+        <span className="text-slate-500">0件: {zero.length}</span>
+        <span>DDGフォールバック: {fellBack.length}</span>
+        <span>抽出URL: {urlCount}</span>
+        <span>HTTP status: {braveStatuses.join(",") || "-"}</span>
+      </div>
+      {firstReason && (
+        <p className="mt-1 text-rose-700">主な理由: {firstReason}</p>
+      )}
+      <details className="mt-1">
+        <summary className="cursor-pointer text-slate-500">
+          クエリ別の詳細（{total}）
+        </summary>
+        <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto">
+          {diagnostics.map((d, i) => (
+            <li key={i} className="break-all">
+              <span
+                className={`mr-1 rounded px-1 text-[10px] ${
+                  (d.results ?? 0) > 0
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {d.results ?? 0}件
+              </span>
+              {d.fallback && (
+                <span className="mr-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">
+                  →{d.fallback}
+                </span>
+              )}
+              <code className="text-slate-700">{d.query}</code>
+              {d.status != null && (
+                <span className="text-slate-400"> [{d.status}]</span>
+              )}
+              {d.reason && <span className="text-slate-400"> — {d.reason}</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 // slug 検索の実行状況・公式サイト登録状況（NarrationOS 等の可視化）。
 function SlugStatus({
   data,
@@ -707,6 +772,12 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
       </summary>
 
       <div className="mt-2 space-y-3">
+        {/* 検索診断（検索結果0件の原因究明） */}
+        {data.web_search_diagnostics &&
+          data.web_search_diagnostics.length > 0 && (
+            <SearchDiagnostics diagnostics={data.web_search_diagnostics} />
+          )}
+
         {/* 使用した検索プロバイダー */}
         <p className="text-slate-600">
           使用した検索プロバイダー:{" "}

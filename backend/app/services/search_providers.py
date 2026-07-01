@@ -254,50 +254,102 @@ def _error_body(exc: Exception) -> str:
         return ""
 
 
+def brave_reason(status: int | None, payload: dict | None, exc: Exception | None) -> str:
+    """Brave が 0 件/失敗になった理由を機械可読な短文で返す（ログ・UI 用）。"""
+    if exc is not None:
+        if status == 401:
+            return "401 unauthorized（APIキーが無効）"
+        if status == 403:
+            return "403 forbidden（プラン制限/キー権限）"
+        if status == 429:
+            return "429 rate limited / quota（レート制限・月次上限）"
+        if status == 402:
+            return "402 payment required（無料枠超過）"
+        if status:
+            return f"http {status}: {exc}"
+        return f"exception: {exc}"
+    if status and status >= 400:
+        return f"http {status}"
+    if isinstance(payload, dict):
+        # Brave はエラーを {"type":"ErrorResponse",...} で返すことがある
+        t = str(payload.get("type", ""))
+        if "error" in t.lower():
+            msg = ((payload.get("error") or {}).get("detail")
+                   if isinstance(payload.get("error"), dict) else payload.get("message"))
+            return f"error response: {msg or t}"
+    return "web.results empty（該当なし）"
+
+
+def brave_search_once(client, query: str, count: int) -> dict:
+    """Brave を 1 回叩き、診断つきで返す（debug CLI と本番で共有する低レベル関数）。
+
+    Returns: {url, status, body_head, results:[{url,title,snippet}], reason, error}
+    """
+    q = sanitize_query(query)
+    diag = {"provider": "brave", "query": q, "url": None, "status": None,
+            "body_head": "", "results": [], "reason": None, "error": None}
+    # API キーを検証：前後空白/改行を除去し、ASCII でなければ送らない（httpx が
+    # ヘッダーを ASCII エンコードするため、非 ASCII キーは 'ascii' codec 例外で全滅する）。
+    key = (settings.brave_search_api_key or "").strip()
+    if not key:
+        diag["reason"] = "api key missing（BRAVE_SEARCH_API_KEY 未設定）"
+        return diag
+    try:
+        key.encode("ascii")
+    except UnicodeEncodeError:
+        diag["reason"] = (
+            "api key invalid：BRAVE_SEARCH_API_KEY に非ASCII文字が含まれています"
+            "（.env のキーを確認してください。全角/日本語/引用符の混入など）"
+        )
+        logger.warning("Brave key contains non-ASCII characters; skipping Brave")
+        return diag
+    url = _utf8_query_url(BRAVE_ENDPOINT, {"q": q, "count": count})
+    diag["url"] = url
+    try:
+        resp = client.get(url, headers={"X-Subscription-Token": key})
+    except Exception as exc:  # noqa: BLE001
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        diag["status"] = status
+        diag["error"] = str(exc)
+        diag["body_head"] = _error_body(exc)
+        diag["reason"] = brave_reason(status, None, exc)
+        logger.warning("Brave error '%s': status=%s reason=%s", q, status, diag["reason"])
+        return diag
+    diag["status"] = resp.status_code
+    try:
+        diag["body_head"] = resp.text[:1000]
+    except Exception:  # noqa: BLE001
+        diag["body_head"] = ""
+    try:
+        payload = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        diag["reason"] = f"parse error (non-JSON): {exc}"
+        logger.warning("Brave non-JSON '%s': status=%s", q, resp.status_code)
+        return diag
+    results = parse_brave_results(payload)[:count]
+    diag["results"] = results
+    if not results:
+        diag["reason"] = brave_reason(resp.status_code, payload, None)
+        logger.warning("Brave 0 results '%s': status=%s reason=%s",
+                       q, resp.status_code, diag["reason"])
+    else:
+        logger.info("Brave search '%s': status=%s, %d result(s)",
+                    q, resp.status_code, len(results))
+    return diag
+
+
 def _brave_search_fn(count: int):
     # Brave は専用ヘッダー（X-Subscription-Token）が必要なため get() を直接使う。
     client = _new_client()
 
     def search(query: str) -> list[dict]:
-        # クエリを正規化（NFKC ＋ スマートクォート）し、UTF-8 で percent-encode した
-        # URL を組み立てて送る（params に文字列を渡さず ascii codec エラーを回避）。
-        q = sanitize_query(query)
-        url = _utf8_query_url(BRAVE_ENDPOINT, {"q": q, "count": count})
-        try:
-            resp = client.get(
-                url,
-                headers={"X-Subscription-Token": settings.brave_search_api_key},
-            )
-        except Exception as exc:  # noqa: BLE001  ステータス・本文を必ずログに残す
-            logger.warning(
-                "Brave search error '%s': %s | body=%s",
-                q, exc, _error_body(exc),
-            )
-            return []
-        try:
-            payload = resp.json()
-        except Exception as exc:  # noqa: BLE001  非 JSON はそのまま記録
-            logger.warning(
-                "Brave non-JSON response '%s': status=%s body=%s",
-                q, resp.status_code, resp.text[:1000],
-            )
-            return []
-        results = parse_brave_results(payload)
-        logger.info(
-            "Brave search '%s': status=%s, %d result(s)",
-            q, resp.status_code, len(results),
-        )
-        # 0 件ならレスポンス JSON を丸ごと（先頭）ログに出して原因を可視化する
-        if not results:
-            try:
-                raw = json.dumps(payload, ensure_ascii=False)[:2000]
-            except Exception:  # noqa: BLE001
-                raw = str(payload)[:2000]
-            logger.warning("Brave 0 results '%s' raw=%s", q, raw)
-        return results[:count]
+        diag = brave_search_once(client, query, count)
+        search.last_diag = diag  # type: ignore[attr-defined]
+        return diag["results"]
 
     search._client = client  # type: ignore[attr-defined]
     search.provider = "brave"  # type: ignore[attr-defined]
+    search.last_diag = None  # type: ignore[attr-defined]
     return search
 
 
@@ -387,36 +439,94 @@ _FACTORIES = {
 }
 
 
-def get_search_fn(count: int | None = None):
-    """設定に基づく検索関数を返す（query -> [{url,title,snippet}]）。
-
-    返り値は `.provider`（実際のプロバイダー名）と `._client`（close 用）を持つ。
-    API が選べない場合は DuckDuckGo HTML フォールバックを返す。
+class SearchRunner:
+    """検索実行の統合ラッパー：プライマリ（Brave 等）が 0 件/失敗なら必ず DuckDuckGo
+    HTML にフォールバックし、各クエリの診断（status/reason/results/fallback/URL）を
+    収集する。Web Research / Search Agent / debug CLI が共通で使う。
     """
-    count = count or settings.search_max_results
-    provider = resolve_provider()
-    factory = _FACTORIES.get(provider)
-    if factory is not None:
-        try:
-            fn = factory(count)
-            logger.info("Using search provider: %s", provider)
-            logger.info("%s enabled", _PROVIDER_LABELS.get(provider, provider))
-            return fn
-        except Exception as exc:  # noqa: BLE001  生成失敗時もフォールバック
-            logger.warning("search provider %s init failed: %s", provider, exc)
 
-    # フォールバック：既存の DuckDuckGo HTML 検索
-    configured = (settings.search_provider or "none").strip().lower()
-    if configured in _FACTORIES:
-        logger.info(
-            "Using search provider: duckduckgo "
-            "(SEARCH_PROVIDER=%s but API key/cx missing; falling back)",
-            configured,
-        )
-    else:
-        logger.info("Using search provider: duckduckgo (no search API configured)")
-    from app.services.web_research_service import _default_search_fn
+    def __init__(self, count: int) -> None:
+        self.count = count
+        self.provider = resolve_provider()
+        self._primary = None
+        self._ddg = None
+        self.diagnostics: list[dict] = []
+        self._client = None  # close 互換用（実体は close() で個別に閉じる）
+        factory = _FACTORIES.get(self.provider)
+        if factory is not None:
+            try:
+                self._primary = factory(count)
+                logger.info("Using search provider: %s", self.provider)
+                logger.info("%s enabled", _PROVIDER_LABELS.get(self.provider, self.provider))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("search provider %s init failed: %s", self.provider, exc)
+                self._primary = None
+        else:
+            logger.info("Using search provider: duckduckgo (no/effective API)")
 
-    fn = _default_search_fn()
-    fn.provider = "duckduckgo"  # type: ignore[attr-defined]
-    return fn
+    def _ddg_fn(self):
+        if self._ddg is None:
+            from app.services.web_research_service import _default_search_fn
+
+            self._ddg = _default_search_fn()
+        return self._ddg
+
+    def __call__(self, query: str) -> list[dict]:
+        d: dict = {"query": query, "provider": self.provider, "status": None,
+                   "reason": None, "results": 0, "fallback": None, "urls": []}
+        results: list[dict] = []
+        if self._primary is not None:
+            try:
+                results = self._primary(query) or []
+            except Exception as exc:  # noqa: BLE001
+                d["reason"] = f"exception: {exc}"
+            pd = getattr(self._primary, "last_diag", None)
+            if pd:
+                d["status"] = pd.get("status")
+                d["reason"] = pd.get("reason") or d["reason"]
+            d["results"] = len(results)
+        else:
+            d["provider"] = "duckduckgo"
+
+        # プライマリが 0 件/失敗 → DuckDuckGo HTML へフォールバック（要件6）
+        if not results:
+            try:
+                fb = self._ddg_fn()(query) or []
+            except Exception as exc:  # noqa: BLE001
+                fb = []
+                d["reason"] = f"{d['reason'] or ''} | ddg exception: {exc}".strip(" |")
+            if fb:
+                results = fb
+                d["results"] = len(fb)
+                if self._primary is not None:
+                    d["fallback"] = "duckduckgo"
+                    d["reason"] = (d["reason"] or "primary 0件") + " → DuckDuckGoで取得"
+            else:
+                if self._primary is None:
+                    d["reason"] = d["reason"] or "DuckDuckGo 0件（ブロック/レート制限の可能性）"
+                else:
+                    d["reason"] = (d["reason"] or "primary 0件") + " / DuckDuckGoも0件"
+
+        d["urls"] = [
+            (r.get("url") if isinstance(r, dict) else str(r)) for r in results[:5]
+        ]
+        self.diagnostics.append(d)
+        return results
+
+    def close(self) -> None:
+        for fn in (self._primary, self._ddg):
+            client = getattr(fn, "_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+def get_search_fn(count: int | None = None) -> SearchRunner:
+    """設定に基づく検索ランナーを返す（query -> [{url,title,snippet}]）。
+
+    `.provider`（プライマリ名）/ `.diagnostics`（各クエリの診断）/ `.close()` を持つ。
+    プライマリが 0 件/失敗なら必ず DuckDuckGo にフォールバックする。
+    """
+    return SearchRunner(count or settings.search_max_results)

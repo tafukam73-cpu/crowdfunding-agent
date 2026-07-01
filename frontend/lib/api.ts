@@ -941,6 +941,17 @@ export type WebKeywordCandidates = {
   maker_ambiguous?: boolean | null;
 };
 
+// 1 検索クエリの診断（0件の原因究明用）。
+export type WebSearchDiagnostic = {
+  query: string | null;
+  provider: string | null;
+  status: number | null;
+  reason: string | null;
+  results: number | null;
+  fallback: string | null;
+  urls: string[];
+};
+
 // 検索結果 1 件のスコアリング履歴（採用/除外理由つき）。
 export type WebSearchResult = {
   query: string | null;
@@ -989,6 +1000,10 @@ export type SearchAgentStep = {
   results: number | null;
   found: Record<string, number> | null;
   missing: string[] | null;
+  search_provider?: string | null;
+  search_status?: number | null;
+  search_detail?: string | null;
+  search_fallback?: string | null;
 };
 
 // 🏆 営業推奨連絡先（営業のしやすさで格付けしたメール）。
@@ -1053,6 +1068,7 @@ export type ContactDiscovery = {
   web_keyword_candidates: WebKeywordCandidates | null;
   web_generated_queries: string[] | null;
   web_search_results: WebSearchResult[] | null;
+  web_search_diagnostics: WebSearchDiagnostic[] | null;
   web_searched_queries: string[] | null;
   web_searched_urls: string[] | null;
   web_candidate_pages: WebCandidatePage[] | null;
