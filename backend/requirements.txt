@@ -14,3 +14,6 @@ APScheduler==3.10.4
 # Gmail 下書き連携（遅延 import。mock 運用時は未使用でも可）
 google-api-python-client==2.149.0
 google-auth==2.35.0
+
+# PDF テキスト抽出（press kit / catalog からのメール抽出。遅延 import）
+pypdf==5.1.0

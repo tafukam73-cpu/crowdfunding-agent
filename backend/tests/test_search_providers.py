@@ -40,6 +40,7 @@ def _reset() -> None:
     settings.tavily_api_key = ""
     settings.google_cse_api_key = ""
     settings.google_cse_cx = ""
+    settings.bing_search_api_key = ""
 
 
 def test_parsers() -> None:
@@ -234,12 +235,60 @@ def test_fallback_queries() -> None:
     check("メーカー名無しでも Vitesy ベース", fb2 and fb2[0] == "Vitesy")
 
 
+def test_bing_and_multi() -> None:
+    """要件1：Bing 正規化、multi 解決（設定済みのみ試行順）、SearchRunner フォールバック。"""
+    print("test_bing_and_multi")
+    b = sp.parse_bing_results(
+        {"webPages": {"value": [{"name": "N", "url": "https://n.com", "snippet": "s"}]}}
+    )
+    check("bing 正規化", b == [{"url": "https://n.com", "title": "N", "snippet": "s"}])
+
+    _reset()
+    settings.search_provider = "multi"
+    settings.brave_search_api_key = "k"
+    settings.bing_search_api_key = "b"
+    check("multi: 使えるものだけ試行順", sp.available_providers() == ["brave", "bing"])
+    check("multi 解決", sp.resolve_provider() == "multi")
+    r = sp.SearchRunner(10)
+    check("multi chain = [brave, bing]", r._chain == ["brave", "bing"])
+
+    _reset()
+    settings.search_provider = "multi"
+    check("キー無し multi は duckduckgo", sp.resolve_provider() == "duckduckgo")
+    check("chain 空（DDGのみ）", sp.SearchRunner(10)._chain == [])
+
+    # SearchRunner フォールバック：プライマリ0件→DDG（注入して検証）
+    _reset()
+    settings.search_provider = "brave"
+    settings.brave_search_api_key = "k"
+    runner = sp.SearchRunner(10)
+    brave_stub = lambda q: []  # noqa: E731
+    brave_stub.last_diag = {"status": 200, "reason": "empty"}
+    runner._fns["brave"] = brave_stub
+    runner._ddg = lambda q: [{"url": "https://x.com", "title": "x", "snippet": ""}]
+    out = runner("q")
+    check("brave0件→DDGフォールバックで取得", len(out) == 1)
+    d = runner.diagnostics[-1]
+    check("診断に fallback=duckduckgo", d["fallback"] == "duckduckgo")
+    check("診断に providers 記録", any(p["provider"] == "brave" for p in d["providers"]))
+    _reset()
+
+
+def test_brave_reason() -> None:
+    print("test_brave_reason")
+    check("401 → unauthorized", "401" in sp.brave_reason(401, None, Exception("x")))
+    check("429 → rate limited", "429" in sp.brave_reason(429, None, Exception("x")))
+    check("200/空 → empty", "empty" in sp.brave_reason(200, {"web": {"results": []}}, None))
+
+
 def main() -> int:
     test_parsers()
     test_sanitize_and_utf8_url()
     test_fallback_queries()
     test_brave_real_response()
     test_brave_fallback_when_structure_unexpected()
+    test_bing_and_multi()
+    test_brave_reason()
     test_resolution()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0

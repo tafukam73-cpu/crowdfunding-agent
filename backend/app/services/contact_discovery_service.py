@@ -85,10 +85,13 @@ PRESS_HINTS = ("press", "media", "press-kit", "media-kit", "newsroom")
 WHOLESALE_HINTS = (
     "wholesale", "distributor", "distribution", "b2b", "retail", "reseller", "business"
 )
-# PDF リンクのうち営業に有用そうなものを示す語
+# PDF リンクのうち営業に有用そうなものを示す語（要件6：対象を拡張）
 PDF_KEYWORDS = (
     "catalog", "catalogue", "media", "press", "distributor", "wholesale",
     "brand", "deck", "company", "profile", "lookbook", "linesheet", "line-sheet",
+    "brochure", "manual", "presskit", "press-kit", "mediakit", "media-kit",
+    "pitch", "pitchdeck", "investor", "reseller", "partner", "privacy", "terms",
+    "factsheet", "fact-sheet", "onepager", "one-pager",
 )
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -569,6 +572,52 @@ def extract_pdf_links(html: str, base_url: str) -> list[dict]:
         out.append({"url": link, "label": name, "relevant": relevant})
     # 関連性の高い PDF を先に
     out.sort(key=lambda p: not p["relevant"])
+    return out
+
+
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    """PDF バイト列からテキストを抽出する（pypdf があれば。無ければ空文字）。"""
+    if not pdf_bytes:
+        return ""
+    try:
+        import io
+
+        from pypdf import PdfReader  # 遅延 import（未導入なら空を返す）
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        parts = []
+        for page in reader.pages[:20]:
+            try:
+                parts.append(page.extract_text() or "")
+            except Exception:  # noqa: BLE001
+                continue
+        return re.sub(r"\s+", " ", " ".join(parts))
+    except Exception:  # noqa: BLE001  pypdf 未導入/破損 PDF は空
+        return ""
+
+
+def extract_from_pdf(url: str, source_site_domain: str | None = None,
+                     timeout: float = 12.0) -> dict:
+    """PDF（press kit / catalog 等）を取得し、メール・SNS・会社名を抽出する（要件6）。
+
+    pypdf 未導入時はテキストを取れないため空で返す。メールは既存フィルタを通す。
+    Returns: {emails:[...], socials:{...}, text_len:int}
+    """
+    out = {"emails": [], "socials": {}, "text_len": 0}
+    try:
+        import httpx
+
+        resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+        if resp.status_code >= 400:
+            return out
+        text = extract_pdf_text(resp.content)
+    except Exception:  # noqa: BLE001
+        return out
+    out["text_len"] = len(text)
+    if not text:
+        return out
+    out["emails"] = extract_emails(text, source_site_domain)
+    out["socials"] = extract_socials(text, url)
     return out
 
 

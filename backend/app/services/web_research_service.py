@@ -226,6 +226,92 @@ def extract_slugs(project: Project) -> tuple[str, str]:
     return creator_slug, project_slug
 
 
+def guess_domains(brand: str, slug: str, project_slug: str = "") -> list[str]:
+    """ブランド名/slug から公式サイト候補ドメインを生成する（要件2）。
+
+    例: RiseFit AI → risefitai.com / risefit.ai / getrisefit.com / risefitapp.com /
+        risefit.io ...（実在確認は verify_official_domain で行う）
+    """
+    tokens: list[str] = []
+    seen_tok: set[str] = set()
+    for name in (slug, project_slug, brand):
+        if not name:
+            continue
+        t = re.sub(r"[^a-z0-9]", "", name.lower())
+        if len(t) >= 3 and t not in seen_tok:
+            seen_tok.add(t)
+            tokens.append(t)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(host: str) -> None:
+        u = f"https://{host}"
+        if host and u not in seen:
+            seen.add(u)
+            out.append(u)
+
+    for t in tokens:
+        for tld in (".com", ".ai", ".io", ".co", ".app", ".net"):
+            add(t + tld)
+        add("get" + t + ".com")
+        add(t + "app.com")
+        add(t + "hq.com")
+    return out[:18]
+
+
+def _default_domain_get(url: str, timeout: float = 8.0):
+    """(status, final_url, body) を返す既定の取得関数（httpx）。失敗時 None。"""
+    try:
+        import httpx
+
+        resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+        return resp.status_code, str(resp.url), (resp.text or "")
+    except Exception:  # noqa: BLE001  取得失敗＝実在扱いしない
+        return None
+
+
+def verify_official_domain(
+    url: str, terms: set[str], *, get_fn=None, timeout: float = 8.0
+) -> str | None:
+    """候補ドメインを GET で実在確認し、本文に関連語があれば公式 root を返す。
+
+    - クラファン/プラットフォーム URL は採用しない。
+    - 実在しない/関連語が無い（スクワッター等）は None。
+    get_fn(url)->(status, final_url, body)|None を注入できる（テスト用）。
+    """
+    if cds.is_platform_url(url):
+        return None
+    got = (get_fn or _default_domain_get)(url)
+    if not got:
+        return None
+    status, final, body = got
+    if status is None or status >= 400:
+        return None
+    if cds.is_platform_url(final):
+        return None
+    low = (body or "").lower()
+    if terms and not any(t in low for t in terms):
+        return None  # ページに関連語が無い＝本物とみなさない
+    p = urlparse(final)
+    return f"{p.scheme}://{p.netloc}"
+
+
+def guess_and_verify_official(
+    brand: str, slug: str, project_slug: str, terms: set[str],
+    *, get_fn=None, max_candidates: int = 10, timeout: float = 6.0
+) -> str | None:
+    """候補ドメインを順に実在確認し、最初に確認できた公式サイト root を返す。
+
+    同期エンドポイントで使うため、候補数とタイムアウトを絞る（速さ優先）。
+    """
+    for u in guess_domains(brand, slug, project_slug)[:max_candidates]:
+        verified = verify_official_domain(u, terms, get_fn=get_fn, timeout=timeout)
+        if verified:
+            logger.info("guessed & verified official site: %s", verified)
+            return verified
+    return None
+
+
 def build_keyword_candidates(
     project: Project, research: CompanyResearch | None = None
 ) -> dict:
@@ -394,7 +480,20 @@ def build_web_search_queries(
         for kwd in ("contact", "email", "partnership", "wholesale", "distributor"):
             add(f'"{maker}" {kwd}')
 
-    # 優先度8: ドメイン site: 限定（メール/PDF）
+    # 優先度8: スタートアップ系ソース（Product Hunt / GitHub / YC / Crunchbase /
+    # LinkedIn company / App Store 等）。会社・創業者・SNS の発見率を上げる（要件3・7）。
+    brand_terms = [t for t in (title, maker, short, creator_slug, project_slug) if t]
+    # ブランド語は最初の 2 つに絞る（クエリ爆発を防ぐ）
+    for b in list(dict.fromkeys(brand_terms))[:2]:
+        for src in ("Product Hunt", "Crunchbase", "GitHub", "YC", "founder",
+                    "LinkedIn company"):
+            add(f'"{b}" {src}')
+        for site in ("producthunt.com", "github.com", "ycombinator.com",
+                     "crunchbase.com", "linkedin.com/company", "linkedin.com/in",
+                     "apps.apple.com", "play.google.com", "medium.com", "substack.com"):
+            add(f'site:{site} "{b}"')
+
+    # 優先度9: ドメイン site: 限定（メール/PDF）
     if domain:
         add(f"site:{domain} contact")
         add(f"site:{domain} email")
@@ -1299,7 +1398,81 @@ def web_research(
         len(email_map), len(socials), len(forms),
     )
 
+    # 公式サイトがどこからも見つからない場合の最終手段：候補ドメインを生成して
+    # 実在確認（GET＋本文の関連語チェック）し、確認できたら代表パスをミニクロール
+    # してメール/SNS/フォームを抽出する（要件2）。
+    domain_guess_used = False
+    if not effective_official and own_fetcher:
+        guessed = guess_and_verify_official(
+            keywords["maker_name"] or keywords["project_title"],
+            keywords["creator_slug"], keywords["project_slug"],
+            project_terms | maker_terms,
+        )
+        if guessed:
+            domain_guess_used = True
+            effective_official = guessed
+            effective_domain = cds._domain_of(guessed)
+            mini = _make_fetcher()
+            try:
+                root = guessed.rstrip("/")
+                for path in ["", "/contact", "/contact-us", "/about",
+                             "/pages/contact", "/team", "/press"]:
+                    if len(searched) >= MAX_URLS:
+                        break
+                    url = root + path
+                    if url in crawl_seen:
+                        continue
+                    crawl_seen.add(url)
+                    html = mini(url)
+                    searched.append(url)
+                    candidate_pages.append({
+                        "url": url, "type": _page_type(url, effective_domain),
+                        "ok": bool(html), "emails": 0,
+                    })
+                    if not html:
+                        continue
+                    for addr in cds.extract_emails(html, site_domain):
+                        if addr.lower() not in email_map:
+                            score, tier = cds.score_email(addr, effective_domain)
+                            email_map[addr.lower()] = {
+                                "email": addr, "score": score, "tier": tier,
+                                "email_owner": cds.classify_email_owner(
+                                    addr, effective_domain, site_domain),
+                                "sources": [url]}
+                    for link in cds.extract_links(html, url):
+                        plat = _social_platform(link)
+                        if plat:
+                            consider_social(plat, link, 25, f"guessed:{url}")
+                        elif cds._same_domain(link, effective_domain) and cds._is_contact_url(link):
+                            if link not in forms:
+                                forms.append(link)
+                    if cds._is_contact_url(url) and url not in forms:
+                        forms.append(url)
+            finally:
+                client = getattr(mini, "_client", None)
+                if client is not None:
+                    client.close()
+            logger.info("web_research[%s] domain-guess official: %s", pid, guessed)
+
     pdfs = pdfs[:8]
+    # 有用そうな PDF（press kit / catalog 等）からもメールを抽出（要件6）。
+    # pypdf 未導入時は no-op。負荷を抑えるため上位 2 件まで。
+    pdf_email_pages = 0
+    for p in [x for x in pdfs if x.get("relevant")][:2]:
+        got = cds.extract_from_pdf(p["url"], site_domain)
+        if got["emails"]:
+            pdf_email_pages += 1
+        for addr in got["emails"]:
+            if addr.lower() not in email_map:
+                score, tier = cds.score_email(addr, effective_domain)
+                email_map[addr.lower()] = {
+                    "email": addr, "score": score, "tier": tier,
+                    "email_owner": cds.classify_email_owner(
+                        addr, effective_domain, site_domain),
+                    "sources": [p["url"]]}
+        for plat, link in (got["socials"] or {}).items():
+            consider_social(plat, link, 20, f"pdf:{p['url']}")
+
     # 運営会社（platform）のメールは営業候補に含めない
     emails = sorted(
         (e for e in email_map.values() if e["email_owner"] != "platform"),

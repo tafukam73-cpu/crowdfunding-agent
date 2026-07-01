@@ -942,6 +942,13 @@ export type WebKeywordCandidates = {
 };
 
 // 1 検索クエリの診断（0件の原因究明用）。
+export type SearchProviderResult = {
+  provider: string | null;
+  results: number | null;
+  status: number | null;
+  reason: string | null;
+};
+
 export type WebSearchDiagnostic = {
   query: string | null;
   provider: string | null;
@@ -950,6 +957,7 @@ export type WebSearchDiagnostic = {
   results: number | null;
   fallback: string | null;
   urls: string[];
+  providers?: SearchProviderResult[];
 };
 
 // 検索結果 1 件のスコアリング履歴（採用/除外理由つき）。

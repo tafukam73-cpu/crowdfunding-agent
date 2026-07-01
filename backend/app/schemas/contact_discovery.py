@@ -100,16 +100,24 @@ class WebDebugCounts(BaseModel):
     ks_websites_registered: bool | None = None  # 外部公式サイトが登録されていたか
 
 
+class SearchProviderResult(BaseModel):
+    provider: str | None = None
+    results: int | None = None
+    status: int | None = None
+    reason: str | None = None
+
+
 class WebSearchDiagnostic(BaseModel):
     """1 検索クエリの診断（0件の原因究明用）。"""
 
     query: str | None = None
-    provider: str | None = None
+    provider: str | None = None      # 実際に結果を返した/代表プロバイダー
     status: int | None = None
     reason: str | None = None
     results: int | None = None
     fallback: str | None = None
     urls: list[str] = []
+    providers: list[SearchProviderResult] = []  # 各プロバイダーの試行結果
 
 
 class WebKeywordCandidates(BaseModel):

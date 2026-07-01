@@ -383,8 +383,66 @@ def test_discovers_from_crowdfunding_page_without_search() -> None:
     check("巡回URLが増える(>=5)", len(res["searched_urls"]) >= 5)
 
 
+def test_domain_guess() -> None:
+    """要件2：候補ドメイン生成（RiseFit AI → risefitai.com 等）。実在確認は網羅しない。"""
+    print("test_domain_guess")
+    g = w.guess_domains("RiseFit AI", "risefit", "risefit-ai")
+    check("risefitai.com を候補化", "https://risefitai.com" in g)
+    check("risefit.ai を候補化", "https://risefit.ai" in g)
+    check("getrisefit.com を候補化", "https://getrisefit.com" in g)
+    check("risefitapp.com を候補化", "https://risefitapp.com" in g)
+    check("risefit.io を候補化", "https://risefit.io" in g)
+    check("クラファンURLは候補化しない",
+          all("kickstarter" not in u for u in g))
+
+    # 実在確認：関連語のあるページのみ公式採用（get_fn を注入）
+    def fake_get(url):
+        if "risefitai.com" in url:
+            return (200, url, "Welcome to RiseFit AI form coaching")
+        if "risefit.com" in url:
+            return (200, url, "buy this domain")  # スクワッター（関連語なし）
+        return (404, url, "")
+
+    got = w.guess_and_verify_official(
+        "RiseFit AI", "risefit", "risefit-ai", {"risefit", "risefitai"},
+        get_fn=fake_get,
+    )
+    check("関連語ページのみ公式採用", got == "https://risefitai.com")
+    check("スクワッター(関連語なし)は不採用",
+          w.verify_official_domain("https://risefit.com", {"risefit"}, get_fn=fake_get) is None)
+    check("実在しないドメインは不採用",
+          w.verify_official_domain("https://nope.com", {"risefit"}, get_fn=fake_get) is None)
+    check("platform URLは検証しない",
+          w.verify_official_domain("https://www.kickstarter.com/x", {"x"}, get_fn=fake_get) is None)
+
+
+def test_source_expansion_queries() -> None:
+    """要件3・7：Product Hunt / GitHub / YC / Crunchbase / LinkedIn company クエリ。"""
+    print("test_source_expansion_queries")
+
+    class P:
+        title = "RiseFit AI"
+        maker_name = "RiseFit"
+        source_url = "https://www.kickstarter.com/projects/risefit/risefit-ai"
+        maker_url = None
+        source_site = "kickstarter"
+        description = ""
+        description_clean = ""
+
+    qs = w.build_web_search_queries(P())
+    check("Product Hunt クエリ", any("Product Hunt" in q for q in qs))
+    check("site:producthunt.com", any("site:producthunt.com" in q for q in qs))
+    check("site:github.com", any("site:github.com" in q for q in qs))
+    check("site:ycombinator.com", any("site:ycombinator.com" in q for q in qs))
+    check("site:crunchbase.com", any("site:crunchbase.com" in q for q in qs))
+    check("site:linkedin.com/company", any("site:linkedin.com/company" in q for q in qs))
+    check("founder クエリ", any("founder" in q for q in qs))
+
+
 def main() -> int:
     test_query_generation()
+    test_domain_guess()
+    test_source_expansion_queries()
     test_composite_query_generation()
     test_sns_normalization()
     test_result_scoring_excludes_platform_and_noise()

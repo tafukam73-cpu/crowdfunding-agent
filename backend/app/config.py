@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     scrape_daily_limit: int = 20
 
     # --- Web Research 検索プロバイダー ---
-    # 検索 API の切り替え： "none" | "brave" | "serpapi" | "tavily" | "google_cse"
+    # 検索 API の切り替え：
+    #   "none" | "brave" | "serpapi" | "tavily" | "google_cse" | "bing" | "multi"
+    # "multi" は設定済みのプロバイダーを順に試し、最初に結果が返ったものを使う。
     # API キーが無い場合は自動的に DuckDuckGo HTML（手動検索クエリ方式）にフォールバック。
     search_provider: str = "none"
     # 各プロバイダーの API キー（設定したものだけ使用可能になる）
@@ -62,8 +64,17 @@ class Settings(BaseSettings):
     google_cse_api_key: str = ""
     # Google Custom Search のエンジン ID（cx）。google_cse には key と cx の両方が必要。
     google_cse_cx: str = ""
+    # Bing Web Search API（Azure）
+    bing_search_api_key: str = ""
     # 1 クエリあたり取得する検索結果の上限
     search_max_results: int = 10
+
+    # --- AI Search Agent の探索上限（発見率と安全性のバランス） ---
+    search_agent_max_steps: int = 15
+    search_agent_max_urls: int = 40
+    search_agent_max_queries: int = 50
+    # 同一ドメインを過剰巡回しない上限
+    search_agent_max_per_domain: int = 8
 
     # --- 取得アラート通知（構造変化・成功率低下） ---
     # Slack Incoming Webhook URL。設定時のみ Slack 通知を行う（未設定なら何もしない）。

@@ -212,6 +212,19 @@ def _extract_into_state(
         if cand:
             state.official_site_url = cand
 
+    # 候補ドメインを実際にたどって「本人の公式サイト root」に着地したら採用（要件2の
+    # 実在確認＝取得成功）。ドメイン名がブランド/slug と一致し、本文に関連語がある root。
+    if not state.official_site_url and trusted:
+        p = urlparse(url)
+        tok = cds._domain_of(url).split(".")[0]
+        if (
+            p.path.strip("/") == ""
+            and tok
+            and any(t in tok or tok in t for t in terms)
+            and any(t in (html or "").lower() for t in terms)
+        ):
+            state.official_site_url = f"{p.scheme}://{p.netloc}"
+
     # SNS リンクは記録するが本文はクロールしない（候補には入れない）
     for lk in cds.extract_links(html, url):
         plat = wr._social_platform(lk)
@@ -337,6 +350,15 @@ def run_search_agent(
     terms = cds.significant_terms(project.title, project.maker_name)
     platform_seed_ok = {project.source_url or "", project.maker_url or ""}
 
+    # 探索上限は .env で変更可能（安全のため clamp）。
+    from app.config import settings as _settings
+
+    max_steps = max(1, min(30, int(getattr(_settings, "search_agent_max_steps", MAX_STEPS))))
+    max_urls = max(1, min(80, int(getattr(_settings, "search_agent_max_urls", MAX_URLS))))
+    max_queries = max(1, min(100, int(getattr(_settings, "search_agent_max_queries", MAX_QUERIES))))
+    max_per_domain = max(1, int(getattr(_settings, "search_agent_max_per_domain", 8)))
+    domain_visits: dict[str, int] = {}
+
     own_fetch = fetch_fn is None
     own_search = search_fn is None
     fetch = fetch_fn or _make_agent_fetcher()
@@ -355,7 +377,7 @@ def run_search_agent(
     pid = getattr(project, "id", "?")
     try:
         state = _initial_state(project, row)
-        for step_i in range(MAX_STEPS):
+        for step_i in range(max_steps):
             state.step = step_i + 1
             plan = agent.plan(state)
             logger.info(
@@ -377,7 +399,7 @@ def run_search_agent(
 
             # 検索クエリを実行して候補 URL を増やす
             for q in plan.next_queries[:STEP_QUERY_BUDGET]:
-                if len(ran) >= MAX_QUERIES or q in ran:
+                if len(ran) >= max_queries or q in ran:
                     continue
                 ran.append(q)
                 state.ran_queries.append(q)
@@ -402,7 +424,7 @@ def run_search_agent(
 
             # URL を取得して連絡先・候補リンクを抽出
             for url in plan.next_urls[:STEP_URL_BUDGET]:
-                if len(visited) >= MAX_URLS or url in visited:
+                if len(visited) >= max_urls or url in visited:
                     continue
                 if wr._is_skip_url(url):
                     steps.append({"step": state.step, "action": "skip", "url": url,
@@ -418,6 +440,12 @@ def run_search_agent(
                     steps.append({"step": state.step, "action": "skip", "url": url,
                                   "reason": "SNS/動画ページは巡回しない（ログイン/ノイズ回避）"})
                     continue
+                dom = cds._domain_of(url)
+                if dom and domain_visits.get(dom, 0) >= max_per_domain:
+                    steps.append({"step": state.step, "action": "skip", "url": url,
+                                  "reason": f"同一ドメイン過剰巡回の抑制（{dom}）"})
+                    continue
+                domain_visits[dom] = domain_visits.get(dom, 0) + 1
                 visited.append(url)
                 state.visited_urls.append(url)
                 if url in state.candidate_urls:

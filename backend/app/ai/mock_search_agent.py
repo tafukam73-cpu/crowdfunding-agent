@@ -81,6 +81,16 @@ class MockSearchAgent(SearchAgent):
         for u in state.candidate_urls:
             add_url(u)
 
+        # 2.5 公式サイト未確定なら候補ドメインを生成して実在確認しにいく（要件2）
+        if not state.official_site_url and len(next_urls) < STEP_URL_BUDGET:
+            from app.services.web_research_service import guess_domains
+
+            creator_slug, project_slug = _slugs_from_state(state)
+            for u in guess_domains(
+                state.maker_name or state.title, creator_slug, project_slug
+            ):
+                add_url(u)
+
         # 3. まだ見るものが無ければ検索で候補を増やす。
         #    creator/project slug は曖昧な maker 名より強い手掛かりなので優先する。
         next_queries: list[str] = []

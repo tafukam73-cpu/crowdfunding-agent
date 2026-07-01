@@ -636,6 +636,25 @@ function SearchDiagnostics({
   const braveStatuses = Array.from(
     new Set(diagnostics.map((d) => d.status).filter((s) => s != null))
   );
+  // プロバイダー別集計（成功/0件/エラー理由）
+  const provAgg: Record<string, { ok: number; zero: number; reason?: string }> = {};
+  for (const d of diagnostics) {
+    for (const p of d.providers ?? []) {
+      const key = p.provider ?? "?";
+      const a = (provAgg[key] ??= { ok: 0, zero: 0 });
+      if ((p.results ?? 0) > 0) a.ok += 1;
+      else {
+        a.zero += 1;
+        if (p.reason && !a.reason) a.reason = p.reason;
+      }
+    }
+  }
+  const succeededProviders = Object.entries(provAgg)
+    .filter(([, a]) => a.ok > 0)
+    .map(([p]) => p);
+  const zeroProviders = Object.entries(provAgg).filter(
+    ([, a]) => a.ok === 0 && a.zero > 0
+  );
 
   return (
     <div className="rounded-md border border-rose-200 bg-rose-50/50 p-2 text-slate-700">
@@ -648,6 +667,19 @@ function SearchDiagnostics({
         <span>抽出URL: {urlCount}</span>
         <span>HTTP status: {braveStatuses.join(",") || "-"}</span>
       </div>
+      {succeededProviders.length > 0 && (
+        <p className="mt-1 text-emerald-700">
+          成功プロバイダー: {succeededProviders.join(", ")}
+        </p>
+      )}
+      {zeroProviders.length > 0 && (
+        <p className="mt-0.5 text-slate-500">
+          0件プロバイダー:{" "}
+          {zeroProviders
+            .map(([p, a]) => `${p}${a.reason ? `（${a.reason}）` : ""}`)
+            .join(" / ")}
+        </p>
+      )}
       {firstReason && (
         <p className="mt-1 text-rose-700">主な理由: {firstReason}</p>
       )}

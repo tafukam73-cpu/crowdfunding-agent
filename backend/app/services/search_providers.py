@@ -77,12 +77,14 @@ _PROVIDER_LABELS = {
     "serpapi": "SerpAPI",
     "tavily": "Tavily Search API",
     "google_cse": "Google Custom Search API",
+    "bing": "Bing Web Search API",
 }
 
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 TAVILY_ENDPOINT = "https://api.tavily.com/search"
 GOOGLE_CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
+BING_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search"
 
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_RATE_LIMIT = 1.0
@@ -211,6 +213,24 @@ def parse_google_cse_results(payload: dict) -> list[dict]:
     return out
 
 
+def parse_bing_results(payload: dict) -> list[dict]:
+    """Bing Web Search API のレスポンスを正規化する（webPages.value）。"""
+    out: list[dict] = []
+    web = (payload or {}).get("webPages") or {}
+    for r in web.get("value") or []:
+        url = _clean(r.get("url"))
+        if not url:
+            continue
+        out.append(
+            {
+                "url": url,
+                "title": _clean(r.get("name")),
+                "snippet": _clean(r.get("snippet")),
+            }
+        )
+    return out
+
+
 # ---------------- プロバイダー解決 ----------------
 def resolve_provider() -> str:
     """設定とキーの有無から、実際に使うプロバイダー名を決める。
@@ -219,14 +239,11 @@ def resolve_provider() -> str:
     "duckduckgo" にフォールバックする。
     """
     provider = (settings.search_provider or "none").strip().lower()
-    if provider == "brave" and settings.brave_search_api_key:
-        return "brave"
-    if provider == "serpapi" and settings.serpapi_api_key:
-        return "serpapi"
-    if provider == "tavily" and settings.tavily_api_key:
-        return "tavily"
-    if provider == "google_cse" and settings.google_cse_api_key and settings.google_cse_cx:
-        return "google_cse"
+    if provider == "multi":
+        # 使えるプロバイダーが 1 つでもあれば multi。無ければ duckduckgo。
+        return "multi" if available_providers() else "duckduckgo"
+    if provider in _PROVIDER_READY and _PROVIDER_READY[provider]():
+        return provider
     return "duckduckgo"
 
 
@@ -431,12 +448,53 @@ def _google_cse_search_fn(count: int):
     return search
 
 
+def _bing_search_fn(count: int):
+    client = _new_client()
+
+    def search(query: str) -> list[dict]:
+        q = sanitize_query(query)
+        url = _utf8_query_url(BING_ENDPOINT, {"q": q, "count": min(count, 50)})
+        try:
+            resp = client.get(
+                url, headers={"Ocp-Apim-Subscription-Key": settings.bing_search_api_key}
+            )
+            payload = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Bing search error '%s': %s | body=%s",
+                           q, exc, _error_body(exc))
+            return []
+        results = parse_bing_results(payload)
+        logger.info("Bing search '%s': %d result(s)", q, len(results))
+        return results[:count]
+
+    search._client = client  # type: ignore[attr-defined]
+    search.provider = "bing"  # type: ignore[attr-defined]
+    return search
+
+
 _FACTORIES = {
     "brave": _brave_search_fn,
     "serpapi": _serpapi_search_fn,
     "tavily": _tavily_search_fn,
     "google_cse": _google_cse_search_fn,
+    "bing": _bing_search_fn,
 }
+
+# キー（google_cse は cx も）が設定済みのプロバイダーか判定。
+_PROVIDER_READY = {
+    "brave": lambda: bool(settings.brave_search_api_key),
+    "serpapi": lambda: bool(settings.serpapi_api_key),
+    "tavily": lambda: bool(settings.tavily_api_key),
+    "google_cse": lambda: bool(settings.google_cse_api_key and settings.google_cse_cx),
+    "bing": lambda: bool(settings.bing_search_api_key),
+}
+# multi モードでの試行順（Brave → 各API。DuckDuckGo は SearchRunner が常に最後に補完）
+_MULTI_ORDER = ("brave", "google_cse", "serpapi", "tavily", "bing")
+
+
+def available_providers() -> list[str]:
+    """キーが設定済みで使えるプロバイダー名の一覧（multi 用、試行順）。"""
+    return [p for p in _MULTI_ORDER if _PROVIDER_READY.get(p, lambda: False)()]
 
 
 class SearchRunner:
@@ -447,22 +505,25 @@ class SearchRunner:
 
     def __init__(self, count: int) -> None:
         self.count = count
-        self.provider = resolve_provider()
-        self._primary = None
+        self.provider = resolve_provider()   # brave/…/bing/multi/duckduckgo
+        self._fns: dict[str, object] = {}    # provider name -> search fn（遅延生成）
         self._ddg = None
         self.diagnostics: list[dict] = []
-        self._client = None  # close 互換用（実体は close() で個別に閉じる）
-        factory = _FACTORIES.get(self.provider)
-        if factory is not None:
-            try:
-                self._primary = factory(count)
-                logger.info("Using search provider: %s", self.provider)
-                logger.info("%s enabled", _PROVIDER_LABELS.get(self.provider, self.provider))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("search provider %s init failed: %s", self.provider, exc)
-                self._primary = None
+        self._client = None  # close 互換
+        # multi なら使える全プロバイダーを試行順に、単一なら1つ、無ければ空（DDGのみ）
+        if self.provider == "multi":
+            self._chain = available_providers()
+        elif self.provider in _FACTORIES:
+            self._chain = [self.provider]
         else:
-            logger.info("Using search provider: duckduckgo (no/effective API)")
+            self._chain = []
+        logger.info("Using search provider: %s (chain=%s → duckduckgo)",
+                    self.provider, self._chain or "-")
+
+    def _fn(self, name: str):
+        if name not in self._fns:
+            self._fns[name] = _FACTORIES[name](self.count)
+        return self._fns[name]
 
     def _ddg_fn(self):
         if self._ddg is None:
@@ -473,40 +534,57 @@ class SearchRunner:
 
     def __call__(self, query: str) -> list[dict]:
         d: dict = {"query": query, "provider": self.provider, "status": None,
-                   "reason": None, "results": 0, "fallback": None, "urls": []}
+                   "reason": None, "results": 0, "fallback": None, "urls": [],
+                   "providers": []}
         results: list[dict] = []
-        if self._primary is not None:
-            try:
-                results = self._primary(query) or []
-            except Exception as exc:  # noqa: BLE001
-                d["reason"] = f"exception: {exc}"
-            pd = getattr(self._primary, "last_diag", None)
-            if pd:
-                d["status"] = pd.get("status")
-                d["reason"] = pd.get("reason") or d["reason"]
-            d["results"] = len(results)
-        else:
-            d["provider"] = "duckduckgo"
+        succeeded: str | None = None
 
-        # プライマリが 0 件/失敗 → DuckDuckGo HTML へフォールバック（要件6）
+        # 1. 設定済みプロバイダーを順に試す（最初に結果が返ったものを採用）
+        for name in self._chain:
+            fn = self._fn(name)
+            try:
+                r = fn(query) or []
+            except Exception as exc:  # noqa: BLE001
+                d["providers"].append({"provider": name, "results": 0,
+                                       "reason": f"exception: {exc}"})
+                continue
+            pd = getattr(fn, "last_diag", None) or {}
+            d["providers"].append({
+                "provider": name, "results": len(r),
+                "status": pd.get("status"), "reason": pd.get("reason"),
+            })
+            if r:
+                results = r
+                succeeded = name
+                break
+
+        # 2. どのプロバイダーも 0 件 → DuckDuckGo HTML へフォールバック
         if not results:
             try:
                 fb = self._ddg_fn()(query) or []
             except Exception as exc:  # noqa: BLE001
                 fb = []
-                d["reason"] = f"{d['reason'] or ''} | ddg exception: {exc}".strip(" |")
+                d["providers"].append({"provider": "duckduckgo", "results": 0,
+                                       "reason": f"exception: {exc}"})
+            else:
+                d["providers"].append({"provider": "duckduckgo", "results": len(fb)})
             if fb:
                 results = fb
-                d["results"] = len(fb)
-                if self._primary is not None:
-                    d["fallback"] = "duckduckgo"
-                    d["reason"] = (d["reason"] or "primary 0件") + " → DuckDuckGoで取得"
-            else:
-                if self._primary is None:
-                    d["reason"] = d["reason"] or "DuckDuckGo 0件（ブロック/レート制限の可能性）"
-                else:
-                    d["reason"] = (d["reason"] or "primary 0件") + " / DuckDuckGoも0件"
+                succeeded = "duckduckgo"
+                d["fallback"] = "duckduckgo"
 
+        d["results"] = len(results)
+        d["provider"] = succeeded or (self._chain[0] if self._chain else "duckduckgo")
+        # 代表 status/reason（成功プロバイダー、無ければ最初の失敗理由）
+        for p in d["providers"]:
+            if p["provider"] == succeeded:
+                d["status"] = p.get("status")
+                break
+        if d["results"] == 0:
+            reasons = [f"{p['provider']}:{p.get('reason') or '0件'}" for p in d["providers"]]
+            d["reason"] = "全プロバイダー0件（" + " / ".join(reasons) + "）"
+        elif d["fallback"]:
+            d["reason"] = "API 0件 → DuckDuckGoで取得"
         d["urls"] = [
             (r.get("url") if isinstance(r, dict) else str(r)) for r in results[:5]
         ]
@@ -514,7 +592,7 @@ class SearchRunner:
         return results
 
     def close(self) -> None:
-        for fn in (self._primary, self._ddg):
+        for fn in list(self._fns.values()) + [self._ddg]:
             client = getattr(fn, "_client", None)
             if client is not None:
                 try:
