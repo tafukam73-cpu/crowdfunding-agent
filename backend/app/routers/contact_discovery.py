@@ -33,6 +33,7 @@ from app.services import (
     document_reader_service,
     email_service,
     project_service,
+    search_agent_service,
     web_research_service,
 )
 
@@ -147,6 +148,42 @@ def run_document_reader(
 )
 def get_document_reader(project_id: int, db: Session = Depends(get_db)):
     """最新の探索結果（doc_reader_* を含む）を返す。未実行なら 204。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    row = contact_discovery_service.get_latest(db, project_id)
+    if row is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return row
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/search-agent",
+    response_model=ContactDiscoveryOut,
+)
+def run_search_agent(
+    project_id: int, db: Session = Depends(get_db)
+) -> ContactDiscoveryOut:
+    """AI Search Agent を反復実行して最新の探索結果の search_agent_* に保存する（同期）。
+
+    AI が各ステップで「次に見る URL・検索クエリ・続行/終了」を判断し、SNS プロフィール
+    → Linktree 等のリンク集 → 公式サイト → Contact のようにリンクを辿って連絡先を探す。
+    最大 5 ステップ / 20 URL / 20 クエリ。ANTHROPIC_API_KEY 未設定時はモックで動作。
+    AI が返したメール・人名は既存フィルタで再検証し、推測メールは採用しない。失敗時も
+    search_agent_error に記録し 200 で返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return search_agent_service.run_search_agent(db, project)
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/search-agent",
+    response_model=ContactDiscoveryOut,
+)
+def get_search_agent(project_id: int, db: Session = Depends(get_db)):
+    """最新の探索結果（search_agent_* を含む）を返す。未実行なら 204。"""
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")

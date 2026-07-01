@@ -17,6 +17,7 @@ import {
   runContactDiscovery,
   runContactHunter,
   runDocumentReader,
+  runSearchAgent,
   runWebResearch,
   type SalesContact,
 } from "@/lib/api";
@@ -894,6 +895,274 @@ function SalesRankingSection({
   );
 }
 
+// 🕵️ AI Search Agent（次に見るページを判断しながら反復探索）。
+function SearchAgentSection({
+  projectId,
+  data,
+  busy,
+  error,
+  onRun,
+  onApply,
+}: {
+  projectId: number;
+  data: ContactDiscovery | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onApply: (email: string) => void;
+}) {
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+
+  function onUseAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setGmailMsg(`「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`);
+  }
+
+  const researched = data?.search_agent_researched;
+  const failed = data?.search_agent_status === "failed";
+  const steps = data?.search_agent_steps ?? [];
+  const emails = data?.search_agent_emails ?? [];
+  const forms = data?.search_agent_contact_forms ?? [];
+  const socials = Object.entries(data?.search_agent_socials ?? {});
+  const people = data?.search_agent_people ?? [];
+
+  const ACTION_LABEL: Record<string, string> = {
+    search: "🔍 検索",
+    visit: "🌐 取得",
+    skip: "⏭ スキップ",
+    stop: "⏹ 終了",
+  };
+
+  return (
+    <div className="rounded-md border border-cyan-300 bg-cyan-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-cyan-900">🕵️ AI Search Agent</p>
+          <p className="mt-0.5 text-xs text-cyan-700">
+            AIが「次に見るべきページ・検索クエリ」を毎ステップ判断し、SNS→Linktree→
+            公式サイト→Contact のようにリンクを辿って連絡先を探します（最大5ステップ。
+            推測メールは作りません）。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="rounded bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-600 disabled:opacity-50"
+        >
+          {busy ? "探索中…" : researched ? "AIで再探索" : "AIで探索する"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {!researched && !error && (
+        <p className="mt-3 text-xs text-cyan-700">
+          まだ探索していません。上のボタンで、AIがページを辿って連絡先を探索します
+          （ANTHROPIC_API_KEY 未設定時はモックで動作）。
+        </p>
+      )}
+
+      {researched && data && (
+        <div className="mt-3 space-y-3 text-sm">
+          {failed && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              <p className="font-semibold">探索でエラーが発生しました。</p>
+              <p className="mt-1 whitespace-pre-wrap break-all">
+                {data.search_agent_error}
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {data.search_agent_model && (
+              <span className="rounded bg-cyan-100 px-2 py-0.5 text-xs font-medium text-cyan-800">
+                モデル: {data.search_agent_model}
+              </span>
+            )}
+            <span className="rounded bg-cyan-100 px-2 py-0.5 text-xs font-medium text-cyan-800">
+              確度: {data.search_agent_confidence_score ?? 0} / 100
+            </span>
+            {data.search_agent_recommended_channel && (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                推奨チャネル:{" "}
+                {CHANNEL_LABELS[data.search_agent_recommended_channel] ??
+                  data.search_agent_recommended_channel}
+              </span>
+            )}
+          </div>
+
+          {data.search_agent_evidence_summary && (
+            <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+              {data.search_agent_evidence_summary}
+            </div>
+          )}
+
+          {/* 推奨連絡先 */}
+          {data.search_agent_recommended_contact && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-cyan-700">推奨送信先</span>
+              <span className="font-medium text-slate-900">
+                {data.search_agent_recommended_contact}
+              </span>
+              <CopyButton text={data.search_agent_recommended_contact} label="コピー" />
+              <button
+                onClick={() =>
+                  onUseAsGmailTo(data.search_agent_recommended_contact as string)
+                }
+                className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+              >
+                Gmail宛先に使用
+              </button>
+              <button
+                onClick={() =>
+                  onApply(data.search_agent_recommended_contact as string)
+                }
+                className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                CRMに反映
+              </button>
+            </div>
+          )}
+
+          {/* 探索ステップ */}
+          {steps.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-cyan-700">
+                探索ステップ（{steps.length}）
+              </p>
+              <ol className="mt-1 space-y-0.5">
+                {steps.map((s, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-1 text-xs">
+                    <span className="rounded bg-cyan-100 px-1 text-[10px] text-cyan-800">
+                      #{s.step}
+                    </span>
+                    <span className="text-slate-600">
+                      {ACTION_LABEL[s.action ?? ""] ?? s.action}
+                    </span>
+                    {s.query && <code className="break-all text-slate-700">{s.query}</code>}
+                    {s.url && (
+                      <span className="break-all text-slate-500">
+                        {s.url}
+                        {s.ok === false && " (取得失敗)"}
+                        {s.found &&
+                          Object.values(s.found).some((v) => v > 0) &&
+                          ` → メール${s.found.emails ?? 0}/SNS${s.found.socials ?? 0}`}
+                      </span>
+                    )}
+                    {s.action === "stop" && s.reason && (
+                      <span className="text-slate-500">— {s.reason}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* 発見メール */}
+          {emails.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-cyan-700">
+                発見メール（出典付き・再検証済み）
+              </p>
+              <ul className="mt-1 space-y-1">
+                {emails.map((e) => (
+                  <li key={e.email} className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-cyan-100 px-2 py-0.5 text-xs text-cyan-800">
+                      {e.purpose ?? "other"} {e.confidence}
+                    </span>
+                    <span className="text-slate-800">{e.email}</span>
+                    <CopyButton text={e.email} />
+                    <button
+                      onClick={() => onUseAsGmailTo(e.email)}
+                      className="rounded border border-blue-200 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50"
+                    >
+                      Gmail宛先
+                    </button>
+                    <button
+                      onClick={() => onApply(e.email)}
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      CRM
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* フォーム / SNS */}
+          {(forms.length > 0 || socials.length > 0) && (
+            <div className="flex flex-wrap items-center gap-3">
+              {forms.map((f) => (
+                <a
+                  key={f.url}
+                  href={f.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  問い合わせフォームを開く ↗
+                </a>
+              ))}
+              {socials.map(([platform, url]) => (
+                <a
+                  key={platform}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  {platform} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
+          {/* 担当者 */}
+          {people.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-cyan-700">担当者候補</p>
+              <ul className="mt-1 space-y-1">
+                {people.map((p, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-slate-800">{p.name}</span>
+                    {p.title && <span className="text-xs text-slate-500">{p.title}</span>}
+                    {p.linkedin_url && (
+                      <a
+                        href={p.linkedin_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-blue-700 hover:underline"
+                      >
+                        LinkedIn ↗
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {gmailMsg && (
+            <p className="text-xs font-medium text-blue-700">{gmailMsg}</p>
+          )}
+
+          {data.search_agent_stop_reason && (
+            <p className="text-xs text-slate-500">
+              <span className="font-semibold">終了理由：</span>
+              {data.search_agent_stop_reason}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 🧠 AI Document Reader（ページ全体を読解して連絡先を文脈から整理）。
 function DocumentReaderSection({
   projectId,
@@ -1748,6 +2017,8 @@ export default function ContactDiscoveryPanel({
   const [webError, setWebError] = useState<string | null>(null);
   const [docBusy, setDocBusy] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
@@ -1814,6 +2085,22 @@ export default function ContactDiscoveryPanel({
       setDocError(String(e));
     } finally {
       setDocBusy(false);
+    }
+  }
+
+  async function onRunAgent() {
+    setAgentBusy(true);
+    setAgentError(null);
+    setApplyMsg(null);
+    try {
+      // Search Agent は最新の探索結果（search_agent_* 含む）を返す。土台が無ければ
+      // サーバ側で自動探索を先に実行する。
+      setData(await runSearchAgent(projectId));
+      onChanged?.();
+    } catch (e) {
+      setAgentError(String(e));
+    } finally {
+      setAgentBusy(false);
     }
   }
 
@@ -1900,6 +2187,15 @@ export default function ContactDiscoveryPanel({
           busy={docBusy}
           error={docError}
           onRun={onRunDoc}
+          onApply={onApply}
+        />
+        {/* AI Search Agent（次に見るページを判断しながら反復探索。他レイヤーと区別） */}
+        <SearchAgentSection
+          projectId={projectId}
+          data={data}
+          busy={agentBusy}
+          error={agentError}
+          onRun={onRunAgent}
           onApply={onApply}
         />
       </div>

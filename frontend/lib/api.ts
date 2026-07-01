@@ -975,6 +975,19 @@ export type DocReaderPerson = {
   reason: string | null;
 };
 
+// 🕵️ AI Search Agent の探索ステップ。
+export type SearchAgentStep = {
+  step: number | null;
+  action: string | null; // search / visit / skip / stop
+  url: string | null;
+  query: string | null;
+  reason: string | null;
+  ok: boolean | null;
+  results: number | null;
+  found: Record<string, number> | null;
+  missing: string[] | null;
+};
+
 // 🏆 営業推奨連絡先（営業のしやすさで格付けしたメール）。
 export type SalesContact = {
   email: string;
@@ -1069,6 +1082,25 @@ export type ContactDiscovery = {
   doc_reader_missing_info: string[] | null;
   doc_reader_sources: AiSource[] | null;
   doc_reader_researched_at: string | null;
+  // --- AI Search Agent ---
+  search_agent_researched: boolean;
+  search_agent_model: string | null;
+  search_agent_status: string | null;
+  search_agent_steps: SearchAgentStep[] | null;
+  search_agent_searched_queries: string[] | null;
+  search_agent_searched_urls: string[] | null;
+  search_agent_official_site_url: string | null;
+  search_agent_emails: DocReaderEmail[] | null;
+  search_agent_contact_forms: DocReaderContactForm[] | null;
+  search_agent_socials: Record<string, string> | null;
+  search_agent_people: DocReaderPerson[] | null;
+  search_agent_recommended_channel: string | null;
+  search_agent_recommended_contact: string | null;
+  search_agent_confidence_score: number | null;
+  search_agent_evidence_summary: string | null;
+  search_agent_stop_reason: string | null;
+  search_agent_error: string | null;
+  search_agent_researched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1140,6 +1172,22 @@ export async function runDocumentReader(
 ): Promise<ContactDiscovery> {
   const res = await fetch(
     `${API_BASE}/projects/${id}/contact-discovery/document-reader`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// AI Search Agent を実行（同期）。次に見るページを判断しながら反復探索。
+// Claude 未設定時はモックで動作。失敗時も search_agent_error を記録して 200 で返る。
+export async function runSearchAgent(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/search-agent`,
     { method: "POST" }
   );
   if (!res.ok) {

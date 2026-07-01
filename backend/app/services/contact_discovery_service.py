@@ -400,6 +400,12 @@ def _iter_source_emails(row: "ContactDiscovery") -> list[dict]:
             src = e.get("source_url")
             add(e.get("email"), e.get("confidence", 0), e.get("email_owner"),
                 [src] if src else [])
+    # AI Search Agent が反復探索で見つけたメール
+    for e in (getattr(row, "search_agent_emails", None) or []):
+        if isinstance(e, dict):
+            src = e.get("source_url")
+            add(e.get("email"), e.get("confidence", 0), e.get("email_owner"),
+                [src] if src else [])
     return out
 
 

@@ -201,6 +201,38 @@ class ContactDiscovery(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- AI Search Agent（次に見るページを判断しながら反復探索する） ---
+    search_agent_researched: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    search_agent_model: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    search_agent_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 探索ステップ [{step, action, url/query, reason, found, ...}]
+    search_agent_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_searched_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_searched_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_official_site_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [{email, purpose, confidence, source_url, reason, email_owner}]
+    search_agent_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_contact_forms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_socials: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    search_agent_people: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    search_agent_recommended_channel: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+    search_agent_recommended_contact: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    search_agent_confidence_score: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    search_agent_evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_agent_stop_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_agent_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_agent_researched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

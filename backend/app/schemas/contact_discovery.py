@@ -155,6 +155,18 @@ class DocReaderPerson(BaseModel):
     reason: str | None = None
 
 
+class SearchAgentStep(BaseModel):
+    step: int | None = None
+    action: str | None = None      # search / visit / skip / stop
+    url: str | None = None
+    query: str | None = None
+    reason: str | None = None
+    ok: bool | None = None
+    results: int | None = None
+    found: dict[str, int] | None = None
+    missing: list[str] | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -250,11 +262,35 @@ class ContactDiscoveryOut(BaseModel):
     doc_reader_sources: list[AiSource] | None = None
     doc_reader_researched_at: datetime | None = None
 
+    # --- AI Search Agent（反復探索） ---
+    search_agent_researched: bool = False
+    search_agent_model: str | None = None
+    search_agent_status: str | None = None
+    search_agent_steps: list[SearchAgentStep] | None = None
+    search_agent_searched_queries: list[str] | None = None
+    search_agent_searched_urls: list[str] | None = None
+    search_agent_official_site_url: str | None = None
+    search_agent_emails: list[DocReaderEmail] | None = None
+    search_agent_contact_forms: list[DocReaderContactForm] | None = None
+    search_agent_socials: dict[str, str] | None = None
+    search_agent_people: list[DocReaderPerson] | None = None
+    search_agent_recommended_channel: str | None = None
+    search_agent_recommended_contact: str | None = None
+    search_agent_confidence_score: int | None = None
+    search_agent_evidence_summary: str | None = None
+    search_agent_stop_reason: str | None = None
+    search_agent_error: str | None = None
+    search_agent_researched_at: datetime | None = None
+
     created_at: datetime
     updated_at: datetime
 
     # --- 後方互換サニタイズ（古い行がプラットフォーム URL を保持していても出さない） ---
-    @field_validator("official_site_url", "doc_reader_official_site_url")
+    @field_validator(
+        "official_site_url",
+        "doc_reader_official_site_url",
+        "search_agent_official_site_url",
+    )
     @classmethod
     def _no_platform_official(cls, v: str | None) -> str | None:
         # 公式サイトとして kickstarter.com/profile/... 等は返さない。
