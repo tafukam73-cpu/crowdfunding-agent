@@ -110,6 +110,9 @@ class WebKeywordCandidates(BaseModel):
     official_domain: str | None = None
     domain_name: str | None = None
     source_site: str | None = None
+    creator_slug: str | None = None
+    project_slug: str | None = None
+    maker_ambiguous: bool | None = None
 
 
 class WebSearchResult(BaseModel):

@@ -23,6 +23,17 @@ from app.ai.search_agent import (
 _KNOWN_PATHS = ["", "/contact", "/contact-us", "/about", "/team", "/press", "/wholesale"]
 
 
+def _slugs_from_state(state: SearchAgentState) -> tuple[str, str]:
+    """state の source_url/maker_url から creator/project slug を取り出す。"""
+    from app.services.web_research_service import extract_slugs
+
+    class _P:
+        source_url = state.source_url
+        maker_url = state.maker_url
+
+    return extract_slugs(_P())
+
+
 def _has_maker_email(state: SearchAgentState) -> bool:
     dom = ""
     if state.official_site_url:
@@ -70,19 +81,29 @@ class MockSearchAgent(SearchAgent):
         for u in state.candidate_urls:
             add_url(u)
 
-        # 3. まだ見るものが無ければ検索で候補を増やす
+        # 3. まだ見るものが無ければ検索で候補を増やす。
+        #    creator/project slug は曖昧な maker 名より強い手掛かりなので優先する。
         next_queries: list[str] = []
         if not next_urls:
+            candidates: list[str] = []
+            creator_slug, project_slug = _slugs_from_state(state)
+            for slug in [s for s in (creator_slug, project_slug) if s]:
+                if state.title:
+                    candidates.append(f"{state.title} {slug}")
+                candidates += [
+                    f"{slug} official website", f"{slug} contact",
+                    f"site:instagram.com {slug}", f"site:linktr.ee {slug}",
+                    f"site:youtube.com {slug}",
+                ]
             base = (state.maker_name or state.title or "").strip()
             if base:
-                for q in (
-                    f'"{base}" official website',
-                    f'"{base}" instagram',
+                candidates += [
+                    f'"{base}" official website', f'"{base}" instagram',
                     f'"{base}" linktree',
-                    f'"{base}" contact email',
-                ):
-                    if q not in ran and q not in next_queries:
-                        next_queries.append(q)
+                ]
+            for q in candidates:
+                if q not in ran and q not in next_queries:
+                    next_queries.append(q)
 
         next_urls = next_urls[:STEP_URL_BUDGET]
         next_queries = next_queries[:STEP_QUERY_BUDGET]

@@ -166,6 +166,58 @@ def _extract_brand_names(text: str | None, limit: int = 4) -> list[str]:
     return out
 
 
+# クラファン URL のパス上、slug の直前に来る既知プレフィックス。
+_SLUG_PREFIXES = ("projects", "profile", "project", "individuals", "creators", "p")
+# slug として採用しない汎用語・純数値。
+_SLUG_STOP = frozenset({"projects", "project", "profile", "www", "en", "discover"})
+
+
+def _slug_ok(seg: str) -> bool:
+    seg = (seg or "").strip().lower()
+    if not seg or seg in _SLUG_STOP:
+        return False
+    if seg.isdigit():           # indiegogo /individuals/12345 のような数値 ID は除外
+        return False
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9._\-]{1,}", seg))
+
+
+def extract_slugs(project: Project) -> tuple[str, str]:
+    """source_url / maker_url からクリエイター slug・プロジェクト slug を抽出する。
+
+    例:
+      https://www.kickstarter.com/projects/lunosama/narrationos
+        → creator_slug=lunosama, project_slug=narrationos
+      https://www.kickstarter.com/profile/lunosama → creator_slug=lunosama
+      https://www.indiegogo.com/projects/vitesy-fruit-bowl → project_slug=vitesy-fruit-bowl
+      https://www.ulule.com/narrationos/ → project_slug=narrationos
+    """
+    creator_slug = ""
+    project_slug = ""
+    for url in (getattr(project, "source_url", None), getattr(project, "maker_url", None)):
+        if not url:
+            continue
+        parts = [p for p in urlparse(url).path.split("/") if p]
+        low = [p.lower() for p in parts]
+        if "profile" in low:
+            i = low.index("profile")
+            if i + 1 < len(parts) and _slug_ok(parts[i + 1]):
+                creator_slug = creator_slug or parts[i + 1]
+        for key in ("projects", "project"):
+            if key in low:
+                i = low.index(key)
+                rest = [p for p in parts[i + 1:]]
+                if len(rest) >= 2 and _slug_ok(rest[0]) and _slug_ok(rest[1]):
+                    creator_slug = creator_slug or rest[0]
+                    project_slug = project_slug or rest[1]
+                elif len(rest) == 1 and _slug_ok(rest[0]):
+                    project_slug = project_slug or rest[0]
+                break
+        # Ulule 等：/<slug>/ 形式（既知プレフィックス無し）
+        if not creator_slug and not project_slug and len(parts) == 1 and _slug_ok(parts[0]):
+            project_slug = parts[0]
+    return creator_slug, project_slug
+
+
 def build_keyword_candidates(
     project: Project, research: CompanyResearch | None = None
 ) -> dict:
@@ -207,6 +259,10 @@ def build_keyword_candidates(
     for name in _extract_brand_names(desc[:1500]):
         add_brand(name)
 
+    creator_slug, project_slug = extract_slugs(project)
+    # maker_name が短く曖昧（"Luno" 等）なら単体検索の優先度を下げる。
+    maker_ambiguous = bool(maker) and len(maker.replace(" ", "")) <= 5
+
     return {
         "project_title": title,
         "short_title": short if short and short != title else "",
@@ -215,6 +271,9 @@ def build_keyword_candidates(
         "official_domain": official_domain,
         "domain_name": domain_name,
         "source_site": source_site,
+        "creator_slug": creator_slug,
+        "project_slug": project_slug,
+        "maker_ambiguous": maker_ambiguous,
     }
 
 
@@ -233,6 +292,9 @@ def build_web_search_queries(
     domain = kw["official_domain"]
     brands = kw["brand_names"]
     source_site = kw["source_site"]
+    creator_slug = kw["creator_slug"]
+    project_slug = kw["project_slug"]
+    maker_ambiguous = kw["maker_ambiguous"]
 
     queries: list[str] = []
     seen: set[str] = set()
@@ -242,6 +304,21 @@ def build_web_search_queries(
         if q and q not in seen:
             seen.add(q)
             queries.append(q)
+
+    def add_slug_queries() -> None:
+        """クリエイター/プロジェクト slug による探索（曖昧な maker 名より強い手掛かり）。"""
+        # タイトル × creator_slug（最も具体的）
+        if title and creator_slug:
+            add(f"{title} {creator_slug}")
+            add(f"{creator_slug} {title}")
+        for slug in [s for s in (creator_slug, project_slug) if s]:
+            for kwd in ("contact", "email", "Instagram", "Facebook",
+                        "LinkedIn", "YouTube", "official website"):
+                add(f"{slug} {kwd}")
+            for site in ("youtube.com", "instagram.com", "facebook.com",
+                         "linkedin.com", "github.com", "linktr.ee",
+                         "carrd.co", "beacons.ai"):
+                add(f"site:{site} {slug}")
 
     # 優先度1: タイトル × メーカー の複合 SNS（最も具体的）
     if title and maker:
@@ -254,10 +331,18 @@ def build_web_search_queries(
                     "official Facebook", "official", "brand"):
             add(f'"{title}" {kwd}')
 
-    # 優先度3: メーカー名の SNS / 連絡先
+    # maker が短く曖昧なら、slug 検索を maker 単体検索より優先する
+    if maker_ambiguous:
+        add_slug_queries()
+
+    # 優先度3: メーカー名の SNS / 連絡先（曖昧な場合は上で slug を先行済み）
     if maker:
         for kwd in ("Instagram", "Facebook", "LinkedIn", "official", "contact"):
             add(f'"{maker}" {kwd}')
+
+    # 曖昧でなければ slug 検索はここで追加（補助）
+    if not maker_ambiguous:
+        add_slug_queries()
 
     # 優先度4: site: 限定（プロフィール/企業ページを直接狙う）
     if title:
@@ -768,15 +853,27 @@ def build_fallback_queries(
         head = (kw["short_title"] or kw["project_title"] or "").strip()
         base = head.split(" ")[0].strip() if head else ""
     base = base.strip()
-    if not base:
-        return []
-    return [
-        base,
-        f"{base} Facebook",
-        f"{base} Instagram",
-        f"{base} LinkedIn",
-        f"{base} official website",
-    ]
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+
+    # slug 検索を優先（曖昧な maker 名より強い手掛かり）
+    title = kw["project_title"]
+    for slug in [s for s in (kw["creator_slug"], kw["project_slug"]) if s]:
+        if title:
+            add(f"{title} {slug}")
+        for kwd in ("contact", "email", "Instagram", "YouTube"):
+            add(f"{slug} {kwd}")
+        for site in ("instagram.com", "youtube.com", "linktr.ee", "linkedin.com"):
+            add(f"site:{site} {slug}")
+    if base:
+        for kwd in ("", " Facebook", " Instagram", " LinkedIn", " official website"):
+            add(f"{base}{kwd}".strip())
+    return out
 
 
 def _as_result(item) -> dict | None:

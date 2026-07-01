@@ -936,6 +936,9 @@ export type WebKeywordCandidates = {
   official_domain: string | null;
   domain_name: string | null;
   source_site: string | null;
+  creator_slug?: string | null;
+  project_slug?: string | null;
+  maker_ambiguous?: boolean | null;
 };
 
 // 検索結果 1 件のスコアリング履歴（採用/除外理由つき）。

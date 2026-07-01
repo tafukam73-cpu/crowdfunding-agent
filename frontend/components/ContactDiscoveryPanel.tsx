@@ -620,6 +620,66 @@ type WebEmail = {
   email_owner?: string | null;
 };
 
+// slug 検索の実行状況・公式サイト登録状況（NarrationOS 等の可視化）。
+function SlugStatus({
+  data,
+  kw,
+}: {
+  data: ContactDiscovery;
+  kw: NonNullable<ContactDiscovery["web_keyword_candidates"]>;
+}) {
+  const slugs = [kw.creator_slug, kw.project_slug].filter(Boolean) as string[];
+  const executed = data.web_searched_queries ?? [];
+  // slug を含む実行クエリがあったか
+  const slugRan = executed.filter((q) =>
+    slugs.some((s) => q.toLowerCase().includes(s.toLowerCase()))
+  );
+  // slug 検索由来で採用された結果（social/page）があったか
+  const results = data.web_search_results ?? [];
+  const slugHits = results.filter(
+    (r) =>
+      r.adopted &&
+      r.query &&
+      slugs.some((s) => r.query!.toLowerCase().includes(s.toLowerCase()))
+  );
+  const dc = data.web_debug_counts;
+  const websitesEmpty =
+    dc?.ks_websites_present && !dc?.ks_websites_registered;
+
+  return (
+    <div className="mt-1 space-y-0.5 rounded bg-slate-50 p-1.5 text-[11px] text-slate-600">
+      {websitesEmpty && (
+        <p className="text-amber-700">
+          Kickstarter websites:[] のため公式サイト未登録（クリエイターが外部サイトを
+          登録していません）
+        </p>
+      )}
+      <p>
+        slug検索の実行:{" "}
+        {slugRan.length > 0 ? (
+          <span className="text-teal-700">
+            実行済み（{slugRan.length}件）例: {slugRan.slice(0, 3).join(" / ")}
+          </span>
+        ) : (
+          <span className="text-slate-400">未実行</span>
+        )}
+      </p>
+      {slugRan.length > 0 && (
+        <p>
+          slug検索の成果:{" "}
+          {slugHits.length > 0 ? (
+            <span className="text-emerald-700">{slugHits.length}件を採用</span>
+          ) : (
+            <span className="text-slate-500">
+              slug検索でも連絡先/公式サイトは未発見
+            </span>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // 🔍 検索クエリ戦略（どのキーワード/クエリで探し、何を採用/除外したか）。
 function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
   const kw = data.web_keyword_candidates;
@@ -670,7 +730,18 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
                 <li>プロジェクト名: {kw.project_title}</li>
               )}
               {kw.short_title && <li>短縮名: {kw.short_title}</li>}
-              {kw.maker_name && <li>メーカー名: {kw.maker_name}</li>}
+              {kw.maker_name && (
+                <li>
+                  メーカー名: {kw.maker_name}
+                  {kw.maker_ambiguous && (
+                    <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">
+                      短く曖昧のため単体検索の優先度を下げ、slug検索を優先
+                    </span>
+                  )}
+                </li>
+              )}
+              {kw.creator_slug && <li>creator_slug: {kw.creator_slug}</li>}
+              {kw.project_slug && <li>project_slug: {kw.project_slug}</li>}
               {kw.brand_names && kw.brand_names.length > 0 && (
                 <li>ブランド名候補: {kw.brand_names.join(" / ")}</li>
               )}
@@ -678,6 +749,11 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
                 <li>公式ドメイン: {kw.official_domain}</li>
               )}
             </ul>
+
+            {/* slug 検索の実行状況・公式サイト登録状況 */}
+            {(kw.creator_slug || kw.project_slug) && (
+              <SlugStatus data={data} kw={kw} />
+            )}
           </div>
         )}
 
