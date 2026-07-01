@@ -394,6 +394,12 @@ def _iter_source_emails(row: "ContactDiscovery") -> list[dict]:
             src = e.get("source_url")
             add(e.get("email"), e.get("score", 0), e.get("email_owner"),
                 [src] if src else [])
+    # AI Document Reader が読解したメール（confidence をスコアに使う）
+    for e in (getattr(row, "doc_reader_emails", None) or []):
+        if isinstance(e, dict):
+            src = e.get("source_url")
+            add(e.get("email"), e.get("confidence", 0), e.get("email_owner"),
+                [src] if src else [])
     return out
 
 

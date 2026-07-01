@@ -30,6 +30,7 @@ from app.schemas.contact_person import (
 from app.services import (
     contact_discovery_service,
     contact_hunter_service,
+    document_reader_service,
     email_service,
     project_service,
     web_research_service,
@@ -110,6 +111,42 @@ def run_web_research(
 )
 def get_web_research(project_id: int, db: Session = Depends(get_db)):
     """最新の探索結果（web_* を含む）を返す。未実行なら 204。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    row = contact_discovery_service.get_latest(db, project_id)
+    if row is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return row
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/document-reader",
+    response_model=ContactDiscoveryOut,
+)
+def run_document_reader(
+    project_id: int, db: Session = Depends(get_db)
+) -> ContactDiscoveryOut:
+    """AI Document Reader を実行して最新の探索結果の doc_reader_* に保存する（同期）。
+
+    Web Research が到達したページの本文・リンク・抽出済みメール/SNS・検索スニペットを
+    集め、AI（Claude / モック）にページ全体を読解させて会社名・公式サイト・メール・
+    SNS・フォーム・担当者候補を整理する。ANTHROPIC_API_KEY 未設定時はモックで動作。
+    AI が返したメール・人名は既存フィルタで再検証し、推測メールは採用しない。失敗時も
+    doc_reader_evidence_summary にエラーを記録し 200 で返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return document_reader_service.run_document_reader(db, project)
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/document-reader",
+    response_model=ContactDiscoveryOut,
+)
+def get_document_reader(project_id: int, db: Session = Depends(get_db)):
+    """最新の探索結果（doc_reader_* を含む）を返す。未実行なら 204。"""
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")

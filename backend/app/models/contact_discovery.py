@@ -167,6 +167,40 @@ class ContactDiscovery(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- AI Document Reader（ページ全体を読解して連絡先を整理する追加レイヤー） ---
+    doc_reader_researched: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    doc_reader_model: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    doc_reader_official_company_name: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    doc_reader_brand_names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    doc_reader_official_site_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [{email, purpose, confidence, source_url, reason, email_owner}]
+    doc_reader_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # [{url, confidence, source_url}]
+    doc_reader_contact_forms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # {platform: url}
+    doc_reader_socials: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # [{name, title, linkedin_url, email, confidence, source_url, reason}]
+    doc_reader_people: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    doc_reader_recommended_channel: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+    doc_reader_recommended_contact: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    doc_reader_confidence_score: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    doc_reader_evidence_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    doc_reader_missing_info: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    doc_reader_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    doc_reader_researched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

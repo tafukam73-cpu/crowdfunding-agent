@@ -949,6 +949,32 @@ export type WebSearchResult = {
   reason: string | null;
 };
 
+// 🧠 AI Document Reader の読解結果。
+export type DocReaderEmail = {
+  email: string;
+  purpose: string | null;
+  confidence: number;
+  source_url: string | null;
+  reason: string | null;
+  email_owner: string | null;
+};
+
+export type DocReaderContactForm = {
+  url: string;
+  confidence: number;
+  source_url: string | null;
+};
+
+export type DocReaderPerson = {
+  name: string;
+  title: string | null;
+  linkedin_url: string | null;
+  email: string | null;
+  confidence: number;
+  source_url: string | null;
+  reason: string | null;
+};
+
 // 🏆 営業推奨連絡先（営業のしやすさで格付けしたメール）。
 export type SalesContact = {
   email: string;
@@ -1026,6 +1052,23 @@ export type ContactDiscovery = {
   web_notes: string | null;
   web_research_error: string | null;
   web_researched_at: string | null;
+  // --- AI Document Reader ---
+  doc_reader_researched: boolean;
+  doc_reader_model: string | null;
+  doc_reader_official_company_name: string | null;
+  doc_reader_brand_names: string[] | null;
+  doc_reader_official_site_url: string | null;
+  doc_reader_emails: DocReaderEmail[] | null;
+  doc_reader_contact_forms: DocReaderContactForm[] | null;
+  doc_reader_socials: Record<string, string> | null;
+  doc_reader_people: DocReaderPerson[] | null;
+  doc_reader_recommended_channel: string | null;
+  doc_reader_recommended_contact: string | null;
+  doc_reader_confidence_score: number | null;
+  doc_reader_evidence_summary: string | null;
+  doc_reader_missing_info: string[] | null;
+  doc_reader_sources: AiSource[] | null;
+  doc_reader_researched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1081,6 +1124,22 @@ export async function runWebResearch(
 ): Promise<ContactDiscovery> {
   const res = await fetch(
     `${API_BASE}/projects/${id}/contact-discovery/web-research`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// AI Document Reader を実行（同期）。Claude 未設定時はモックで動作。
+// AI が返したメール・人名は既存フィルタで再検証。失敗時も evidence にエラーを記録。
+export async function runDocumentReader(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(
+    `${API_BASE}/projects/${id}/contact-discovery/document-reader`,
     { method: "POST" }
   );
   if (!res.ok) {

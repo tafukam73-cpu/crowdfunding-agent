@@ -130,6 +130,31 @@ class DiscoveredPdf(BaseModel):
     relevant: bool | None = None
 
 
+class DocReaderEmail(BaseModel):
+    email: str
+    purpose: str | None = None
+    confidence: int = 0
+    source_url: str | None = None
+    reason: str | None = None
+    email_owner: str | None = None
+
+
+class DocReaderContactForm(BaseModel):
+    url: str
+    confidence: int = 0
+    source_url: str | None = None
+
+
+class DocReaderPerson(BaseModel):
+    name: str
+    title: str | None = None
+    linkedin_url: str | None = None
+    email: str | None = None
+    confidence: int = 0
+    source_url: str | None = None
+    reason: str | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -207,11 +232,29 @@ class ContactDiscoveryOut(BaseModel):
     web_research_error: str | None = None
     web_researched_at: datetime | None = None
 
+    # --- AI Document Reader（ページ全体を読解して連絡先を整理） ---
+    doc_reader_researched: bool = False
+    doc_reader_model: str | None = None
+    doc_reader_official_company_name: str | None = None
+    doc_reader_brand_names: list[str] | None = None
+    doc_reader_official_site_url: str | None = None
+    doc_reader_emails: list[DocReaderEmail] | None = None
+    doc_reader_contact_forms: list[DocReaderContactForm] | None = None
+    doc_reader_socials: dict[str, str] | None = None
+    doc_reader_people: list[DocReaderPerson] | None = None
+    doc_reader_recommended_channel: str | None = None
+    doc_reader_recommended_contact: str | None = None
+    doc_reader_confidence_score: int | None = None
+    doc_reader_evidence_summary: str | None = None
+    doc_reader_missing_info: list[str] | None = None
+    doc_reader_sources: list[AiSource] | None = None
+    doc_reader_researched_at: datetime | None = None
+
     created_at: datetime
     updated_at: datetime
 
     # --- 後方互換サニタイズ（古い行がプラットフォーム URL を保持していても出さない） ---
-    @field_validator("official_site_url")
+    @field_validator("official_site_url", "doc_reader_official_site_url")
     @classmethod
     def _no_platform_official(cls, v: str | None) -> str | None:
         # 公式サイトとして kickstarter.com/profile/... 等は返さない。

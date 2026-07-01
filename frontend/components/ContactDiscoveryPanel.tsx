@@ -16,6 +16,7 @@ import {
   runAiContactResearch,
   runContactDiscovery,
   runContactHunter,
+  runDocumentReader,
   runWebResearch,
   type SalesContact,
 } from "@/lib/api";
@@ -893,6 +894,291 @@ function SalesRankingSection({
   );
 }
 
+// 🧠 AI Document Reader（ページ全体を読解して連絡先を文脈から整理）。
+function DocumentReaderSection({
+  projectId,
+  data,
+  busy,
+  error,
+  onRun,
+  onApply,
+}: {
+  projectId: number;
+  data: ContactDiscovery | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onApply: (email: string) => void;
+}) {
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+
+  function onUseAsGmailTo(email: string) {
+    try {
+      sessionStorage.setItem(gmailToKey(projectId), email);
+    } catch {
+      /* sessionStorage 不可環境では無視 */
+    }
+    setGmailMsg(`「${email}」をメール作成画面（STEP 3）の宛先候補に設定しました。`);
+  }
+
+  const researched = data?.doc_reader_researched;
+  const emails = data?.doc_reader_emails ?? [];
+  const forms = data?.doc_reader_contact_forms ?? [];
+  const socials = Object.entries(data?.doc_reader_socials ?? {});
+  const people = data?.doc_reader_people ?? [];
+  const sources = data?.doc_reader_sources ?? [];
+
+  return (
+    <div className="rounded-md border border-violet-300 bg-violet-50/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-violet-900">
+            🧠 AI Document Reader
+          </p>
+          <p className="mt-0.5 text-xs text-violet-700">
+            取得済みページ（案件・プロフィール・公式サイト・Contact/About/Team/Press
+            等）の本文・リンク・PDF・検索スニペットをAIが読解し、会社名・公式サイト・
+            メール・SNS・フォーム・担当者候補を文脈から整理します（推測メール・人名は
+            作りません）。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="rounded bg-violet-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-600 disabled:opacity-50"
+        >
+          {busy ? "読解中…" : researched ? "AIで再読解" : "AIでページを読解"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {!researched && !error && (
+        <p className="mt-3 text-xs text-violet-700">
+          まだ読解していません。上のボタンで、取得済みページをAIに読ませて連絡先を
+          整理できます（ANTHROPIC_API_KEY 未設定時はモックで動作）。
+        </p>
+      )}
+
+      {researched && data && (
+        <div className="mt-3 space-y-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            {data.doc_reader_model && (
+              <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                モデル: {data.doc_reader_model}
+              </span>
+            )}
+            <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+              確度: {data.doc_reader_confidence_score ?? 0} / 100
+            </span>
+            {data.doc_reader_recommended_channel && (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                推奨チャネル:{" "}
+                {CHANNEL_LABELS[data.doc_reader_recommended_channel] ??
+                  data.doc_reader_recommended_channel}
+              </span>
+            )}
+          </div>
+
+          {(data.doc_reader_official_company_name ||
+            data.doc_reader_official_site_url) && (
+            <div className="text-xs text-slate-700">
+              {data.doc_reader_official_company_name && (
+                <span className="mr-2">
+                  <span className="text-slate-400">会社名：</span>
+                  {data.doc_reader_official_company_name}
+                </span>
+              )}
+              <span className="text-slate-400">公式サイト：</span>
+              {data.doc_reader_official_site_url ? (
+                <a
+                  href={data.doc_reader_official_site_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-700 hover:underline"
+                >
+                  {data.doc_reader_official_site_url.replace(/^https?:\/\//, "")}
+                </a>
+              ) : (
+                <span className="text-slate-400">未発見</span>
+              )}
+            </div>
+          )}
+
+          {data.doc_reader_evidence_summary && (
+            <div className="rounded-md border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+              {data.doc_reader_evidence_summary}
+            </div>
+          )}
+
+          {/* 推奨連絡先 */}
+          {data.doc_reader_recommended_contact && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-violet-700">推奨送信先</span>
+              <span className="font-medium text-slate-900">
+                {data.doc_reader_recommended_contact}
+              </span>
+              <CopyButton text={data.doc_reader_recommended_contact} label="コピー" />
+              <button
+                onClick={() =>
+                  onUseAsGmailTo(data.doc_reader_recommended_contact as string)
+                }
+                className="rounded border border-blue-300 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+              >
+                Gmail宛先に使用
+              </button>
+              <button
+                onClick={() => onApply(data.doc_reader_recommended_contact as string)}
+                className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                CRMに反映
+              </button>
+            </div>
+          )}
+
+          {/* 発見メール */}
+          {emails.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-violet-700">
+                読解で発見したメール（出典付き・再検証済み）
+              </p>
+              <ul className="mt-1 space-y-1">
+                {emails.map((e) => (
+                  <li key={e.email} className="flex flex-wrap items-center gap-2">
+                    <span className="rounded bg-violet-100 px-2 py-0.5 text-xs text-violet-800">
+                      {e.purpose ?? "other"} {e.confidence}
+                    </span>
+                    <span className="text-slate-800">{e.email}</span>
+                    <CopyButton text={e.email} />
+                    <button
+                      onClick={() => onUseAsGmailTo(e.email)}
+                      className="rounded border border-blue-200 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50"
+                    >
+                      Gmail宛先
+                    </button>
+                    <button
+                      onClick={() => onApply(e.email)}
+                      className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      CRM
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* フォーム / SNS */}
+          {(forms.length > 0 || socials.length > 0) && (
+            <div className="flex flex-wrap items-center gap-3">
+              {forms.map((f) => (
+                <a
+                  key={f.url}
+                  href={f.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  問い合わせフォームを開く ↗
+                </a>
+              ))}
+              {socials.map(([platform, url]) => (
+                <a
+                  key={platform}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-700 hover:underline"
+                >
+                  {platform} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
+          {/* 担当者候補 */}
+          {people.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-violet-700">担当者候補</p>
+              <ul className="mt-1 space-y-1">
+                {people.map((p, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-slate-800">{p.name}</span>
+                    {p.title && (
+                      <span className="text-xs text-slate-500">{p.title}</span>
+                    )}
+                    {p.linkedin_url && (
+                      <a
+                        href={p.linkedin_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-blue-700 hover:underline"
+                      >
+                        LinkedIn ↗
+                      </a>
+                    )}
+                    {p.email && (
+                      <>
+                        <span className="text-xs text-slate-700">{p.email}</span>
+                        <CopyButton text={p.email} />
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {gmailMsg && (
+            <p className="text-xs font-medium text-blue-700">{gmailMsg}</p>
+          )}
+
+          {/* 不足情報 */}
+          {data.doc_reader_missing_info &&
+            data.doc_reader_missing_info.length > 0 && (
+              <div className="text-xs text-slate-500">
+                <p className="font-semibold">不足情報</p>
+                <ul className="mt-0.5 list-disc pl-4">
+                  {data.doc_reader_missing_info.map((m, i) => (
+                    <li key={i}>{m}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+          {/* 参照ページ */}
+          {sources.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">
+                読解した参照ページ（{sources.length}）
+              </summary>
+              <ul className="mt-1 space-y-0.5">
+                {sources.map((s, i) => (
+                  <li key={i} className="break-all">
+                    {s.type && (
+                      <span className="mr-1 rounded bg-slate-100 px-1 text-[10px]">
+                        {s.type}
+                      </span>
+                    )}
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 hover:underline"
+                    >
+                      {s.url} ↗
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // AI Web Research Mode（検索エンジン＋公式サイト横断クロールの実調査）。
 function WebResearchSection({
   projectId,
@@ -1460,6 +1746,8 @@ export default function ContactDiscoveryPanel({
   const [aiError, setAiError] = useState<string | null>(null);
   const [webBusy, setWebBusy] = useState(false);
   const [webError, setWebError] = useState<string | null>(null);
+  const [docBusy, setDocBusy] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
@@ -1510,6 +1798,22 @@ export default function ContactDiscoveryPanel({
       setWebError(String(e));
     } finally {
       setWebBusy(false);
+    }
+  }
+
+  async function onRunDoc() {
+    setDocBusy(true);
+    setDocError(null);
+    setApplyMsg(null);
+    try {
+      // AI Document Reader は最新の探索結果（doc_reader_* 含む）を返す。土台が
+      // 無ければサーバ側で自動探索を先に実行する。
+      setData(await runDocumentReader(projectId));
+      onChanged?.();
+    } catch (e) {
+      setDocError(String(e));
+    } finally {
+      setDocBusy(false);
     }
   }
 
@@ -1587,6 +1891,15 @@ export default function ContactDiscoveryPanel({
           busy={webBusy}
           error={webError}
           onRun={onRunWeb}
+          onApply={onApply}
+        />
+        {/* AI Document Reader（ページ全体を読解。自動抽出/AI調査/Web調査/担当者と区別） */}
+        <DocumentReaderSection
+          projectId={projectId}
+          data={data}
+          busy={docBusy}
+          error={docError}
+          onRun={onRunDoc}
           onApply={onApply}
         />
       </div>
