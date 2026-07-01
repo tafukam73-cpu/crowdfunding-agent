@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   type AiCandidateEmail,
@@ -20,6 +20,11 @@ import {
   runSearchAgent,
   runWebResearch,
   type SalesContact,
+  type ContactIntelligenceJob,
+  startContactIntelligenceJob,
+  getContactIntelligenceJob,
+  getLatestContactIntelligenceJob,
+  cancelContactIntelligenceJob,
 } from "@/lib/api";
 
 // 営業推奨度の星表示（★★★★★〜★☆☆☆☆）。
@@ -968,6 +973,211 @@ function SearchStrategyDetails({ data }: { data: ContactDiscovery }) {
         )}
       </div>
     </details>
+  );
+}
+
+// 🔎 じっくり調査（Contact Intelligence v2）。重い探索を非同期ジョブ化してポーリング表示。
+function DeepInvestigationSection({
+  projectId,
+  onDone,
+}: {
+  projectId: number;
+  onDone?: () => void;
+}) {
+  const [job, setJob] = useState<ContactIntelligenceJob | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const ACTIVE = (s?: string) => s === "queued" || s === "running";
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  function startPolling(jobId: number) {
+    stopPolling();
+    pollRef.current = setInterval(async () => {
+      try {
+        const j = await getContactIntelligenceJob(jobId);
+        setJob(j);
+        if (!ACTIVE(j.status)) {
+          stopPolling();
+          if (j.status === "completed") onDone?.();
+        }
+      } catch {
+        /* ネットワーク一時失敗は次回ポーリングで回復 */
+      }
+    }, 2000);
+  }
+
+  // 初回：最新の full ジョブを取得。進行中なら購読、完了済みならキャッシュ提示。
+  useEffect(() => {
+    let active = true;
+    getLatestContactIntelligenceJob(projectId, "full_contact_intelligence")
+      .then((j) => {
+        if (!active || !j) return;
+        setJob(j);
+        if (ACTIVE(j.status)) startPolling(j.id);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      stopPolling();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  async function start(force: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const j = await startContactIntelligenceJob(
+        projectId,
+        "full_contact_intelligence",
+        force
+      );
+      setJob(j);
+      if (ACTIVE(j.status)) startPolling(j.id);
+      else if (j.status === "completed") onDone?.();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCancel() {
+    if (!job) return;
+    try {
+      setJob(await cancelContactIntelligenceJob(job.id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  const active = ACTIVE(job?.status);
+  const completedRecent =
+    job?.status === "completed" &&
+    job.completed_at &&
+    Date.now() - new Date(job.completed_at).getTime() < 24 * 3600 * 1000;
+  const result = (job?.result_json ?? {}) as Record<string, unknown>;
+
+  return (
+    <div className="rounded-md border-2 border-indigo-300 bg-indigo-50/70 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold text-indigo-900">🔎 じっくり調査（推奨）</p>
+          <p className="mt-0.5 text-xs text-indigo-700">
+            Web調査 → Document Reader → Search Agent →
+            営業推奨ランキング更新を、バックグラウンドでまとめて実行します（重い探索でも
+            タイムアウトしません。進捗はここに表示されます）。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {active ? (
+            <button
+              onClick={onCancel}
+              className="rounded border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100"
+            >
+              中断
+            </button>
+          ) : (
+            <>
+              {completedRecent && (
+                <button
+                  onClick={() => onDone?.()}
+                  className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-sm text-indigo-700 hover:bg-indigo-50"
+                >
+                  前回結果を使う
+                </button>
+              )}
+              <button
+                onClick={() => start(true)}
+                disabled={busy}
+                className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-600 disabled:opacity-50"
+              >
+                {busy
+                  ? "開始中…"
+                  : completedRecent
+                  ? "再実行"
+                  : "じっくり調査を開始"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {job && (
+        <div className="mt-3 space-y-2">
+          {/* 進捗バー */}
+          <div className="flex items-center gap-2">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-indigo-100">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  job.status === "failed"
+                    ? "bg-red-500"
+                    : job.status === "cancelled"
+                    ? "bg-slate-400"
+                    : "bg-indigo-600"
+                }`}
+                style={{ width: `${job.progress ?? 0}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold text-indigo-800">
+              {job.progress ?? 0}%
+            </span>
+          </div>
+          <p className="text-xs text-slate-600">
+            <span className="font-semibold">状態:</span> {job.status}
+            {job.current_step ? ` / ${job.current_step}` : ""}
+            {job.from_cache && "（前回結果／キャッシュ）"}
+          </p>
+          {job.error && (
+            <p className="text-xs text-red-600 break-all">{job.error}</p>
+          )}
+
+          {/* 結果サマリ */}
+          {job.status === "completed" && (
+            <div className="rounded-md border border-indigo-200 bg-white p-2 text-xs text-slate-700">
+              <span className="font-semibold text-indigo-800">結果:</span>{" "}
+              公式サイト {String(result.official_site_url ?? "未発見")} / 推奨連絡先{" "}
+              {result.top_contact
+                ? String(
+                    (result.top_contact as Record<string, unknown>).email ?? "-"
+                  )
+                : "-"}{" "}
+              / 連絡先候補 {String(result.sales_contacts_count ?? 0)}件 / SNS{" "}
+              {Object.keys(
+                (result.socials as Record<string, unknown>) ?? {}
+              ).length}
+              件
+            </div>
+          )}
+
+          {/* ログ（最新6件） */}
+          {job.logs_json && job.logs_json.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer">
+                進捗ログ（{job.logs_json.length}）
+              </summary>
+              <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto">
+                {job.logs_json.slice(-12).map((l, i) => (
+                  <li key={i} className="break-all">
+                    {l.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2205,6 +2415,16 @@ export default function ContactDiscoveryPanel({
       .catch((e) => setError(String(e)));
   }, [projectId]);
 
+  // じっくり調査ジョブ完了時などに最新の探索結果を取り込む。
+  function refetchDiscovery() {
+    fetchContactDiscovery(projectId)
+      .then((d) => {
+        setData(d);
+        onChanged?.();
+      })
+      .catch(() => {});
+  }
+
   async function onRun() {
     setBusy(true);
     setError(null);
@@ -2338,8 +2558,16 @@ export default function ContactDiscoveryPanel({
         </div>
       )}
 
+      {/* 🔎 じっくり調査（推奨・非同期ジョブ）。重い探索をまとめて実行し進捗表示。 */}
+      <div className="mt-3">
+        <DeepInvestigationSection
+          projectId={projectId}
+          onDone={refetchDiscovery}
+        />
+      </div>
+
       {/* Contact Hunter（誰に送るか）＋ AI連絡先リサーチ ＋ AI Web調査。
-          自動抽出 / AI調査 / Web調査 / 担当者 を区別して表示する。 */}
+          単発実行は残す（推奨は上の「じっくり調査」）。 */}
       <div className="mt-3 space-y-3">
         <ContactHunterSection projectId={projectId} onChanged={onChanged} />
         <AiResearchSection

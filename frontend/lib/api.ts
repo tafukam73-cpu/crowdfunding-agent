@@ -1208,6 +1208,86 @@ export async function runDocumentReader(
   return res.json();
 }
 
+// ===== Contact Intelligence v2（非同期ジョブ） =====
+export type CIJobType =
+  | "web_research"
+  | "document_reader"
+  | "search_agent"
+  | "full_contact_intelligence";
+
+export type CIJobStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ContactIntelligenceJob = {
+  id: number;
+  project_id: number;
+  job_type: CIJobType | string;
+  status: CIJobStatus | string;
+  progress: number;
+  current_step: string | null;
+  logs_json: { ts: string | null; message: string | null }[] | null;
+  result_json: Record<string, unknown> | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  from_cache: boolean;
+};
+
+// 重い探索をジョブ化して開始（24hキャッシュ再利用。force で再実行）。すぐ返る。
+export async function startContactIntelligenceJob(
+  projectId: number,
+  jobType: CIJobType = "full_contact_intelligence",
+  force = false
+): Promise<ContactIntelligenceJob> {
+  const res = await fetch(
+    `${API_BASE}/projects/${projectId}/contact-intelligence/jobs?job_type=${jobType}&force=${force}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// ジョブ取得（ポーリング用）。
+export async function getContactIntelligenceJob(
+  jobId: number
+): Promise<ContactIntelligenceJob> {
+  const res = await apiFetch(`/contact-intelligence/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 最新ジョブ取得（未実行なら 204 → null）。
+export async function getLatestContactIntelligenceJob(
+  projectId: number,
+  jobType?: CIJobType
+): Promise<ContactIntelligenceJob | null> {
+  const q = jobType ? `?job_type=${jobType}` : "";
+  const res = await apiFetch(
+    `/projects/${projectId}/contact-intelligence/jobs/latest${q}`
+  );
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// ジョブ中断要求。
+export async function cancelContactIntelligenceJob(
+  jobId: number
+): Promise<ContactIntelligenceJob> {
+  const res = await fetch(
+    `${API_BASE}/contact-intelligence/jobs/${jobId}/cancel`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
 // AI Search Agent を実行（同期）。次に見るページを判断しながら反復探索。
 // Claude 未設定時はモックで動作。失敗時も search_agent_error を記録して 200 で返る。
 export async function runSearchAgent(
