@@ -987,7 +987,15 @@ function DeepInvestigationSection({
   const [job, setJob] = useState<ContactIntelligenceJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [stalled, setStalled] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 同じ current_step が続いた時間の計測（60秒超で「長引いています」表示）
+  const stepRef = useRef<{ step: string | null; at: number }>({
+    step: null,
+    at: Date.now(),
+  });
+  const failRef = useRef(0);
 
   const ACTIVE = (s?: string) => s === "queued" || s === "running";
 
@@ -1000,16 +1008,36 @@ function DeepInvestigationSection({
 
   function startPolling(jobId: number) {
     stopPolling();
+    stepRef.current = { step: null, at: Date.now() };
+    failRef.current = 0;
+    setStalled(false);
+    setPollError(null);
     pollRef.current = setInterval(async () => {
       try {
         const j = await getContactIntelligenceJob(jobId);
+        failRef.current = 0;
+        setPollError(null);
         setJob(j);
+        // ステップが変わったら計測をリセット。同じステップが 60 秒超で「長引き」表示。
+        if (j.current_step !== stepRef.current.step) {
+          stepRef.current = { step: j.current_step, at: Date.now() };
+          setStalled(false);
+        } else if (ACTIVE(j.status) && Date.now() - stepRef.current.at > 60000) {
+          setStalled(true);
+        }
         if (!ACTIVE(j.status)) {
           stopPolling();
+          setStalled(false);
           if (j.status === "completed") onDone?.();
         }
-      } catch {
-        /* ネットワーク一時失敗は次回ポーリングで回復 */
+      } catch (e) {
+        // 連続失敗時のみエラー表示（一時的な失敗は握りつぶす）
+        failRef.current += 1;
+        if (failRef.current >= 3) {
+          setPollError(
+            "進捗の取得に繰り返し失敗しています（ネットワーク/サーバを確認してください）。"
+          );
+        }
       }
     }, 2000);
   }
@@ -1138,8 +1166,20 @@ function DeepInvestigationSection({
             {job.current_step ? ` / ${job.current_step}` : ""}
             {job.from_cache && "（前回結果／キャッシュ）"}
           </p>
-          {job.error && (
-            <p className="text-xs text-red-600 break-all">{job.error}</p>
+          {stalled && ACTIVE(job.status) && (
+            <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
+              ⏳ 処理が長引いています（重いページの取得中かもしれません）。このまま
+              お待ちいただくか、「中断」できます。
+            </p>
+          )}
+          {pollError && <p className="text-xs text-red-600">{pollError}</p>}
+          {job.status === "failed" && (
+            <p className="text-xs text-red-600 break-all">
+              失敗：{job.error ?? "原因不明のエラー"}
+            </p>
+          )}
+          {job.status === "cancelled" && (
+            <p className="text-xs text-slate-500">中断しました。</p>
           )}
 
           {/* 結果サマリ */}

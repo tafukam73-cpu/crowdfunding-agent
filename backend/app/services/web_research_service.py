@@ -1018,6 +1018,7 @@ def web_research(
     *,
     fetch_fn=None,
     search_fn=None,
+    progress_cb=None,
 ) -> dict:
     """Web リサーチ本体（DB 非依存）。集計した結果 dict を返す。
 
@@ -1143,7 +1144,11 @@ def web_research(
                 })
 
     try:
-        for q in generated_queries[:MAX_QUERIES]:
+        _qn = min(len(generated_queries), MAX_QUERIES)
+        for _qi, q in enumerate(generated_queries[:MAX_QUERIES]):
+            if progress_cb:
+                progress_cb(f"検索中 ({_qi + 1}/{_qn}): {q[:60]}",
+                            pct=(_qi / max(1, _qn)) * 0.4)  # 検索フェーズは全体の 0〜40%
             run_query(q)
         # フォールバック：公式サイト/SNS/巡回ページを全く拾えなかったら短縮クエリで
         # 再検索する（フル件名 → メーカー名 → "<名> Facebook/Instagram/LinkedIn"）。
@@ -1267,6 +1272,12 @@ def web_research(
         while i < len(crawl_urls) and len(searched) < MAX_URLS:
             url = crawl_urls[i]
             i += 1
+            if progress_cb:
+                # 1 URL 巡回ごとに進捗・現在URLを通知（DB へ随時 flush される）。
+                # 検索フェーズが 0〜40% なので、巡回は 40〜100% に割り当てる。
+                total = min(len(crawl_urls), MAX_URLS)
+                progress_cb(f"巡回中 ({len(searched) + 1}/{total}): {url}",
+                            pct=0.4 + 0.6 * (len(searched) / max(1, total)))
             html = fetch(url)
             searched.append(url)
             page = {"url": url, "type": _page_type(url, effective_domain),
@@ -1635,13 +1646,14 @@ def _make_fetcher():
 
 # ---------------- DB 連携 ----------------
 def run_web_research(
-    db: Session, project: Project, *, fetch_fn=None, search_fn=None
+    db: Session, project: Project, *, fetch_fn=None, search_fn=None, progress_cb=None
 ) -> ContactDiscovery:
     """Web リサーチを実行し、最新の探索結果（ContactDiscovery）の web_* に保存する。
 
     既存の探索結果が無ければ先に自動探索を実行して土台を作る。Web 結果は web_*
     カラムに分離保存し、自動抽出（primary_email 等）/ AI 調査（ai_*）は上書きしない。
     失敗時は web_research_error に記録し、アプリは落とさない。
+    progress_cb(message, pct) を渡すと 1 URL 巡回ごとに進捗を通知する。
     """
     research = cds._latest_research(db, project.id)
     row = cds.get_latest(db, project.id)
@@ -1650,7 +1662,12 @@ def run_web_research(
 
     now = datetime.now(timezone.utc)
     try:
-        result = web_research(project, research, fetch_fn=fetch_fn, search_fn=search_fn)
+        if progress_cb:
+            progress_cb("検索エンジンで候補を収集中…", pct=0.0)
+        result = web_research(
+            project, research, fetch_fn=fetch_fn, search_fn=search_fn,
+            progress_cb=progress_cb,
+        )
         row.web_researched = True
         row.web_researched_at = now
         row.web_search_provider = result["search_provider"]

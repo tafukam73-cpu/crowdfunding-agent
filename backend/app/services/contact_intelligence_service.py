@@ -39,6 +39,14 @@ CACHE_TTL_HOURS = 24
 _cancel_requested: set[int] = set()
 
 
+class _JobCancelled(BaseException):
+    """フェーズ実行中に中断が要求されたことを示す内部シグナル。
+
+    各サービス（run_web_research 等）の `except Exception` に握り潰されず、ジョブ
+    ランナーまで伝播させるため BaseException を継承する（中断を即時に反映する）。
+    """
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -140,16 +148,42 @@ def _is_cancelled(job_id: int) -> bool:
 
 
 # ---------------- ジョブ実行（別スレッド／独自セッション） ----------------
-def _run_web(db: Session, project: Project) -> None:
-    web_research_service.run_web_research(db, project)
+def _phase_progress(
+    db: Session, job: ContactIntelligenceJob, base: int, span: int
+):
+    """フェーズ内の進捗コールバックを作る。各 URL/ステップで current_step・log・
+    progress を更新し、DB へ即 commit（flush）する（UI が固まって見えないように）。"""
+
+    def cb(message: str, pct: float | None = None) -> None:
+        # 中断要求があればフェーズを速やかに打ち切る（URL/クエリ境界で確認）。
+        if _is_cancelled(job.id):
+            raise _JobCancelled()
+        try:
+            job.current_step = str(message)[:120]
+            _log(job, message)
+            if pct is not None:
+                p = max(0.0, min(1.0, pct))
+                job.progress = min(99, int(base + span * p))
+            job.updated_at = _now()
+            db.commit()
+        except _JobCancelled:
+            raise
+        except Exception:  # noqa: BLE001  進捗更新失敗で本体は止めない
+            db.rollback()
+
+    return cb
 
 
-def _run_doc(db: Session, project: Project) -> None:
-    document_reader_service.run_document_reader(db, project)
+def _run_web(db, project, cb=None) -> None:
+    web_research_service.run_web_research(db, project, progress_cb=cb)
 
 
-def _run_agent(db: Session, project: Project) -> None:
-    search_agent_service.run_search_agent(db, project)
+def _run_doc(db, project, cb=None) -> None:
+    document_reader_service.run_document_reader(db, project, progress_cb=cb)
+
+
+def _run_agent(db, project, cb=None) -> None:
+    search_agent_service.run_search_agent(db, project, progress_cb=cb)
 
 
 _SINGLE_PHASES = {
@@ -185,11 +219,11 @@ def _run_job(job_id: int) -> None:
         else:
             name, fn = _SINGLE_PHASES[job.job_type]
             job.current_step = f"{name} 実行中"
-            job.progress = 10
+            job.progress = 5
             _log(job, f"{name} を実行します")
             db.commit()
-            fn(db, project)
-            job.progress = 90
+            fn(db, project, _phase_progress(db, job, base=5, span=90))
+            job.progress = 95
             _log(job, f"{name} が完了しました")
             db.commit()
 
@@ -205,6 +239,18 @@ def _run_job(job_id: int) -> None:
             _log(job, "ジョブが完了しました")
         job.completed_at = _now()
         db.commit()
+    except _JobCancelled:
+        db.rollback()
+        try:
+            job = db.get(ContactIntelligenceJob, job_id)
+            if job is not None:
+                job.status = CIJobStatus.cancelled.value
+                job.current_step = "中断されました"
+                _log(job, "ジョブを中断しました")
+                job.completed_at = _now()
+                db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
     except Exception as exc:  # noqa: BLE001  失敗は行に記録（アプリは落とさない）
         logger.warning("contact intelligence job %s failed: %s", job_id, exc)
         try:
@@ -226,20 +272,20 @@ def _run_job(job_id: int) -> None:
 def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> None:
     """full_contact_intelligence：Web調査 → Document Reader → Search Agent →
     営業推奨連絡先ランキング更新 を順に実行する。各フェーズ境界で中断を確認する。"""
+    # (name, fn, base_pct, span_pct)：各フェーズの進捗帯
     phases = [
-        ("Web Research", _run_web),
-        ("AI Document Reader", _run_doc),
-        ("AI Search Agent", _run_agent),
+        ("Web Research", _run_web, 0, 32),
+        ("AI Document Reader", _run_doc, 32, 32),
+        ("AI Search Agent", _run_agent, 64, 30),
     ]
-    total = len(phases) + 1  # +1: ランキング更新
-    for i, (name, fn) in enumerate(phases):
+    for name, fn, base, span in phases:
         if _is_cancelled(job.id):
             return
-        job.current_step = f"{name} 実行中（{i + 1}/{total}）"
-        job.progress = max(1, int(i / total * 100))
+        job.current_step = f"{name} 実行中"
+        job.progress = max(1, base)
         _log(job, f"{name} を実行します")
         db.commit()
-        fn(db, project)
+        fn(db, project, _phase_progress(db, job, base=base, span=span))
         _log(job, f"{name} が完了しました")
         db.commit()
 

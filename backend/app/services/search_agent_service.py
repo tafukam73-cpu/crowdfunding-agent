@@ -338,9 +338,12 @@ def _finalize(project: Project, row: ContactDiscovery, state: SearchAgentState) 
 
 
 def run_search_agent(
-    db: Session, project: Project, *, agent=None, fetch_fn=None, search_fn=None
+    db: Session, project: Project, *, agent=None, fetch_fn=None, search_fn=None,
+    progress_cb=None,
 ) -> ContactDiscovery:
-    """AI Search Agent を反復実行し、結果を search_agent_* に保存する。"""
+    """AI Search Agent を反復実行し、結果を search_agent_* に保存する。
+
+    progress_cb(message, pct) を渡すとステップ/1URL巡回ごとに進捗を通知する。"""
     agent = agent or get_search_agent()
     row = cds.get_latest(db, project.id)
     if row is None:
@@ -379,6 +382,9 @@ def run_search_agent(
         state = _initial_state(project, row)
         for step_i in range(max_steps):
             state.step = step_i + 1
+            if progress_cb:
+                progress_cb(f"探索ステップ {state.step}/{max_steps}（次に見る先を判断中）",
+                            pct=step_i / max(1, max_steps))
             plan = agent.plan(state)
             logger.info(
                 "search_agent[%s] step %d: stop=%s urls=%d queries=%d reason=%s",
@@ -446,6 +452,9 @@ def run_search_agent(
                                   "reason": f"同一ドメイン過剰巡回の抑制（{dom}）"})
                     continue
                 domain_visits[dom] = domain_visits.get(dom, 0) + 1
+                if progress_cb:
+                    progress_cb(f"巡回中: {url}",
+                                pct=min(0.99, len(visited) / max_urls))
                 visited.append(url)
                 state.visited_urls.append(url)
                 if url in state.candidate_urls:

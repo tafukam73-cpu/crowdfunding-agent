@@ -56,7 +56,9 @@ def _html_to_text(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _gather_pages(project: Project, row: ContactDiscovery, fetch_fn) -> list[DocReaderPage]:
+def _gather_pages(
+    project: Project, row: ContactDiscovery, fetch_fn, progress_cb=None
+) -> list[DocReaderPage]:
     """AI に渡す重要ページを選び、本文・リンク・メール・SNS を付けて返す。"""
     official = cds.official_site_or_none(
         row.official_site_url if row else None
@@ -93,7 +95,10 @@ def _gather_pages(project: Project, row: ContactDiscovery, fetch_fn) -> list[Doc
     fetch = fetch_fn or wr._make_fetcher()
     pages: list[DocReaderPage] = []
     try:
-        for url in urls:
+        for idx, url in enumerate(urls):
+            if progress_cb:
+                progress_cb(f"ページ取得中 ({idx + 1}/{len(urls)}): {url}",
+                            pct=idx / max(1, len(urls)))
             html = fetch(url)
             if not html:
                 continue
@@ -260,12 +265,13 @@ def _score(emails, forms, socials, official, people) -> int:
 
 
 def run_document_reader(
-    db: Session, project: Project, *, reader=None, fetch_fn=None
+    db: Session, project: Project, *, reader=None, fetch_fn=None, progress_cb=None
 ) -> ContactDiscovery:
     """AI Document Reader を実行し、最新の探索結果の doc_reader_* に保存する。
 
     既存の探索結果が無ければ先に自動探索を実行して土台を作る。失敗時も
     doc_reader_evidence_summary にエラーを記録し、アプリは落とさない。
+    progress_cb(message, pct) を渡すとページ取得ごとに進捗を通知する。
     """
     reader = reader or get_document_reader()
     row = cds.get_latest(db, project.id)
@@ -279,7 +285,9 @@ def run_document_reader(
     site_domain = cds.source_site_email_domain(getattr(project, "source_site", None))
     now = datetime.now(timezone.utc)
     try:
-        pages = _gather_pages(project, row, fetch_fn)
+        pages = _gather_pages(project, row, fetch_fn, progress_cb)
+        if progress_cb:
+            progress_cb("AI がページを読解中…", pct=0.9)
         ctx = _build_context(project, row, pages)
         result = reader.read(ctx)
 

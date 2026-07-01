@@ -59,15 +59,17 @@ def _mk_project(db) -> Project:
 _order = []
 
 
-def _fake_web(db, project):
+def _fake_web(db, project, cb=None):
     _order.append("web")
+    if cb:
+        cb("巡回中: https://example.com/1", pct=0.5)
 
 
-def _fake_doc(db, project):
+def _fake_doc(db, project, cb=None):
     _order.append("doc")
 
 
-def _fake_agent(db, project):
+def _fake_agent(db, project, cb=None):
     _order.append("agent")
 
 
@@ -96,6 +98,8 @@ def test_create_and_run_single():
     check("completed になる", job.status == CIJobStatus.completed.value)
     check("progress=100", job.progress == 100)
     check("ログが記録される", bool(job.logs_json))
+    check("進捗コールバックのログ（巡回中）が入る",
+          any("巡回中" in (l.get("message") or "") for l in (job.logs_json or [])))
     check("result_json が入る", job.result_json is not None)
     db.close()
 
@@ -119,7 +123,7 @@ def test_failed_saves_error():
     print("test_failed_saves_error")
     _install_fakes()
 
-    def boom(db, project):
+    def boom(db, project, cb=None):
         raise RuntimeError("探索失敗X")
 
     ci._run_web = boom
