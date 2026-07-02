@@ -1159,6 +1159,134 @@ export type ApplyToCrmResult = {
   recorded: boolean;
 };
 
+// ===== Contact Intelligence v5：営業案件管理（SalesOpportunity） =====
+export type SalesOpportunityStatus =
+  | "not_started"
+  | "researched"
+  | "contacted"
+  | "waiting_reply"
+  | "meeting"
+  | "negotiating"
+  | "likely_contract"
+  | "lost"
+  | "on_hold";
+
+// 営業案件ステータスの日本語表示。
+export const SALES_OPP_STATUS_LABELS: Record<SalesOpportunityStatus, string> = {
+  not_started: "未着手",
+  researched: "調査済み",
+  contacted: "初回連絡済み",
+  waiting_reply: "返信待ち",
+  meeting: "商談中",
+  negotiating: "条件交渉中",
+  likely_contract: "契約見込み",
+  lost: "失注",
+  on_hold: "保留",
+};
+
+// ステータス表示色（バッジ用）。
+export const SALES_OPP_STATUS_COLORS: Record<SalesOpportunityStatus, string> = {
+  not_started: "bg-slate-100 text-slate-600",
+  researched: "bg-sky-100 text-sky-700",
+  contacted: "bg-indigo-100 text-indigo-700",
+  waiting_reply: "bg-amber-100 text-amber-700",
+  meeting: "bg-violet-100 text-violet-700",
+  negotiating: "bg-fuchsia-100 text-fuchsia-700",
+  likely_contract: "bg-emerald-100 text-emerald-700",
+  lost: "bg-rose-100 text-rose-600",
+  on_hold: "bg-slate-200 text-slate-500",
+};
+
+// 優先度の日本語表示。
+export const SALES_PRIORITY_LABELS: Record<string, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+
+export type SalesOpportunity = {
+  id: number;
+  contact_discovery_id: number;
+  company_name: string | null;
+  product_name: string | null;
+  website_url: string | null;
+  sales_score: number | null;
+  sales_priority: string | null;
+  recommended_channel: string | null;
+  primary_email: string | null;
+  contact_form_url: string | null;
+  primary_social_url: string | null;
+  status: SalesOpportunityStatus;
+  next_action: string | null;
+  next_action_due_date: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 営業案件一覧の取得（フィルター・並び替え）。
+export async function fetchSalesOpportunities(params: {
+  status?: string;
+  sales_priority?: string;
+  min_score?: number;
+  sort?: "score" | "due_date" | "created";
+} = {}): Promise<SalesOpportunity[]> {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  if (params.sales_priority) q.set("sales_priority", params.sales_priority);
+  if (params.min_score != null) q.set("min_score", String(params.min_score));
+  if (params.sort) q.set("sort", params.sort);
+  const res = await apiFetch(`/sales-opportunities?${q.toString()}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 営業案件の詳細取得。
+export async function fetchSalesOpportunity(
+  id: number
+): Promise<SalesOpportunity> {
+  const res = await apiFetch(`/sales-opportunities/${id}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// Contact Intelligence 結果から営業案件を作成（冪等）。
+export async function createSalesOpportunityFromDiscovery(
+  contactDiscoveryId: number
+): Promise<SalesOpportunity> {
+  const res = await fetch(
+    `${API_BASE}/sales-opportunities/from-contact-discovery/${contactDiscoveryId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// 営業案件を更新（status / next_action / 期限 / メモ）。
+export async function updateSalesOpportunity(
+  id: number,
+  patch: Partial<
+    Pick<
+      SalesOpportunity,
+      "status" | "next_action" | "next_action_due_date" | "notes"
+    >
+  >
+): Promise<SalesOpportunity> {
+  const res = await fetch(`${API_BASE}/sales-opportunities/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // 最新の連絡先探索を取得（未実行なら 204 → null）。
 export async function fetchContactDiscovery(
   id: number

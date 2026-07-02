@@ -22,6 +22,12 @@ export default function Header() {
               営業管理
             </Link>
             <Link
+              href="/sales-opportunities"
+              className="text-slate-600 hover:text-slate-900"
+            >
+              営業案件
+            </Link>
+            <Link
               href="/email-settings"
               className="text-slate-600 hover:text-slate-900"
             >

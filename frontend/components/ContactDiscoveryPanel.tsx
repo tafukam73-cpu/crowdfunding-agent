@@ -21,6 +21,7 @@ import {
   runWebResearch,
   type SalesContact,
   type ContactIntelligenceJob,
+  createSalesOpportunityFromDiscovery,
   startContactIntelligenceJob,
   getContactIntelligenceJob,
   getLatestContactIntelligenceJob,
@@ -2464,6 +2465,52 @@ const FAILURE_CODE_LABELS: Record<string, string> = {
   RATE_LIMITED: "レート制限",
 };
 
+// 「営業案件に追加」ボタン（Contact Intelligence v5）。
+// 現在の連絡先探索（data.id）から営業案件を作成し、営業案件管理へ引き継ぐ（冪等）。
+function AddToSalesOpportunity({ contactDiscoveryId }: { contactDiscoveryId: number }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function add() {
+    setBusy(true);
+    setError(null);
+    try {
+      const opp = await createSalesOpportunityFromDiscovery(contactDiscoveryId);
+      setMsg(
+        `営業案件に追加しました（スコア ${opp.sales_score ?? "-"} / 優先度 ${
+          opp.sales_priority ?? "-"
+        }）。`
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        onClick={add}
+        disabled={busy}
+        className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+      >
+        {busy ? "追加中…" : "＋ 営業案件に追加"}
+      </button>
+      {msg && (
+        <span className="text-xs text-emerald-700">
+          {msg}{" "}
+          <a href="/sales-opportunities" className="underline hover:text-emerald-900">
+            営業案件を開く ↗
+          </a>
+        </span>
+      )}
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </div>
+  );
+}
+
 // 🕸 公式サイト再帰クロール（Contact Intelligence v3）の統合結果。
 // サイト全体の再帰巡回・sitemap・robots・PDF解析・DNS(MX/SPF/DMARC)の要点を表示する。
 function RecursiveCrawlSummary({ data }: { data: ContactDiscovery }) {
@@ -3121,6 +3168,12 @@ export default function ContactDiscoveryPanel({
       {data && (
         <div className="mt-3">
           <UnifiedResultSummary data={data} searchKeyword={searchKeyword} />
+        </div>
+      )}
+      {/* ＋ 営業案件に追加（v5）：この探索結果を営業案件管理へ引き継ぐ */}
+      {data && (
+        <div className="mt-3">
+          <AddToSalesOpportunity contactDiscoveryId={data.id} />
         </div>
       )}
       {/* 🕸 公式サイト再帰クロール（v3）の統合結果 */}

@@ -28,6 +28,7 @@ from app.routers import (
     projects,
     reply_assistant,
     sales,
+    sales_opportunities,
     scrape,
     usage,
 )
@@ -86,6 +87,7 @@ app.include_router(contact_discovery.router)
 app.include_router(contact_intelligence.router)
 app.include_router(reply_assistant.router)
 app.include_router(sales.router)
+app.include_router(sales_opportunities.router)
 app.include_router(usage.router)
 
 

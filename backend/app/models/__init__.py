@@ -21,6 +21,7 @@ from app.models.japanese_success import JapaneseSuccessProject
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
 from app.models.project import Project, ProjectStatus, SalesStatus, SourceSite
 from app.models.reply_assistant import ReplyAssistant, ReplyStatus
+from app.models.sales_opportunity import SalesOpportunity, SalesOpportunityStatus
 from app.models.scrape_run import ScrapeRun, ScrapeStatus
 from app.models.usage_log import UsageLog
 
@@ -62,5 +63,7 @@ __all__ = [
     "ContactPerson",
     "ReplyAssistant",
     "ReplyStatus",
+    "SalesOpportunity",
+    "SalesOpportunityStatus",
     "UsageLog",
 ]
