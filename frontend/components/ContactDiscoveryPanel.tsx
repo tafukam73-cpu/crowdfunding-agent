@@ -2426,6 +2426,329 @@ function ContactHunterSection({
   );
 }
 
+// 個別ツールの実行状態（未実行 / 実行中 / 完了=発見あり・未発見）。状態バッジのみ表示。
+function toolStatus(
+  researched: boolean | undefined,
+  hasFindings: boolean,
+  busy: boolean
+): { label: string; cls: string } {
+  if (busy) return { label: "実行中", cls: "bg-amber-100 text-amber-700" };
+  if (!researched) return { label: "未実行", cls: "bg-slate-100 text-slate-400" };
+  if (hasFindings)
+    return { label: "発見あり", cls: "bg-emerald-100 text-emerald-700" };
+  return { label: "未発見", cls: "bg-slate-200 text-slate-500" };
+}
+
+function StatusBadge({ label, cls }: { label: string; cls: string }) {
+  return (
+    <span className={`rounded px-2 py-0.5 text-[11px] font-semibold ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+// 🧭 統合結果サマリ。各レイヤー（自動抽出／AI／Web／Doc／Agent）の発見を1つに集約し、
+// 営業担当が見るべき要点だけを表示する：推奨連絡先・メール・問い合わせフォーム・SNS・
+// 公式サイト・担当者候補・見つからなかった理由・次に取るべき営業アクション。
+function UnifiedResultSummary({
+  data,
+  searchKeyword,
+}: {
+  data: ContactDiscovery;
+  searchKeyword: string;
+}) {
+  // 公式サイト（プラットフォームURLはサーバ側で除外済み）
+  const official =
+    data.official_site_url ||
+    data.search_agent_official_site_url ||
+    data.doc_reader_official_site_url ||
+    null;
+
+  // メール（営業先のみ。platform 所有は除外）
+  const emails: string[] = [];
+  const pushEmail = (e?: string | null) => {
+    if (e && !emails.includes(e)) emails.push(e);
+  };
+  (data.sales_contacts ?? []).forEach((c) => pushEmail(c.email));
+  (data.discovered_emails ?? [])
+    .filter((e) => e.email_owner !== "platform")
+    .forEach((e) => pushEmail(e.email));
+  (data.web_discovered_emails ?? [])
+    .filter((e) => e.email_owner !== "platform")
+    .forEach((e) => pushEmail(e.email));
+  (data.doc_reader_emails ?? [])
+    .filter((e) => e.email_owner !== "platform")
+    .forEach((e) => pushEmail(e.email));
+  (data.search_agent_emails ?? [])
+    .filter((e) => e.email_owner !== "platform")
+    .forEach((e) => pushEmail(e.email));
+  pushEmail(data.ai_primary_email);
+
+  const topContact = data.sales_contacts?.[0]?.email ?? emails[0] ?? null;
+
+  // 問い合わせフォーム
+  const forms: string[] = [];
+  const pushForm = (u?: string | null) => {
+    if (u && !forms.includes(u)) forms.push(u);
+  };
+  pushForm(data.primary_contact_form_url);
+  pushForm(data.web_primary_contact_form_url);
+  pushForm(data.ai_contact_form_url);
+  (data.web_discovered_forms ?? []).forEach(pushForm);
+  (data.doc_reader_contact_forms ?? []).forEach((f) => pushForm(f.url));
+  (data.search_agent_contact_forms ?? []).forEach((f) => pushForm(f.url));
+
+  // SNS
+  const socials: { label: string; url: string }[] = [];
+  const pushSocial = (label: string, url?: string | null) => {
+    if (url && !socials.some((s) => s.url === url)) socials.push({ label, url });
+  };
+  SOCIAL_LABELS.forEach((s) =>
+    pushSocial(s.label, data[s.key] as string | null)
+  );
+  [
+    data.web_discovered_socials,
+    data.doc_reader_socials,
+    data.search_agent_socials,
+  ].forEach((m) => {
+    Object.entries(m ?? {}).forEach(([k, v]) => pushSocial(k, v));
+  });
+
+  // 担当者候補
+  const people = [
+    ...(data.doc_reader_people ?? []),
+    ...(data.search_agent_people ?? []),
+  ];
+  const seenPeople = new Set<string>();
+  const uniquePeople = people.filter((p) => {
+    const key = (p.name || "") + "|" + (p.email || "");
+    if (key === "|" || seenPeople.has(key)) return false;
+    seenPeople.add(key);
+    return true;
+  });
+
+  // 次に取るべき営業アクション
+  const nextAction =
+    data.recommended_action ||
+    (data.recommended_channel
+      ? `${CHANNEL_LABELS[data.recommended_channel] ?? data.recommended_channel} での接触を推奨します。`
+      : null);
+
+  // 見つからなかった理由（発見できなかったチャネルの手掛かり）
+  const missingReasons: string[] = [];
+  if (emails.length === 0)
+    missingReasons.push(
+      "公開メールアドレスは見つかりませんでした（フォーム／SNSでの接触を推奨）。"
+    );
+  if (!official)
+    missingReasons.push("公式サイトは特定できませんでした。");
+  if (data.search_agent_stop_reason)
+    missingReasons.push(`Search Agent: ${data.search_agent_stop_reason}`);
+  (data.doc_reader_missing_info ?? []).forEach((m) => missingReasons.push(m));
+
+  const nothing =
+    !topContact &&
+    emails.length === 0 &&
+    forms.length === 0 &&
+    socials.length === 0 &&
+    !official &&
+    uniquePeople.length === 0;
+
+  const keyword = searchKeyword.trim();
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+      <p className="text-xs font-semibold text-slate-500">統合結果（要点）</p>
+
+      {nothing ? (
+        <p className="mt-2 text-xs text-slate-400">
+          まだ発見はありません。上の「じっくり調査」を実行すると、公式サイト・SNS・
+          問い合わせフォーム・メール・担当者候補をまとめて探索します。
+        </p>
+      ) : (
+        <dl className="mt-2 space-y-2.5">
+          {/* 推奨連絡先 */}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+              推奨連絡先
+            </dt>
+            <dd className="min-w-0 flex-1 break-all text-slate-800">
+              {topContact ? (
+                <span className="font-medium">{topContact}</span>
+              ) : (
+                <span className="text-slate-400">
+                  メール未発見（下記のフォーム／SNSを利用）
+                </span>
+              )}
+            </dd>
+          </div>
+
+          {/* メール */}
+          {emails.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+                メール
+              </dt>
+              <dd className="min-w-0 flex-1 space-y-0.5">
+                {emails.slice(0, 5).map((e) => (
+                  <div key={e} className="flex items-center gap-1.5 break-all">
+                    <span>{e}</span>
+                    <CopyButton text={e} />
+                  </div>
+                ))}
+                {emails.length > 5 && (
+                  <span className="text-xs text-slate-400">
+                    ほか {emails.length - 5} 件
+                  </span>
+                )}
+              </dd>
+            </div>
+          )}
+
+          {/* 問い合わせフォーム */}
+          {forms.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+                問い合わせフォーム
+              </dt>
+              <dd className="min-w-0 flex-1 space-y-0.5">
+                {forms.slice(0, 4).map((u) => (
+                  <a
+                    key={u}
+                    href={u}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block break-all text-indigo-600 hover:underline"
+                  >
+                    {u}
+                  </a>
+                ))}
+              </dd>
+            </div>
+          )}
+
+          {/* SNS */}
+          {socials.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+                SNS
+              </dt>
+              <dd className="min-w-0 flex-1">
+                <div className="flex flex-wrap gap-2">
+                  {socials.map((s) => (
+                    <a
+                      key={s.url}
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded bg-slate-100 px-2 py-0.5 text-xs text-indigo-600 hover:bg-slate-200"
+                    >
+                      {s.label}
+                    </a>
+                  ))}
+                </div>
+              </dd>
+            </div>
+          )}
+
+          {/* 公式サイト */}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+              公式サイト
+            </dt>
+            <dd className="min-w-0 flex-1 break-all">
+              {official ? (
+                <a
+                  href={official}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-indigo-600 hover:underline"
+                >
+                  {official}
+                </a>
+              ) : keyword ? (
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(
+                    `${keyword} official site`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-slate-400 hover:underline"
+                >
+                  未発見（Googleで「{keyword} official site」を検索）
+                </a>
+              ) : (
+                <span className="text-slate-400">未発見</span>
+              )}
+            </dd>
+          </div>
+
+          {/* 担当者候補 */}
+          {uniquePeople.length > 0 && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+                担当者候補
+              </dt>
+              <dd className="min-w-0 flex-1 space-y-0.5">
+                {uniquePeople.slice(0, 5).map((p, i) => (
+                  <div key={i} className="break-all">
+                    <span className="font-medium text-slate-800">{p.name}</span>
+                    {p.title && (
+                      <span className="text-xs text-slate-500">
+                        {" "}
+                        ・{p.title}
+                      </span>
+                    )}
+                    {p.email && (
+                      <span className="text-xs text-slate-600"> ・{p.email}</span>
+                    )}
+                    {p.linkedin_url && (
+                      <a
+                        href={p.linkedin_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-1 text-xs text-indigo-600 hover:underline"
+                      >
+                        LinkedIn
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </dd>
+            </div>
+          )}
+
+          {/* 次に取るべき営業アクション */}
+          {nextAction && (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <dt className="w-24 shrink-0 text-xs font-semibold text-slate-500">
+                次のアクション
+              </dt>
+              <dd className="min-w-0 flex-1 text-slate-700">{nextAction}</dd>
+            </div>
+          )}
+
+          {/* 見つからなかった理由 */}
+          {missingReasons.length > 0 && (
+            <details className="text-xs text-slate-500">
+              <summary className="cursor-pointer select-none">
+                見つからなかった理由（{missingReasons.length}）
+              </summary>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {missingReasons.map((m, i) => (
+                  <li key={i} className="break-all">
+                    {m}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -2567,38 +2890,52 @@ export default function ContactDiscoveryPanel({
     (e) => e.email_owner !== "platform"
   );
 
+  // 個別ツールの発見有無（詳細ツールの状態バッジ用）
+  const aiHasFindings = !!(
+    data?.ai_primary_email ||
+    data?.ai_contact_form_url ||
+    data?.ai_instagram_url ||
+    data?.ai_facebook_url ||
+    data?.ai_linkedin_url ||
+    (data?.ai_candidate_emails && data.ai_candidate_emails.length > 0)
+  );
+  const webHasFindings = !!(
+    data?.web_primary_email ||
+    data?.web_primary_contact_form_url ||
+    (data?.web_discovered_emails && data.web_discovered_emails.length > 0) ||
+    (data?.web_discovered_forms && data.web_discovered_forms.length > 0) ||
+    (data?.web_discovered_socials &&
+      Object.keys(data.web_discovered_socials).length > 0)
+  );
+  const docHasFindings = !!(
+    data?.doc_reader_official_site_url ||
+    (data?.doc_reader_emails && data.doc_reader_emails.length > 0) ||
+    (data?.doc_reader_contact_forms &&
+      data.doc_reader_contact_forms.length > 0) ||
+    (data?.doc_reader_people && data.doc_reader_people.length > 0)
+  );
+  const agentHasFindings = !!(
+    data?.search_agent_official_site_url ||
+    (data?.search_agent_emails && data.search_agent_emails.length > 0) ||
+    (data?.search_agent_contact_forms &&
+      data.search_agent_contact_forms.length > 0) ||
+    (data?.search_agent_people && data.search_agent_people.length > 0)
+  );
+
   return (
     <div className="mt-8">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-700">
           連絡先探索（Contact Intelligence）
         </h2>
-        <button
-          onClick={onRun}
-          disabled={busy}
-          className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          {busy ? "探索中…" : data ? "再探索" : "連絡先を探索"}
-        </button>
       </div>
       <p className="mt-1 text-xs text-slate-400">
-        メールが見つからなくても、問い合わせフォーム・SNS・PDF・検索クエリから最適な営業アプローチを提案します。
+        まず「じっくり調査」を実行すると、公式サイト・SNS・問い合わせフォーム・メール・担当者候補をまとめて探索します。
       </p>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
-      {/* 🏆 営業推奨連絡先（最上部）。発見メールを営業のしやすさ順に格付け。 */}
-      {data?.sales_contacts && data.sales_contacts.length > 0 && (
-        <div className="mt-3">
-          <SalesRankingSection
-            projectId={projectId}
-            contacts={data.sales_contacts}
-            onApply={onApply}
-          />
-        </div>
-      )}
-
-      {/* 🔎 じっくり調査（推奨・非同期ジョブ）。重い探索をまとめて実行し進捗表示。 */}
+      {/* 🔎 じっくり調査（メイン導線・推奨）。重い探索をまとめて非同期実行し進捗表示。 */}
       <div className="mt-3">
         <DeepInvestigationSection
           projectId={projectId}
@@ -2606,61 +2943,126 @@ export default function ContactDiscoveryPanel({
         />
       </div>
 
-      {/* Contact Hunter（誰に送るか）＋ AI連絡先リサーチ ＋ AI Web調査。
-          単発実行は残す（推奨は上の「じっくり調査」）。 */}
-      <div className="mt-3 space-y-3">
-        <ContactHunterSection projectId={projectId} onChanged={onChanged} />
-        <AiResearchSection
-          projectId={projectId}
-          data={data}
-          busy={aiBusy}
-          error={aiError}
-          onRun={onRunAi}
-          onApply={onApply}
-        />
-        {/* AI Web調査（検索エンジン＋公式サイト横断クロール。自動抽出/AI調査と区別） */}
-        <WebResearchSection
-          projectId={projectId}
-          data={data}
-          busy={webBusy}
-          error={webError}
-          onRun={onRunWeb}
-          onApply={onApply}
-        />
-        {/* AI Document Reader（ページ全体を読解。自動抽出/AI調査/Web調査/担当者と区別） */}
-        <DocumentReaderSection
-          projectId={projectId}
-          data={data}
-          busy={docBusy}
-          error={docError}
-          onRun={onRunDoc}
-          onApply={onApply}
-        />
-        {/* AI Search Agent（次に見るページを判断しながら反復探索。他レイヤーと区別） */}
-        <SearchAgentSection
-          projectId={projectId}
-          data={data}
-          busy={agentBusy}
-          error={agentError}
-          onRun={onRunAgent}
-          onApply={onApply}
-        />
-      </div>
-
-      {!data && !error && (
-        <p className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-400">
-          まだ自動探索されていません。「連絡先を探索」を押すと、営業可能な連絡手段を総合評価します（上のAI連絡先リサーチは単独でも実行できます）。
-        </p>
-      )}
-
-      {failed && (
-        <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <p className="font-semibold">探索に失敗しました。</p>
-          <p className="mt-1 whitespace-pre-wrap break-all text-xs">
-            {data?.error ?? "原因不明のエラーです。"}
-          </p>
+      {/* 🧭 統合結果：各レイヤーの発見を集約し、営業が見るべき要点だけを表示。 */}
+      {data?.sales_contacts && data.sales_contacts.length > 0 && (
+        <div className="mt-4">
+          <SalesRankingSection
+            projectId={projectId}
+            contacts={data.sales_contacts}
+            onApply={onApply}
+          />
         </div>
       )}
+      {data && (
+        <div className="mt-3">
+          <UnifiedResultSummary data={data} searchKeyword={searchKeyword} />
+        </div>
+      )}
+
+      {/* 🛠 詳細ツール（上級者向け）。個別ツール・自動抽出・詳細ログはここに折りたたむ。 */}
+      <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50/60">
+        <summary className="cursor-pointer select-none px-4 py-2.5 text-sm font-semibold text-slate-600">
+          🛠 詳細ツール（上級者向け）
+        </summary>
+        <div className="space-y-3 border-t border-slate-200 p-4">
+          {/* 各ツールの実行状態（状態だけを一覧表示） */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
+            <span className="inline-flex items-center gap-1.5">
+              AI連絡先リサーチ
+              <StatusBadge
+                {...toolStatus(data?.ai_researched, aiHasFindings, aiBusy)}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              AI Web調査
+              <StatusBadge
+                {...toolStatus(data?.web_researched, webHasFindings, webBusy)}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              AI Document Reader
+              <StatusBadge
+                {...toolStatus(data?.doc_reader_researched, docHasFindings, docBusy)}
+              />
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              AI Search Agent
+              <StatusBadge
+                {...toolStatus(
+                  data?.search_agent_researched,
+                  agentHasFindings,
+                  agentBusy
+                )}
+              />
+            </span>
+          </div>
+
+          {/* 自動抽出（同期）：メール・フォーム・SNS・PDF・検索クエリを総合評価 */}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              自動抽出（同期）：メール・フォーム・SNS・PDF・検索クエリを総合評価します。
+            </p>
+            <button
+              onClick={onRun}
+              disabled={busy}
+              className="shrink-0 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            >
+              {busy ? "探索中…" : data ? "再探索" : "自動抽出を実行"}
+            </button>
+          </div>
+
+          {/* Contact Hunter（誰に送るか）＋ 個別 AI レイヤー（単発実行） */}
+          <ContactHunterSection projectId={projectId} onChanged={onChanged} />
+          <AiResearchSection
+            projectId={projectId}
+            data={data}
+            busy={aiBusy}
+            error={aiError}
+            onRun={onRunAi}
+            onApply={onApply}
+          />
+          {/* AI Web調査（検索エンジン＋公式サイト横断クロール。自動抽出/AI調査と区別） */}
+          <WebResearchSection
+            projectId={projectId}
+            data={data}
+            busy={webBusy}
+            error={webError}
+            onRun={onRunWeb}
+            onApply={onApply}
+          />
+          {/* AI Document Reader（ページ全体を読解。自動抽出/AI調査/Web調査/担当者と区別） */}
+          <DocumentReaderSection
+            projectId={projectId}
+            data={data}
+            busy={docBusy}
+            error={docError}
+            onRun={onRunDoc}
+            onApply={onApply}
+          />
+          {/* AI Search Agent（次に見るページを判断しながら反復探索。他レイヤーと区別） */}
+          <SearchAgentSection
+            projectId={projectId}
+            data={data}
+            busy={agentBusy}
+            error={agentError}
+            onRun={onRunAgent}
+            onApply={onApply}
+          />
+
+          {!data && !error && (
+            <p className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-xs text-slate-400">
+              まだ自動抽出は実行されていません。上の「じっくり調査」または各ツールから探索できます。
+            </p>
+          )}
+
+          {failed && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              <p className="font-semibold">探索に失敗しました。</p>
+              <p className="mt-1 whitespace-pre-wrap break-all text-xs">
+                {data?.error ?? "原因不明のエラーです。"}
+              </p>
+            </div>
+          )}
 
       {completed && data && (
         <div className="mt-3 space-y-4 rounded-lg border border-slate-200 bg-white p-5 text-sm">
@@ -2947,6 +3349,8 @@ export default function ContactDiscoveryPanel({
           </p>
         </div>
       )}
+        </div>
+      </details>
     </div>
   );
 }
