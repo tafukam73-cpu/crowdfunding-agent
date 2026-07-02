@@ -17,3 +17,6 @@ google-auth==2.35.0
 
 # PDF テキスト抽出（press kit / catalog からのメール抽出。遅延 import）
 pypdf==5.1.0
+
+# DNS/MX/SPF/DMARC 確認（Contact Intelligence v3。遅延 import・未導入でも動作）
+dnspython==2.7.0

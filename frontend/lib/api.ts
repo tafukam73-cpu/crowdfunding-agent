@@ -925,6 +925,9 @@ export type DiscoveredPdf = {
   url: string;
   label: string | null;
   relevant: boolean | null;
+  // v3 再帰クロールの PDF 解析結果（抽出メール数・本文長）。任意。
+  emails?: number | null;
+  text_len?: number | null;
 };
 
 // AI Web Research が生成したキーワード候補（検索戦略のデバッグ表示用）。
@@ -1128,6 +1131,23 @@ export type ContactDiscovery = {
   search_agent_stop_reason: string | null;
   search_agent_error: string | null;
   search_agent_researched_at: string | null;
+  // --- Contact Intelligence v3（公式サイト再帰クロール） ---
+  recursive_crawl_enabled: boolean;
+  recursive_crawled_urls: string[] | null;
+  recursive_skipped_urls: string[] | null;
+  recursive_emails: DiscoveredEmail[] | null;
+  recursive_forms: string[] | null;
+  recursive_socials: Record<string, string> | null;
+  recursive_pdfs: DiscoveredPdf[] | null;
+  recursive_sitemap_urls: string[] | null;
+  recursive_robots_sitemaps: string[] | null;
+  recursive_has_mx: boolean | null;
+  recursive_mx_provider: string | null;
+  recursive_spf_record: string | null;
+  recursive_dmarc_record: string | null;
+  recursive_failure_reasons: string[] | null;
+  recursive_summary: string | null;
+  recursive_crawled_at: string | null;
   created_at: string;
   updated_at: string;
 };

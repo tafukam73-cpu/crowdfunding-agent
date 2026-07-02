@@ -392,6 +392,10 @@ def _iter_source_emails(row: "ContactDiscovery") -> list[dict]:
     for e in (getattr(row, "web_discovered_emails", None) or []):
         if isinstance(e, dict):
             add(e.get("email"), e.get("score", 0), e.get("email_owner"), e.get("sources"))
+    # Contact Intelligence v3：公式サイト再帰クロールで見つけたメール
+    for e in (getattr(row, "recursive_emails", None) or []):
+        if isinstance(e, dict):
+            add(e.get("email"), e.get("score", 0), e.get("email_owner"), e.get("sources"))
     for e in (getattr(row, "ai_candidate_emails", None) or []):
         if isinstance(e, dict):
             src = e.get("source_url")
@@ -601,9 +605,10 @@ def extract_from_pdf(url: str, source_site_domain: str | None = None,
     """PDF（press kit / catalog 等）を取得し、メール・SNS・会社名を抽出する（要件6）。
 
     pypdf 未導入時はテキストを取れないため空で返す。メールは既存フィルタを通す。
-    Returns: {emails:[...], socials:{...}, text_len:int}
+    Returns: {emails:[...], socials:{...}, text_len:int, text:str}
+    （text は担当者候補抽出などの追加解析用。先頭 20000 文字まで。）
     """
-    out = {"emails": [], "socials": {}, "text_len": 0}
+    out = {"emails": [], "socials": {}, "text_len": 0, "text": ""}
     try:
         import httpx
 
@@ -618,6 +623,7 @@ def extract_from_pdf(url: str, source_site_domain: str | None = None,
         return out
     out["emails"] = extract_emails(text, source_site_domain)
     out["socials"] = extract_socials(text, url)
+    out["text"] = text[:20000]
     return out
 
 

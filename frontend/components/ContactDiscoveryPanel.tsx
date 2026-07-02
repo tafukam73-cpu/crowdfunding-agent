@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
   type AiCandidateEmail,
@@ -2447,6 +2447,166 @@ function StatusBadge({ label, cls }: { label: string; cls: string }) {
   );
 }
 
+// 失敗理由コード（Contact Intelligence v3）の日本語ラベル。
+const FAILURE_CODE_LABELS: Record<string, string> = {
+  OFFICIAL_SITE_NOT_FOUND: "公式サイト未発見",
+  OFFICIAL_SITE_NOT_REGISTERED: "公式サイト未登録（クリエイター未登録）",
+  SEARCH_PROVIDER_FAILED: "検索プロバイダー失敗",
+  SEARCH_PROVIDER_NO_RESULTS: "検索結果0件",
+  CRAWL_BLOCKED: "クロール不可（取得ブロック）",
+  CONTACT_FORM_ONLY: "問い合わせフォームのみ（メール未公開）",
+  EMAIL_NOT_PUBLIC: "公開メール未発見",
+  SOCIAL_ONLY: "SNSのみ発見",
+  PDF_NO_EMAIL: "PDFにメールなし",
+  DNS_MX_FOUND_EMAIL_NOT_PUBLIC: "メール運用あり・公開メール未発見",
+  LOGIN_REQUIRED: "ログインが必要",
+  TIMEOUT: "タイムアウト",
+  RATE_LIMITED: "レート制限",
+};
+
+// 🕸 公式サイト再帰クロール（Contact Intelligence v3）の統合結果。
+// サイト全体の再帰巡回・sitemap・robots・PDF解析・DNS(MX/SPF/DMARC)の要点を表示する。
+function RecursiveCrawlSummary({ data }: { data: ContactDiscovery }) {
+  const attempted =
+    data.recursive_crawl_enabled ||
+    !!data.recursive_summary ||
+    (data.recursive_failure_reasons?.length ?? 0) > 0;
+  if (!attempted) return null;
+
+  const crawledCount = data.recursive_crawled_urls?.length ?? 0;
+  const skippedCount = data.recursive_skipped_urls?.length ?? 0;
+  const pdfs = data.recursive_pdfs ?? [];
+  const pdfParsed = pdfs.filter((p) => (p.text_len ?? 0) > 0).length;
+  const sitemapCount = data.recursive_sitemap_urls?.length ?? 0;
+  const robotsSitemaps = data.recursive_robots_sitemaps?.length ?? 0;
+  const forms = data.recursive_forms ?? [];
+  const socials = Object.entries(data.recursive_socials ?? {});
+  const emails = (data.recursive_emails ?? []).filter(
+    (e) => e.email_owner !== "platform"
+  );
+  const reasons = data.recursive_failure_reasons ?? [];
+  const hasMx = data.recursive_has_mx;
+
+  const rows: { label: string; value: ReactNode }[] = [
+    { label: "サイトクロールURL数", value: `${crawledCount} 件（スキップ ${skippedCount} 件）` },
+    {
+      label: "PDF解析数",
+      value: `${pdfParsed} / ${pdfs.length} 件`,
+    },
+    {
+      label: "sitemap発見",
+      value: sitemapCount > 0 ? `あり（${sitemapCount} URL）` : "なし",
+    },
+    {
+      label: "robots確認",
+      value:
+        robotsSitemaps > 0
+          ? `確認済（Sitemap ${robotsSitemaps} 件）`
+          : "確認済",
+    },
+    {
+      label: "メール運用（MX）",
+      value:
+        hasMx == null ? (
+          <span className="text-slate-400">未確認</span>
+        ) : hasMx ? (
+          <span className="text-emerald-700">
+            MXあり{data.recursive_mx_provider ? `（${data.recursive_mx_provider}）` : ""}
+            {emails.length === 0 && "・公開メール未発見"}
+          </span>
+        ) : (
+          <span className="text-slate-500">MXなし</span>
+        ),
+    },
+    { label: "フォーム", value: forms.length > 0 ? `あり（${forms.length} 件）` : "なし" },
+    {
+      label: "SNS",
+      value:
+        socials.length > 0
+          ? socials.map(([k]) => k).join(" / ")
+          : "なし",
+    },
+  ];
+
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 text-sm">
+      <p className="text-xs font-semibold text-emerald-800">
+        🕸 公式サイト再帰クロール（v3）
+      </p>
+      {data.recursive_summary && (
+        <p className="mt-1 text-xs text-slate-600">{data.recursive_summary}</p>
+      )}
+
+      <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-baseline justify-between gap-2">
+            <dt className="text-xs text-slate-500">{r.label}</dt>
+            <dd className="text-right font-medium text-slate-800">{r.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {emails.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold text-emerald-700">
+            再帰クロールで発見したメール
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {emails.slice(0, 5).map((e) => (
+              <li key={e.email} className="flex items-center gap-1.5 break-all text-slate-800">
+                <span>{e.email}</span>
+                <CopyButton text={e.email} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {reasons.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold text-slate-500">
+            メール未発見理由 / 失敗理由コード
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {reasons.map((c) => (
+              <span
+                key={c}
+                title={c}
+                className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+              >
+                {FAILURE_CODE_LABELS[c] ?? c}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pdfs.length > 0 && (
+        <details className="mt-2 text-xs text-slate-500">
+          <summary className="cursor-pointer">解析したPDF（{pdfs.length}）</summary>
+          <ul className="mt-1 space-y-0.5">
+            {pdfs.map((p) => (
+              <li key={p.url} className="break-all">
+                <a
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-700 hover:underline"
+                >
+                  {p.label || p.url}
+                </a>
+                {(p.emails ?? 0) > 0 && (
+                  <span className="ml-1 text-emerald-700">メール{p.emails}件</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // 🧭 統合結果サマリ。各レイヤー（自動抽出／AI／Web／Doc／Agent）の発見を1つに集約し、
 // 営業担当が見るべき要点だけを表示する：推奨連絡先・メール・問い合わせフォーム・SNS・
 // 公式サイト・担当者候補・見つからなかった理由・次に取るべき営業アクション。
@@ -2482,6 +2642,9 @@ function UnifiedResultSummary({
   (data.search_agent_emails ?? [])
     .filter((e) => e.email_owner !== "platform")
     .forEach((e) => pushEmail(e.email));
+  (data.recursive_emails ?? [])
+    .filter((e) => e.email_owner !== "platform")
+    .forEach((e) => pushEmail(e.email));
   pushEmail(data.ai_primary_email);
 
   const topContact = data.sales_contacts?.[0]?.email ?? emails[0] ?? null;
@@ -2495,6 +2658,7 @@ function UnifiedResultSummary({
   pushForm(data.web_primary_contact_form_url);
   pushForm(data.ai_contact_form_url);
   (data.web_discovered_forms ?? []).forEach(pushForm);
+  (data.recursive_forms ?? []).forEach(pushForm);
   (data.doc_reader_contact_forms ?? []).forEach((f) => pushForm(f.url));
   (data.search_agent_contact_forms ?? []).forEach((f) => pushForm(f.url));
 
@@ -2510,6 +2674,7 @@ function UnifiedResultSummary({
     data.web_discovered_socials,
     data.doc_reader_socials,
     data.search_agent_socials,
+    data.recursive_socials,
   ].forEach((m) => {
     Object.entries(m ?? {}).forEach(([k, v]) => pushSocial(k, v));
   });
@@ -2956,6 +3121,12 @@ export default function ContactDiscoveryPanel({
       {data && (
         <div className="mt-3">
           <UnifiedResultSummary data={data} searchKeyword={searchKeyword} />
+        </div>
+      )}
+      {/* 🕸 公式サイト再帰クロール（v3）の統合結果 */}
+      {data && (
+        <div className="mt-3">
+          <RecursiveCrawlSummary data={data} />
         </div>
       )}
 

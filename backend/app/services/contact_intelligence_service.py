@@ -28,6 +28,7 @@ from app.models.project import Project
 from app.services import (
     contact_discovery_service,
     document_reader_service,
+    recursive_crawl_service,
     search_agent_service,
     web_research_service,
 )
@@ -186,10 +187,15 @@ def _run_agent(db, project, cb=None) -> None:
     search_agent_service.run_search_agent(db, project, progress_cb=cb)
 
 
+def _run_recursive(db, project, cb=None) -> None:
+    recursive_crawl_service.run_recursive_crawl(db, project, progress_cb=cb)
+
+
 _SINGLE_PHASES = {
     CIJobType.web_research.value: ("Web Research", _run_web),
     CIJobType.document_reader.value: ("AI Document Reader", _run_doc),
     CIJobType.search_agent.value: ("AI Search Agent", _run_agent),
+    CIJobType.recursive_crawl.value: ("公式サイト再帰クロール", _run_recursive),
 }
 
 
@@ -272,11 +278,13 @@ def _run_job(job_id: int) -> None:
 def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> None:
     """full_contact_intelligence：Web調査 → Document Reader → Search Agent →
     営業推奨連絡先ランキング更新 を順に実行する。各フェーズ境界で中断を確認する。"""
-    # (name, fn, base_pct, span_pct)：各フェーズの進捗帯
+    # (name, fn, base_pct, span_pct)：各フェーズの進捗帯。
+    # Web Research の直後に「公式サイト再帰クロール」を実行する（要件 11）。
     phases = [
-        ("Web Research", _run_web, 0, 32),
-        ("AI Document Reader", _run_doc, 32, 32),
-        ("AI Search Agent", _run_agent, 64, 30),
+        ("Web Research", _run_web, 0, 25),
+        ("公式サイト再帰クロール", _run_recursive, 25, 20),
+        ("AI Document Reader", _run_doc, 45, 25),
+        ("AI Search Agent", _run_agent, 70, 24),
     ]
     for name, fn, base, span in phases:
         if _is_cancelled(job.id):
@@ -326,7 +334,14 @@ def _build_result(db: Session, project: Project) -> dict:
         for k, v in (src or {}).items():
             if v and not socials.get(k):
                 socials[k] = v
+    for src in (getattr(row, "recursive_socials", None),):
+        for k, v in (src or {}).items():
+            if v and not socials.get(k):
+                socials[k] = v
     forms = list(row.web_discovered_forms or [])
+    for f in getattr(row, "recursive_forms", None) or []:
+        if f not in forms:
+            forms.append(f)
     return {
         "official_site_url": official,
         "top_contact": ranked[0] if ranked else None,
@@ -334,4 +349,12 @@ def _build_result(db: Session, project: Project) -> dict:
         "socials": socials,
         "forms_count": len(forms),
         "recommended_channel": row.recommended_channel,
+        # Contact Intelligence v3：再帰クロールのサマリ
+        "recursive_crawl_enabled": bool(getattr(row, "recursive_crawl_enabled", False)),
+        "recursive_crawled_count": len(getattr(row, "recursive_crawled_urls", None) or []),
+        "recursive_pdf_count": len(getattr(row, "recursive_pdfs", None) or []),
+        "recursive_has_mx": getattr(row, "recursive_has_mx", None),
+        "recursive_mx_provider": getattr(row, "recursive_mx_provider", None),
+        "recursive_failure_reasons": getattr(row, "recursive_failure_reasons", None) or [],
+        "recursive_summary": getattr(row, "recursive_summary", None),
     }

@@ -151,6 +151,9 @@ class DiscoveredPdf(BaseModel):
     url: str
     label: str | None = None
     relevant: bool | None = None
+    # v3 再帰クロールの PDF 解析結果（抽出メール数・本文長）。任意。
+    emails: int | None = None
+    text_len: int | None = None
 
 
 class DocReaderEmail(BaseModel):
@@ -305,6 +308,24 @@ class ContactDiscoveryOut(BaseModel):
     search_agent_stop_reason: str | None = None
     search_agent_error: str | None = None
     search_agent_researched_at: datetime | None = None
+
+    # --- Contact Intelligence v3（公式サイト再帰クロール） ---
+    recursive_crawl_enabled: bool = False
+    recursive_crawled_urls: list[str] | None = None
+    recursive_skipped_urls: list[str] | None = None
+    recursive_emails: list[DiscoveredEmail] | None = None
+    recursive_forms: list[str] | None = None
+    recursive_socials: dict[str, str] | None = None
+    recursive_pdfs: list[DiscoveredPdf] | None = None
+    recursive_sitemap_urls: list[str] | None = None
+    recursive_robots_sitemaps: list[str] | None = None
+    recursive_has_mx: bool | None = None
+    recursive_mx_provider: str | None = None
+    recursive_spf_record: str | None = None
+    recursive_dmarc_record: str | None = None
+    recursive_failure_reasons: list[str] | None = None
+    recursive_summary: str | None = None
+    recursive_crawled_at: datetime | None = None
 
     created_at: datetime
     updated_at: datetime

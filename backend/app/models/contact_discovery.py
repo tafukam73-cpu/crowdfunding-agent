@@ -236,6 +236,39 @@ class ContactDiscovery(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- Contact Intelligence v3：公式サイト再帰クロール（発見率強化） ---
+    # 公式サイトが見つかった場合のみ実行。サイト全体を安全に再帰巡回し、メール・
+    # フォーム・SNS・PDF・営業窓口を「実際に取得したページから」抽出する。
+    # 実行できたか（公式サイト未発見なら False）
+    recursive_crawl_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # 実際に巡回した URL / スキップした URL（login/cart/robots/深さ超過など）
+    recursive_crawled_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recursive_skipped_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 抽出した連絡先（既存フィルタ通過済み）
+    # [{email, score, tier, email_owner, sources:[url]}]
+    recursive_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recursive_forms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recursive_socials: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 解析した PDF [{url, label, relevant, emails:int, text_len:int}]
+    recursive_pdfs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # sitemap.xml から拾った優先 URL / robots.txt の Sitemap: 行
+    recursive_sitemap_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recursive_robots_sitemaps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # DNS / MX / SPF / DMARC（メール運用の有無。公開メール未発見でも運用ありを表示）
+    recursive_has_mx: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recursive_mx_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    recursive_spf_record: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recursive_dmarc_record: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 失敗理由コード（OFFICIAL_SITE_NOT_FOUND / EMAIL_NOT_PUBLIC / CRAWL_BLOCKED 等）
+    recursive_failure_reasons: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 再帰クロールの要約（UI・ログ用）
+    recursive_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recursive_crawled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

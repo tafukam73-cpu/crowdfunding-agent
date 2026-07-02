@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # 1 クエリあたり取得する検索結果の上限
     search_max_results: int = 10
 
+    # --- Contact Intelligence v3：公式サイト再帰クロールの上限（発見率と安全性） ---
+    # 公式サイトが見つかった場合に、サイト全体を再帰巡回する際の上限。.env で変更可。
+    recursive_crawl_max_urls: int = 50
+    recursive_crawl_max_depth: int = 2
+
     # --- AI Search Agent の探索上限（発見率と安全性のバランス） ---
     search_agent_max_steps: int = 15
     search_agent_max_urls: int = 40

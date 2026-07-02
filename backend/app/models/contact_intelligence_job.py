@@ -27,6 +27,8 @@ class CIJobType(str, enum.Enum):
     web_research = "web_research"
     document_reader = "document_reader"
     search_agent = "search_agent"
+    # Contact Intelligence v3：公式サイト内の再帰クロール（発見率強化）
+    recursive_crawl = "recursive_crawl"
     full_contact_intelligence = "full_contact_intelligence"
 
 

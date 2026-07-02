@@ -73,14 +73,22 @@ def _fake_agent(db, project, cb=None):
     _order.append("agent")
 
 
+def _fake_recursive(db, project, cb=None):
+    _order.append("recursive")
+    if cb:
+        cb("巡回中 (1/50): https://example.com/contact", pct=0.5)
+
+
 def _install_fakes():
     ci._run_web = _fake_web
     ci._run_doc = _fake_doc
     ci._run_agent = _fake_agent
+    ci._run_recursive = _fake_recursive
     ci._SINGLE_PHASES = {
         CIJobType.web_research.value: ("Web Research", _fake_web),
         CIJobType.document_reader.value: ("AI Document Reader", _fake_doc),
         CIJobType.search_agent.value: ("AI Search Agent", _fake_agent),
+        CIJobType.recursive_crawl.value: ("公式サイト再帰クロール", _fake_recursive),
     }
 
 
@@ -113,7 +121,8 @@ def test_full_order():
     job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
     ci._run_job(job.id)
     db.refresh(job)
-    check("実行順序 web→doc→agent", _order == ["web", "doc", "agent"])
+    check("実行順序 web→recursive→doc→agent",
+          _order == ["web", "recursive", "doc", "agent"])
     check("full completed", job.status == CIJobStatus.completed.value)
     check("ランキング更新ログ", any("ランキング" in (l.get("message") or "") for l in (job.logs_json or [])))
     db.close()
