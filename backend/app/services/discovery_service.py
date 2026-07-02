@@ -8,6 +8,7 @@ source_url をキーに重複登録を防ぐ（同一 URL は既存を返す）�
 from __future__ import annotations
 
 import logging
+from typing import Any, Callable
 
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from app.models.discovered_product import (
     DiscoveredProductStatus,
     DiscoverySourcePlatform,
 )
+from app.services import discovery_scoring_service
 
 logger = logging.getLogger("discovery")
 
@@ -38,11 +40,20 @@ def get_by_source_url(db: Session, source_url: str) -> DiscoveredProduct | None:
     )
 
 
-def create(db: Session, data: dict) -> tuple[DiscoveredProduct, bool]:
+def create(
+    db: Session,
+    data: dict,
+    *,
+    auto_score: bool = False,
+    ai_fn: Callable[[dict], Any] | None = None,
+) -> tuple[DiscoveredProduct, bool]:
     """商品候補を作成する。(商品, created) を返す。
 
     source_url が指定され、かつ既存と重複する場合は作成せず既存を返す
     （重複登録防止）。
+
+    auto_score=True のときは、新規作成した商品を作成直後に自動スコアリングする
+    （既定 False。既存を再利用した場合は再スコアリングしない）。
     """
     source_url = data.get("source_url")
     if source_url:
@@ -58,7 +69,41 @@ def create(db: Session, data: dict) -> tuple[DiscoveredProduct, bool]:
         "discovered product created: id=%s platform=%s score=%s",
         product.id, product.source_platform, product.overall_discovery_score,
     )
+    if auto_score:
+        _apply_scores(db, product, ai_fn=ai_fn)
     return product, True
+
+
+def _apply_scores(
+    db: Session,
+    product: DiscoveredProduct,
+    *,
+    ai_fn: Callable[[dict], Any] | None = None,
+) -> DiscoveredProduct:
+    """商品を評価してスコア系カラム・reasoning・next_action を更新・保存する。"""
+    scores = discovery_scoring_service.score(product, ai_fn=ai_fn)
+    for key, value in scores.items():
+        setattr(product, key, value)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+def score_product(
+    db: Session,
+    product_id: int,
+    *,
+    ai_fn: Callable[[dict], Any] | None = None,
+) -> DiscoveredProduct | None:
+    """保存済み商品を評価し、スコア系カラムを更新して返す。
+
+    対象が存在しなければ None。AI 呼び出し（ai_fn）が失敗しても
+    discovery_scoring_service 側でルールベースにフォールバックする。
+    """
+    product = db.get(DiscoveredProduct, product_id)
+    if product is None:
+        return None
+    return _apply_scores(db, product, ai_fn=ai_fn)
 
 
 def update(db: Session, product_id: int, updates: dict) -> DiscoveredProduct | None:

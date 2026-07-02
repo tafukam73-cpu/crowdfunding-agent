@@ -49,6 +49,9 @@ class DiscoveredProductCreate(BaseModel):
 
     contact_discovery_id: int | None = None
 
+    # True のとき、作成直後に AI Discovery Scoring で自動スコアリングする（既定 False）。
+    auto_score: bool = False
+
     @field_validator("source_platform")
     @classmethod
     def _platform_value(cls, v):
@@ -58,6 +61,23 @@ class DiscoveredProductCreate(BaseModel):
     @classmethod
     def _status_value(cls, v):
         return v.value if isinstance(v, DiscoveredProductStatus) else v
+
+
+class DiscoveryScoreOut(BaseModel):
+    """AI Discovery Scoring の結果（スコア系カラムのみ）。"""
+
+    japan_fit_score: int | None = None
+    crowdfunding_fit_score: int | None = None
+    novelty_score: int | None = None
+    logistics_score: int | None = None
+    regulatory_risk_score: int | None = None
+    competition_risk_score: int | None = None
+    japan_entry_risk_score: int | None = None
+    overall_discovery_score: int | None = None
+    discovery_reasoning: str | None = None
+    recommended_next_action: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DiscoveredProductUpdate(BaseModel):

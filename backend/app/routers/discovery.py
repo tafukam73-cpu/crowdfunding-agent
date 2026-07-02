@@ -1,9 +1,11 @@
 """発掘商品候補 API（Discovery Engine v1-1）。
 
 - POST  /discovery/products         商品候補を登録（source_url 重複時は既存を再利用）
+                                     auto_score=true で登録直後に自動スコアリング
 - GET   /discovery/products         一覧（platform/status/category/min_score/sort で絞り込み）
 - GET   /discovery/products/{id}    詳細取得
 - PATCH /discovery/products/{id}    更新（渡されたフィールドのみ）
+- POST  /discovery/products/{id}/score  保存済み商品を AI/ルールでスコアリング
 """
 from __future__ import annotations
 
@@ -25,8 +27,13 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 def create_product(
     payload: DiscoveredProductCreate, db: Session = Depends(get_db)
 ) -> DiscoveredProductOut:
-    """商品候補を登録する（source_url 重複時は既存を再利用）。"""
-    product, _created = discovery_service.create(db, payload.model_dump())
+    """商品候補を登録する（source_url 重複時は既存を再利用）。
+
+    auto_score=true のときのみ、登録直後に自動スコアリングする。
+    """
+    data = payload.model_dump()
+    auto_score = data.pop("auto_score", False)
+    product, _created = discovery_service.create(db, data, auto_score=auto_score)
     return product
 
 
@@ -51,6 +58,20 @@ def get_product(
     product_id: int, db: Session = Depends(get_db)
 ) -> DiscoveredProductOut:
     product = discovery_service.get(db, product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="商品候補が見つかりません")
+    return product
+
+
+@router.post("/products/{product_id}/score", response_model=DiscoveredProductOut)
+def score_product(
+    product_id: int, db: Session = Depends(get_db)
+) -> DiscoveredProductOut:
+    """保存済み商品を AI Discovery Scoring で評価し、スコアを更新して返す。
+
+    実 API キーが無くてもルールベースにフォールバックして必ずスコアを付与する。
+    """
+    product = discovery_service.score_product(db, product_id)
     if product is None:
         raise HTTPException(status_code=404, detail="商品候補が見つかりません")
     return product
