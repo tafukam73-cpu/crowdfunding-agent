@@ -13,6 +13,11 @@ from app.models.contact_intelligence_job import (
 )
 from app.models.contact_person import ContactPerson
 from app.models.crm import ActivityKind, Contact, CrmStatus, Maker, SalesActivity
+from app.models.discovered_product import (
+    DiscoveredProduct,
+    DiscoveredProductStatus,
+    DiscoverySourcePlatform,
+)
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.email_settings import EmailSettings
 from app.models.evaluation import AiEvaluation, Recommendation
@@ -61,6 +66,9 @@ __all__ = [
     "CIJobStatus",
     "CIJobType",
     "ContactPerson",
+    "DiscoveredProduct",
+    "DiscoveredProductStatus",
+    "DiscoverySourcePlatform",
     "ReplyAssistant",
     "ReplyStatus",
     "SalesOpportunity",
