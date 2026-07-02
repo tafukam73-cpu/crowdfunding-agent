@@ -184,20 +184,22 @@ export default function ProjectDetail() {
             詳細情報（必要なときに開く）
           </h2>
 
-          {/* 連絡先（Contact Intelligence）。営業フローの STEP2 と同じ機能を、
-              フロー外でも常時開ける独立エントリとして提供する（AI連絡先リサーチ /
-              AI Web調査 / Contact Hunter の各ボタン・結果をここから実行できる）。 */}
-          <Collapsible
-            title="📇 連絡先（Contact Intelligence）"
-            hint="AIリサーチ / Web調査 / Contact Hunter"
-            defaultOpen
-          >
-            <ContactDiscoveryPanel
-              projectId={id}
-              searchKeyword={project.maker_name?.trim() || project.title}
-              onChanged={() => setDiscoveryVersion((v) => v + 1)}
-            />
-          </Collapsible>
+          {/* 連絡先（Contact Intelligence）。パネル本体はここに一本化する（Sales Mode
+              STEP2 はこのセクションへ誘導するだけ）。「じっくり調査」をメイン導線とし、
+              個別ツールは「詳細ツール（上級者向け）」の折りたたみ内に格納。 */}
+          <div id="contact-intelligence" className="scroll-mt-4">
+            <Collapsible
+              title="📇 連絡先（Contact Intelligence）"
+              hint="じっくり調査 / 個別ツールは折りたたみ内"
+              defaultOpen
+            >
+              <ContactDiscoveryPanel
+                projectId={id}
+                searchKeyword={project.maker_name?.trim() || project.title}
+                onChanged={() => setDiscoveryVersion((v) => v + 1)}
+              />
+            </Collapsible>
+          </div>
 
           <Collapsible title="🧭 営業ワークフロー" hint="ステップ・チャネル・優先度">
             <WorkflowCard

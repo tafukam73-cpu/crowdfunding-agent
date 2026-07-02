@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EmailDraftPanel from "@/components/EmailDraftPanel";
 import ExecutiveSummaryPanel from "@/components/ExecutiveSummaryPanel";
 import {
@@ -263,13 +262,28 @@ export default function SalesModeGuide({
               />
             </div>
 
-            {/* STEP 2: Contact Intelligence（フォーム/SNS/Google検索/短文DM） */}
+            {/* STEP 2: Contact Intelligence。パネル本体は下の「📇 連絡先」セクションに
+                一本化し、二重表示を避ける。ここはそこへ誘導するだけ。 */}
             <div className={step === 2 ? "" : "hidden"}>
-              <ContactDiscoveryPanel
-                projectId={projectId}
-                searchKeyword={project.maker_name?.trim() || project.title}
-                onChanged={onDiscoveryChanged}
-              />
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4 text-sm">
+                <p className="font-semibold text-indigo-900">
+                  📇 連絡先（Contact Intelligence）
+                </p>
+                <p className="mt-1 text-xs text-indigo-700">
+                  公式サイト・SNS・問い合わせフォーム・メール・担当者候補は「じっくり調査」で
+                  まとめて探索できます。下の「📇 連絡先」セクションから実行してください。
+                </p>
+                <button
+                  onClick={() =>
+                    document
+                      .getElementById("contact-intelligence")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
+                  className="mt-3 rounded bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-600"
+                >
+                  連絡先の探索を開く ↓
+                </button>
+              </div>
             </div>
 
             {/* STEP 3: メール作成（営業メール / Gmail / コピー） */}
