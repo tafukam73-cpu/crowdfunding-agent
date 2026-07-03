@@ -56,6 +56,27 @@ def analyze_product(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@router.post(
+    "/analyze-ai/{discovered_product_id}",
+    response_model=JapanOpportunityAnalysisOut,
+)
+def analyze_product_ai(
+    discovered_product_id: int, db: Session = Depends(get_db)
+) -> JapanOpportunityAnalysisOut:
+    """発掘商品を AI 評価（＋ルールベース土台）で分析し、作成して返す（v1-4）。
+
+    現時点では実 AI クライアントは接続しない（ai_fn 未指定）。よって通常はルールベース
+    へフォールバックして動作する。将来 ai_fn を注入すれば AI 評価に切り替わる。
+    発掘商品が存在しなければ 404。
+    """
+    try:
+        return japan_opportunity_service.analyze_product_ai(
+            db, discovered_product_id, ai_fn=None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/analyses", response_model=list[JapanOpportunityAnalysisOut])
 def list_analyses(
     discovered_product_id: int | None = Query(

@@ -24,6 +24,7 @@ from app.services.discovery_scoring_service import (
     _LOGISTICS_HEAVY,
     _SHORT_DESC_THRESHOLD,
     _match_categories,
+    _parse_ai_json,
 )
 
 logger = logging.getLogger("japan_opportunity")
@@ -239,7 +240,16 @@ def analyze_product_rules(
     product = db.get(DiscoveredProduct, discovered_product_id)
     if product is None:
         raise ValueError(f"発掘商品が見つかりません: id={discovered_product_id}")
+    data = _compute_rule_data(product)
+    return create_analysis(db, discovered_product_id, data)
 
+
+def _compute_rule_data(product: DiscoveredProduct) -> dict:
+    """発掘商品からルールベースの分析データ（dict）を計算する（DB 非依存）。
+
+    analyze_product_rules（保存）と analyze_product_ai（AI 評価のベースライン）で
+    共有する。スコア軸・総合・confidence・根拠テキスト・evidence_json を含む。
+    """
     # --- 入力の整理 ---
     text = " ".join(
         str(getattr(product, k) or "")
@@ -375,12 +385,11 @@ def analyze_product_rules(
         },
     }
 
-    data = {**axes,
+    return {**axes,
             "overall_opportunity_score": overall_opportunity,
             "confidence_score": confidence_score,
             **summaries,
             "evidence_json": evidence}
-    return create_analysis(db, discovered_product_id, data)
 
 
 def _build_summaries(
@@ -495,3 +504,157 @@ def _build_summaries(
         "recommended_strategy": strategy,
         "recommended_next_action": next_action,
     }
+
+
+# --------------------------------------------------------------------------- #
+# AI 評価連携（Japan Opportunity Engine v1-4）
+# --------------------------------------------------------------------------- #
+AI_ENGINE_NAME = "ai-japan-opportunity-v1"
+
+# AI が上書き/補完できる根拠テキスト
+_AI_TEXT_FIELDS = (
+    "japan_presence_summary",
+    "competition_summary",
+    "regulatory_summary",
+    "logistics_summary",
+    "pricing_summary",
+    "opportunity_reasoning",
+    "recommended_strategy",
+    "recommended_next_action",
+)
+
+
+def _build_ai_prompt(product: DiscoveredProduct, rule_data: dict) -> str:
+    """AI 評価用プロンプトを組み立てる（商品情報＋ルール評価＋注意書き）。"""
+    lines = [
+        "あなたは海外クラウドファンディング商品の日本展開を評価するアナリストです。",
+        "この評価は営業前の予備評価であり、法的・規制上の断定ではありません。",
+        "不明な情報は断定しないでください。",
+        "日本未進出・競合・法規制は「要確認」として扱ってください。",
+        "各スコアは 0〜100 で評価し、高いほど日本展開・営業に有利とします。",
+        "推薦理由（opportunity_reasoning）と次アクション（recommended_next_action）"
+        "は日本語で書いてください。",
+        "出力は JSON のみとし、前後に説明文を付けないでください。",
+        "",
+        "# 商品情報",
+        f"product_name: {product.product_name}",
+        f"project_title: {product.project_title}",
+        f"category: {product.category}",
+        f"country: {product.country}",
+        f"status: {product.status}",
+        f"funding_amount: {product.funding_amount}",
+        f"backers_count: {product.backers_count}",
+        f"description: {(product.description or '')[:1500]}",
+        "",
+        "# ルールベース評価（ベースライン。妥当なら踏襲し、根拠があれば調整する）",
+    ]
+    for field in SCORE_FIELDS:
+        lines.append(f"{field}: {rule_data.get(field)}")
+    lines += [
+        "",
+        "# 出力する JSON のキー（スコアは 0〜100 の整数）",
+        ", ".join(SCORE_FIELDS) + ",",
+        ", ".join(_AI_TEXT_FIELDS) + ", evidence_json",
+    ]
+    return "\n".join(lines)
+
+
+def _coerce_raw(raw: Any) -> Any:
+    """ai_raw_response として JSON 保存できる形に整える。"""
+    if raw is None or isinstance(raw, (dict, list, str)):
+        return raw
+    return str(raw)
+
+
+def _apply_ai(
+    product: DiscoveredProduct, rule_data: dict, ai_fn: Any
+) -> tuple[dict, bool, str | None, Any]:
+    """ルール評価を土台に AI 評価を重ねる。安全にフォールバックする。
+
+    Returns: (最終 data, ai_used, fallback_reason, ai_raw_response)
+    """
+    rule_baseline = {f: rule_data.get(f) for f in SCORE_FIELDS}
+    final = dict(rule_data)
+    ai_used = False
+    fallback_reason: str | None = None
+    ai_raw: Any = None
+    parsed: dict | None = None
+
+    if ai_fn is None:
+        fallback_reason = "ai_fn_not_provided"
+    else:
+        prompt = _build_ai_prompt(product, rule_data)
+        try:
+            raw = ai_fn(prompt)
+        except Exception as exc:  # noqa: BLE001  AI 例外はフォールバック
+            fallback_reason = f"ai_exception:{exc}"[:300]
+            logger.warning("japan opportunity AI failed: %s", exc)
+        else:
+            ai_raw = _coerce_raw(raw)
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                fallback_reason = "ai_empty"
+            else:
+                try:
+                    parsed = _parse_ai_json(raw)
+                    ai_used = True
+                except Exception as exc:  # noqa: BLE001  不正 JSON はフォールバック
+                    fallback_reason = "ai_invalid_json"
+                    logger.warning(
+                        "japan opportunity AI returned invalid JSON: %s", exc
+                    )
+
+    if ai_used and parsed is not None:
+        # スコアは範囲外を 0〜100 に正規化して上書き（非数値は無視＝ルール維持）
+        for field in SCORE_FIELDS:
+            v = _clamp_score(parsed.get(field))
+            if v is not None:
+                final[field] = v
+        # 根拠テキストは非空のみ上書き
+        for field in _AI_TEXT_FIELDS:
+            t = parsed.get(field)
+            if isinstance(t, str) and t.strip():
+                final[field] = t
+
+    # evidence_json：ルール根拠を土台に AI メタ情報を必ず付与
+    evidence = dict(rule_data.get("evidence_json") or {})
+    if ai_used and parsed is not None and isinstance(
+        parsed.get("evidence_json"), (dict, list)
+    ):
+        evidence["ai_evidence"] = parsed.get("evidence_json")
+    evidence["ai_used"] = ai_used
+    evidence["fallback_reason"] = fallback_reason
+    evidence["rule_baseline"] = rule_baseline
+    evidence["ai_raw_response"] = ai_raw
+    evidence["engine"] = AI_ENGINE_NAME if ai_used else evidence.get("engine")
+    final["evidence_json"] = evidence
+
+    return final, ai_used, fallback_reason, ai_raw
+
+
+def analyze_product_ai(
+    db: Session,
+    discovered_product_id: int,
+    ai_fn: Any = None,
+) -> JapanOpportunityAnalysis:
+    """発掘商品を AI 評価（＋ルールベース土台）で分析し、作成して返す。
+
+    - まず v1-3 のルールベース評価をベースラインとして計算する。
+    - ai_fn が指定されたときのみ AI 評価を実行し、スコア・根拠を上書き/補完する。
+    - AI 応答が壊れている/空/例外/未指定のときは、必ずルールベースへフォールバック
+      する（例外は投げない）。スコアは 0〜100 に正規化する。
+    - evidence_json に ai_used / fallback_reason / rule_baseline / ai_raw_response を残す。
+
+    ai_fn の契約: ``ai_fn(prompt: str) -> dict | str``（JSON 文字列または dict）。
+    発掘商品が無ければ ValueError。
+    """
+    product = db.get(DiscoveredProduct, discovered_product_id)
+    if product is None:
+        raise ValueError(f"発掘商品が見つかりません: id={discovered_product_id}")
+
+    rule_data = _compute_rule_data(product)
+    final, ai_used, fallback_reason, _raw = _apply_ai(product, rule_data, ai_fn)
+    logger.info(
+        "japan opportunity AI analysis: product=%s ai_used=%s fallback=%s",
+        discovered_product_id, ai_used, fallback_reason,
+    )
+    return create_analysis(db, discovered_product_id, final)
