@@ -24,6 +24,7 @@ from app.routers import (
     evaluate,
     executive_summary,
     health,
+    japan_opportunity,
     japan_sales,
     japanese_success,
     projects,
@@ -87,6 +88,7 @@ app.include_router(company_research.router)
 app.include_router(contact_discovery.router)
 app.include_router(contact_intelligence.router)
 app.include_router(discovery.router)
+app.include_router(japan_opportunity.router)
 app.include_router(reply_assistant.router)
 app.include_router(sales.router)
 app.include_router(sales_opportunities.router)
