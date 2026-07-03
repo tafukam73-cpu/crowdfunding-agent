@@ -17,10 +17,9 @@ import {
   runContactDiscovery,
   runContactHunter,
   runDocumentReader,
-  runSearchAgent,
-  runWebResearch,
   type SalesContact,
   type ContactIntelligenceJob,
+  type CIJobType,
   createSalesOpportunityFromDiscovery,
   startContactIntelligenceJob,
   getContactIntelligenceJob,
@@ -2998,11 +2997,47 @@ export default function ContactDiscoveryPanel({
   const [docError, setDocError] = useState<string | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
+  // Web調査 / Search Agent の非同期ジョブ ポーリング用インターバル
+  const webJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const agentJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
       .then(setData)
       .catch((e) => setError(String(e)));
+  }, [projectId]);
+
+  // アンマウント時にポーリングを止める（リーク防止）。
+  useEffect(() => {
+    return () => {
+      if (webJobRef.current) clearInterval(webJobRef.current);
+      if (agentJobRef.current) clearInterval(agentJobRef.current);
+    };
+  }, []);
+
+  // 再読み込み時、進行中の Web調査 / Search Agent ジョブがあれば購読を再開する。
+  useEffect(() => {
+    let active = true;
+    (["web_research", "search_agent"] as CIJobType[]).forEach((jt) => {
+      getLatestContactIntelligenceJob(projectId, jt)
+        .then((j) => {
+          if (!active || !j) return;
+          if (j.status === "queued" || j.status === "running") {
+            if (jt === "web_research") {
+              setWebBusy(true);
+              pollJob(j.id, webJobRef, setWebBusy, setWebError);
+            } else {
+              setAgentBusy(true);
+              pollJob(j.id, agentJobRef, setAgentBusy, setAgentError);
+            }
+          }
+        })
+        .catch(() => {});
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // じっくり調査ジョブ完了時などに最新の探索結果を取り込む。
@@ -3055,16 +3090,114 @@ export default function ContactDiscoveryPanel({
     }
   }
 
+  // Web調査 / Search Agent は特に重いため、非同期ジョブ＋ポーリングで実行する。
+  // POST でジョブを開始してすぐ返し（ブラウザは長時間 fetch を張らない）、status を
+  // ポーリングして completed で最新結果を再取得する。これにより
+  // TypeError: Failed to fetch を招かない。既存のジョブ基盤（web_research /
+  // search_agent の CIJobType）をそのまま使う。
+  function pollJob(
+    jobId: number,
+    jobRef: { current: ReturnType<typeof setInterval> | null },
+    setBusyFn: (b: boolean) => void,
+    setErrFn: (m: string | null) => void
+  ) {
+    if (jobRef.current) clearInterval(jobRef.current);
+    let fails = 0;
+    jobRef.current = setInterval(async () => {
+      try {
+        const j = await getContactIntelligenceJob(jobId);
+        fails = 0;
+        if (j.status === "completed") {
+          if (jobRef.current) clearInterval(jobRef.current);
+          jobRef.current = null;
+          try {
+            const latest = await fetchContactDiscovery(projectId);
+            setData(latest);
+            onChanged?.();
+          } catch {
+            /* 再取得失敗は次操作で解消 */
+          }
+          setBusyFn(false);
+        } else if (j.status === "failed") {
+          if (jobRef.current) clearInterval(jobRef.current);
+          jobRef.current = null;
+          setErrFn(`探索に失敗しました：${j.error ?? "原因不明のエラー"}`);
+          setBusyFn(false);
+        } else if (j.status === "cancelled") {
+          if (jobRef.current) clearInterval(jobRef.current);
+          jobRef.current = null;
+          setErrFn("探索を中断しました。");
+          setBusyFn(false);
+        }
+        // queued / running はそのまま待機（busy=true 継続）
+      } catch {
+        // ポーリングの一時失敗は握りつぶす（TypeError を画面に出さない）。
+        // 連続失敗が続く場合のみ日本語で案内する。
+        fails += 1;
+        if (fails >= 5) {
+          if (jobRef.current) clearInterval(jobRef.current);
+          jobRef.current = null;
+          setErrFn(
+            "進捗の取得に繰り返し失敗しました。バックエンドで処理は継続している" +
+              "可能性があります。しばらくして再読み込みしてください。"
+          );
+          setBusyFn(false);
+        }
+      }
+    }, 2000);
+  }
+
+  async function runAsJob(
+    jobType: CIJobType,
+    jobRef: { current: ReturnType<typeof setInterval> | null },
+    setBusyFn: (b: boolean) => void,
+    setErrFn: (m: string | null) => void
+  ) {
+    setBusyFn(true);
+    setErrFn(null);
+    setApplyMsg(null);
+    try {
+      // force=true：ユーザーの「再探索」操作なので毎回実行する
+      const j = await startContactIntelligenceJob(projectId, jobType, true);
+      if (j.status === "completed") {
+        try {
+          const latest = await fetchContactDiscovery(projectId);
+          setData(latest);
+          onChanged?.();
+        } catch {
+          /* ignore */
+        }
+        setBusyFn(false);
+      } else if (j.status === "failed") {
+        setErrFn(`探索に失敗しました：${j.error ?? "原因不明のエラー"}`);
+        setBusyFn(false);
+      } else {
+        pollJob(j.id, jobRef, setBusyFn, setErrFn);
+      }
+    } catch (e) {
+      // 開始 POST は短時間だが、接続断でも生の TypeError は出さない。
+      if (isNetworkDropError(e)) {
+        setErrFn(
+          "探索の開始でネットワークエラーが発生しました。時間をおいて再度お試しください。"
+        );
+      } else {
+        setErrFn(`探索の開始に失敗しました：${String(e)}`);
+      }
+      setBusyFn(false);
+    }
+  }
+
   const onRun = () =>
     runResearch(() => runContactDiscovery(projectId), setBusy, setError);
   const onRunAi = () =>
     runResearch(() => runAiContactResearch(projectId), setAiBusy, setAiError);
+  // Web調査 / Search Agent は非同期ジョブ＋ポーリング（同期 fetch で待たない）
   const onRunWeb = () =>
-    runResearch(() => runWebResearch(projectId), setWebBusy, setWebError);
+    runAsJob("web_research", webJobRef, setWebBusy, setWebError);
   const onRunDoc = () =>
     runResearch(() => runDocumentReader(projectId), setDocBusy, setDocError);
   const onRunAgent = () =>
-    runResearch(() => runSearchAgent(projectId), setAgentBusy, setAgentError);
+    runAsJob("search_agent", agentJobRef, setAgentBusy, setAgentError);
 
   async function onApply(email?: string) {
     setApplyMsg(null);
