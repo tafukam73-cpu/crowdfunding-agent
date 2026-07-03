@@ -2961,6 +2961,21 @@ function UnifiedResultSummary({
   );
 }
 
+// ブラウザ↔サーバ間の接続断（長時間の同期処理でよく起きる）を判定する。
+// これらは「バックエンドが失敗した」ではなく「応答を受け取れなかった」ケース。
+function isNetworkDropError(e: unknown): boolean {
+  const msg = String(e);
+  return (
+    msg.includes("Failed to fetch") ||
+    msg.includes("NetworkError") ||
+    msg.includes("network error") ||
+    msg.includes("ERR_") ||
+    msg.includes("AbortError") ||
+    msg.includes("aborted") ||
+    msg.includes("タイムアウト")
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -3000,83 +3015,56 @@ export default function ContactDiscoveryPanel({
       .catch(() => {});
   }
 
-  async function onRun() {
-    setBusy(true);
-    setError(null);
+  // 長時間の同期探索を実行する共通ランナー。
+  // これらの探索（自動抽出 / AI / Web / Document / Search Agent）はサーバ側で公式サイトを
+  // 横断クロールするため時間がかかり、ブラウザ↔サーバの接続が先に切れて fetch が
+  // TypeError: Failed to fetch を投げることがある。その場合でもバックエンドは処理を
+  // 継続・保存しているため、生のエラーを出さずに最新の保存結果を再取得し、状況を
+  // 日本語で案内する（本当の API エラー時のみエラー表示にする）。
+  async function runResearch(
+    run: () => Promise<ContactDiscovery>,
+    setBusyFn: (b: boolean) => void,
+    setErrFn: (m: string | null) => void
+  ) {
+    setBusyFn(true);
+    setErrFn(null);
     setApplyMsg(null);
     try {
-      setData(await runContactDiscovery(projectId));
+      setData(await run());
       onChanged?.();
     } catch (e) {
-      setError(String(e));
+      if (isNetworkDropError(e)) {
+        // 接続断：バックエンドは処理継続の可能性が高い。最新結果を取り込む。
+        try {
+          const latest = await fetchContactDiscovery(projectId);
+          setData(latest);
+          onChanged?.();
+        } catch {
+          /* 再取得も失敗した場合は下の案内文のみ表示 */
+        }
+        setErrFn(
+          "処理に時間がかかり、ブラウザとの接続が切れました。" +
+            "バックエンドでは探索が継続・保存されている場合があります。" +
+            "最新の結果を再取得しました。数十秒おいて再読み込みすると最新状態を確認できます。"
+        );
+      } else {
+        setErrFn(`実行に失敗しました：${String(e)}`);
+      }
     } finally {
-      setBusy(false);
+      setBusyFn(false);
     }
   }
 
-  async function onRunAi() {
-    setAiBusy(true);
-    setAiError(null);
-    setApplyMsg(null);
-    try {
-      // AI リサーチは最新の探索結果（ai_* 含む）を返す。土台が無ければサーバ側で
-      // 自動探索を先に実行する。
-      setData(await runAiContactResearch(projectId));
-      onChanged?.();
-    } catch (e) {
-      setAiError(String(e));
-    } finally {
-      setAiBusy(false);
-    }
-  }
-
-  async function onRunWeb() {
-    setWebBusy(true);
-    setWebError(null);
-    setApplyMsg(null);
-    try {
-      // Web 調査は最新の探索結果（web_* 含む）を返す。土台が無ければサーバ側で
-      // 自動探索を先に実行する。
-      setData(await runWebResearch(projectId));
-      onChanged?.();
-    } catch (e) {
-      setWebError(String(e));
-    } finally {
-      setWebBusy(false);
-    }
-  }
-
-  async function onRunDoc() {
-    setDocBusy(true);
-    setDocError(null);
-    setApplyMsg(null);
-    try {
-      // AI Document Reader は最新の探索結果（doc_reader_* 含む）を返す。土台が
-      // 無ければサーバ側で自動探索を先に実行する。
-      setData(await runDocumentReader(projectId));
-      onChanged?.();
-    } catch (e) {
-      setDocError(String(e));
-    } finally {
-      setDocBusy(false);
-    }
-  }
-
-  async function onRunAgent() {
-    setAgentBusy(true);
-    setAgentError(null);
-    setApplyMsg(null);
-    try {
-      // Search Agent は最新の探索結果（search_agent_* 含む）を返す。土台が無ければ
-      // サーバ側で自動探索を先に実行する。
-      setData(await runSearchAgent(projectId));
-      onChanged?.();
-    } catch (e) {
-      setAgentError(String(e));
-    } finally {
-      setAgentBusy(false);
-    }
-  }
+  const onRun = () =>
+    runResearch(() => runContactDiscovery(projectId), setBusy, setError);
+  const onRunAi = () =>
+    runResearch(() => runAiContactResearch(projectId), setAiBusy, setAiError);
+  const onRunWeb = () =>
+    runResearch(() => runWebResearch(projectId), setWebBusy, setWebError);
+  const onRunDoc = () =>
+    runResearch(() => runDocumentReader(projectId), setDocBusy, setDocError);
+  const onRunAgent = () =>
+    runResearch(() => runSearchAgent(projectId), setAgentBusy, setAgentError);
 
   async function onApply(email?: string) {
     setApplyMsg(null);
