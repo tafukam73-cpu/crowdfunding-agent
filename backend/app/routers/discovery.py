@@ -17,10 +17,35 @@ from app.schemas.discovery import (
     DiscoveredProductCreate,
     DiscoveredProductOut,
     DiscoveredProductUpdate,
+    DiscoveryRunRequest,
+    DiscoveryRunResult,
 )
-from app.services import discovery_service
+from app.services import discovery_crawler_service, discovery_service
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
+
+
+@router.post("/run", response_model=DiscoveryRunResult)
+def run_discovery(
+    payload: DiscoveryRunRequest, db: Session = Depends(get_db)
+) -> DiscoveryRunResult:
+    """Discovery Crawler Framework を 1 回実行し、結果サマリを返す。
+
+    source_platform に対応する adapter で候補を収集し、URL 正規化・重複排除の上で
+    discovered_products に保存する。auto_score=True なら保存時に自動スコアリングする。
+
+    v1-3 の安全設計：本 API は実ネットワーク取得を行わない（fetch_fn を注入しない）。
+    ネットワーク系プラットフォームでは候補 0 件となり、外部送信・課金は発生しない。
+    manual では別途投入されたレコードのみを扱う（本エンドポイントからは 0 件）。
+    """
+    result = discovery_crawler_service.run(
+        db,
+        source_platform=payload.source_platform,
+        query=payload.query,
+        limit=payload.limit,
+        auto_score=payload.auto_score,
+    )
+    return result
 
 
 @router.post("/products", response_model=DiscoveredProductOut)

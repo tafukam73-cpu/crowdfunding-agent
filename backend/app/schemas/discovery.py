@@ -126,6 +126,47 @@ class DiscoveredProductUpdate(BaseModel):
         return v.value if isinstance(v, DiscoveredProductStatus) else v
 
 
+class DiscoveryRunRequest(BaseModel):
+    """発掘実行（Discovery Crawler Framework）のリクエスト。"""
+
+    source_platform: DiscoverySourcePlatform = DiscoverySourcePlatform.manual
+    query: str | None = None
+    limit: int = 20
+    # True のとき保存した候補を AI Discovery Scoring で自動評価する（既定 False）。
+    auto_score: bool = False
+
+    @field_validator("source_platform")
+    @classmethod
+    def _platform_value(cls, v):
+        return v.value if isinstance(v, DiscoverySourcePlatform) else v
+
+    @field_validator("limit")
+    @classmethod
+    def _limit_range(cls, v):
+        # 想定外の巨大 limit を弾く（安全側・0〜200）
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            return 20
+        return max(0, min(200, v))
+
+
+class DiscoveryRunResult(BaseModel):
+    """発掘実行の結果サマリ。"""
+
+    run_id: int | None = None
+    source_platform: str
+    query: str | None = None
+    status: str
+    found_count: int
+    saved_count: int
+    duplicate_count: int
+    error_message: str | None = None
+    product_ids: list[int] = []
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class DiscoveredProductOut(BaseModel):
     id: int
 

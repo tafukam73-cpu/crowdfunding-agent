@@ -18,6 +18,7 @@ from app.models.discovered_product import (
     DiscoveredProductStatus,
     DiscoverySourcePlatform,
 )
+from app.models.discovery_run import DiscoveryRun, DiscoveryRunStatus
 from app.models.email_draft import EmailDraft, EmailType
 from app.models.email_settings import EmailSettings
 from app.models.evaluation import AiEvaluation, Recommendation
@@ -69,6 +70,8 @@ __all__ = [
     "DiscoveredProduct",
     "DiscoveredProductStatus",
     "DiscoverySourcePlatform",
+    "DiscoveryRun",
+    "DiscoveryRunStatus",
     "ReplyAssistant",
     "ReplyStatus",
     "SalesOpportunity",
