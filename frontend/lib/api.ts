@@ -2233,3 +2233,258 @@ export async function fetchAvailabilityChecks(
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// ===== Discovery Engine（商品発掘）v1-4 =====
+
+// 発掘元プラットフォーム（backend の DiscoverySourcePlatform に対応）
+export type DiscoverySourcePlatform =
+  | "kickstarter"
+  | "indiegogo"
+  | "backerkit"
+  | "backertracker"
+  | "crowdsupply"
+  | "gamefound"
+  | "producthunt"
+  | "manual"
+  | "other";
+
+// キャンペーン状態（backend の DiscoveredProductStatus に対応）
+export type DiscoveredProductStatus =
+  | "live"
+  | "successful"
+  | "ended"
+  | "failed"
+  | "canceled"
+  | "preorder"
+  | "unknown";
+
+// 発掘元の読みやすい表示名。未定義キーはそのまま表示すること。
+export const DISCOVERY_PLATFORM_LABELS: Record<string, string> = {
+  kickstarter: "Kickstarter",
+  indiegogo: "Indiegogo",
+  backerkit: "BackerKit",
+  backertracker: "BackerTracker",
+  crowdsupply: "Crowd Supply",
+  gamefound: "Gamefound",
+  producthunt: "Product Hunt",
+  manual: "手動登録",
+  other: "その他",
+};
+
+// 手動登録フォーム等で選ばせる発掘元の並び順。
+export const DISCOVERY_PLATFORM_ORDER: DiscoverySourcePlatform[] = [
+  "kickstarter",
+  "indiegogo",
+  "backerkit",
+  "manual",
+  "other",
+];
+
+// ステータスの日本語表示。
+export const DISCOVERY_STATUS_LABELS: Record<string, string> = {
+  live: "実施中",
+  successful: "成功",
+  ended: "終了",
+  failed: "未達成",
+  canceled: "キャンセル",
+  preorder: "予約販売",
+  unknown: "不明",
+};
+
+export const DISCOVERY_STATUS_COLORS: Record<string, string> = {
+  live: "bg-blue-100 text-blue-700",
+  successful: "bg-green-100 text-green-700",
+  ended: "bg-slate-100 text-slate-600",
+  failed: "bg-red-100 text-red-700",
+  canceled: "bg-rose-100 text-rose-700",
+  preorder: "bg-amber-100 text-amber-700",
+  unknown: "bg-slate-100 text-slate-500",
+};
+
+export const DISCOVERY_STATUS_ORDER: DiscoveredProductStatus[] = [
+  "live",
+  "successful",
+  "ended",
+  "failed",
+  "canceled",
+  "preorder",
+  "unknown",
+];
+
+// 発掘商品候補（backend DiscoveredProductOut に対応）。
+export type DiscoveredProduct = {
+  id: number;
+  source_platform: DiscoverySourcePlatform;
+  source_url: string | null;
+  project_title: string | null;
+  creator_name: string | null;
+  product_name: string | null;
+  category: string | null;
+  description: string | null;
+  image_url: string | null;
+  country: string | null;
+  status: DiscoveredProductStatus;
+  funding_amount: number | null;
+  funding_goal: number | null;
+  backers_count: number | null;
+  launch_date: string | null;
+  end_date: string | null;
+  official_website_url: string | null;
+  japan_fit_score: number | null;
+  crowdfunding_fit_score: number | null;
+  novelty_score: number | null;
+  logistics_score: number | null;
+  regulatory_risk_score: number | null;
+  competition_risk_score: number | null;
+  japan_entry_risk_score: number | null;
+  overall_discovery_score: number | null;
+  discovery_reasoning: string | null;
+  recommended_next_action: string | null;
+  contact_discovery_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 商品候補の手動登録ペイロード（backend DiscoveredProductCreate に対応・任意項目）。
+export type DiscoveredProductCreate = {
+  source_platform?: DiscoverySourcePlatform;
+  source_url?: string | null;
+  project_title?: string | null;
+  creator_name?: string | null;
+  product_name?: string | null;
+  category?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  country?: string | null;
+  status?: DiscoveredProductStatus;
+  funding_amount?: number | null;
+  funding_goal?: number | null;
+  backers_count?: number | null;
+  launch_date?: string | null;
+  end_date?: string | null;
+  official_website_url?: string | null;
+  // true のとき登録直後に自動スコアリング（既定 false）。
+  auto_score?: boolean;
+};
+
+// 商品候補の更新ペイロード（backend DiscoveredProductUpdate に対応・渡した項目のみ更新）。
+export type DiscoveredProductUpdate = Partial<
+  Omit<DiscoveredProductCreate, "auto_score">
+>;
+
+// Discovery 実行のリクエスト（backend DiscoveryRunRequest に対応）。
+export type DiscoveryRunRequest = {
+  source_platform: DiscoverySourcePlatform;
+  query?: string | null;
+  limit?: number;
+  auto_score?: boolean;
+};
+
+// Discovery 実行の結果サマリ（backend DiscoveryRunResult に対応）。
+export type DiscoveryRunResult = {
+  run_id: number | null;
+  source_platform: string;
+  query: string | null;
+  status: string;
+  found_count: number;
+  saved_count: number;
+  duplicate_count: number;
+  error_message: string | null;
+  product_ids: number[];
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+// 一覧の絞り込み・並び替え。sort は backend の "score" / "created" に対応。
+export type DiscoveryListParams = {
+  platform?: string;
+  status?: string;
+  category?: string;
+  min_score?: number;
+  sort?: "score" | "created";
+};
+
+// GET /discovery/products
+export async function listDiscoveredProducts(
+  params: DiscoveryListParams = {}
+): Promise<DiscoveredProduct[]> {
+  const qs = new URLSearchParams();
+  if (params.platform) qs.set("platform", params.platform);
+  if (params.status) qs.set("status", params.status);
+  if (params.category) qs.set("category", params.category);
+  if (params.min_score != null) qs.set("min_score", String(params.min_score));
+  if (params.sort) qs.set("sort", params.sort);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const res = await apiFetch(`/discovery/products${suffix}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// GET /discovery/products/{id}
+export async function getDiscoveredProduct(
+  id: number
+): Promise<DiscoveredProduct> {
+  const res = await apiFetch(`/discovery/products/${id}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// POST /discovery/products
+export async function createDiscoveredProduct(
+  payload: DiscoveredProductCreate
+): Promise<DiscoveredProduct> {
+  const res = await fetch(`${API_BASE}/discovery/products`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// PATCH /discovery/products/{id}
+export async function updateDiscoveredProduct(
+  id: number,
+  payload: DiscoveredProductUpdate
+): Promise<DiscoveredProduct> {
+  const res = await fetch(`${API_BASE}/discovery/products/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// POST /discovery/products/{id}/score
+export async function scoreDiscoveredProduct(
+  id: number
+): Promise<DiscoveredProduct> {
+  const res = await fetch(`${API_BASE}/discovery/products/${id}/score`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// POST /discovery/run
+export async function runDiscovery(
+  payload: DiscoveryRunRequest
+): Promise<DiscoveryRunResult> {
+  const res = await fetch(`${API_BASE}/discovery/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
