@@ -18,10 +18,32 @@ from sqlalchemy.orm import Session
 from app.models.discovered_product import DiscoveredProduct
 from app.models.japan_opportunity_analysis import JapanOpportunityAnalysis
 from app.schemas.japan_opportunity import SCORE_FIELDS
+from app.services.discovery_scoring_service import (
+    _CAUTION_KEYWORDS,
+    _HIGH_FIT_KEYWORDS,
+    _LOGISTICS_HEAVY,
+    _SHORT_DESC_THRESHOLD,
+    _match_categories,
+)
 
 logger = logging.getLogger("japan_opportunity")
 
 _VALID_SORT = {"score_desc", "created_desc"}
+
+RULE_ENGINE_NAME = "rule-based-japan-opportunity-v1"
+
+# 総合スコアの重み（docs/japan_opportunity_engine_strategy.md §3.10・合計 1.0）
+_OVERALL_WEIGHTS: dict[str, float] = {
+    "japan_market_fit_score": 0.20,
+    "japan_entry_gap_score": 0.15,
+    "crowdfunding_fit_score": 0.12,
+    "retail_fit_score": 0.10,
+    "regulatory_safety_score": 0.12,
+    "logistics_score": 0.08,
+    "margin_potential_score": 0.10,
+    "competition_gap_score": 0.08,
+    "sales_success_score": 0.05,
+}
 
 
 def _clamp_score(value: Any) -> int | None:
@@ -157,3 +179,319 @@ def list_analyses(
             desc(JapanOpportunityAnalysis.id),
         )
     return list(db.scalars(stmt).all())
+
+
+# --------------------------------------------------------------------------- #
+# ルールベース評価（Japan Opportunity Engine v1-3）
+# --------------------------------------------------------------------------- #
+def _to_float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clamp(value: float, lo: int = 0, hi: int = 100) -> int:
+    return max(lo, min(hi, int(round(value))))
+
+
+def _or_rule(discovery_value: Any, rule_value: float) -> int:
+    """Discovery 側スコアがあればそれを、無ければルール値を採用する（0〜100）。"""
+    dv = _to_int(discovery_value)
+    return _clamp(dv if dv is not None else rule_value)
+
+
+def _funding_backers_boost(funding: float | None, backers: int | None) -> int:
+    """調達額・支援者数が大きいほど加点する共通ブースト（CF/営業に効く）。"""
+    boost = 0
+    if backers is not None:
+        if backers >= 5000:
+            boost += 15
+        elif backers >= 1000:
+            boost += 8
+        elif backers >= 100:
+            boost += 3
+    if funding is not None:
+        if funding >= 500_000:
+            boost += 10
+        elif funding >= 100_000:
+            boost += 5
+    return boost
+
+
+def analyze_product_rules(
+    db: Session, discovered_product_id: int
+) -> JapanOpportunityAnalysis:
+    """発掘商品をルールベースで評価し、分析結果を作成して返す。
+
+    商品名/カテゴリ/説明/status/funding/backers/country と、あれば Discovery 側の
+    スコアを使って 0〜100 の各軸を算出する。不明情報は 0 点ではなく中立点＋低
+    confidence とし、failed / canceled / ended でも除外しない。AI・実検索は使わない
+    （実ネットワークなし）。発掘商品が無ければ ValueError。
+    """
+    product = db.get(DiscoveredProduct, discovered_product_id)
+    if product is None:
+        raise ValueError(f"発掘商品が見つかりません: id={discovered_product_id}")
+
+    # --- 入力の整理 ---
+    text = " ".join(
+        str(getattr(product, k) or "")
+        for k in ("category", "product_name", "project_title", "description")
+    ).lower()
+    high_hits = _match_categories(text, _HIGH_FIT_KEYWORDS)
+    caution_hits = _match_categories(text, _CAUTION_KEYWORDS)
+    logistics_heavy = [c for c in caution_hits if c in _LOGISTICS_HEAVY]
+
+    funding = _to_float(product.funding_amount)
+    backers = _to_int(product.backers_count)
+    fb_boost = _funding_backers_boost(funding, backers)
+
+    desc = str(product.description or "").strip()
+    short_desc = len(desc) < _SHORT_DESC_THRESHOLD
+
+    # Discovery 側スコア（あれば活用）
+    d_japan_fit = product.japan_fit_score
+    d_cf = product.crowdfunding_fit_score
+    d_logistics = product.logistics_score
+    d_reg = product.regulatory_risk_score
+    d_comp = product.competition_risk_score
+    d_entry = product.japan_entry_risk_score
+
+    # --- 各軸（0〜100・高いほど有利） ---
+    # 日本市場適合度：高評価カテゴリで加点、要注意カテゴリで小減点
+    jm_rule = 50 + (20 + 5 * min(len(high_hits), 3) if high_hits else 0) \
+        - (10 if caution_hits else 0)
+    japan_market_fit = _or_rule(d_japan_fit, jm_rule)
+
+    # クラファン適性：Discovery 値（or ルール）＋ funding/backers ブースト
+    cf_base = _or_rule(d_cf, 50 + (15 if high_hits else 0))
+    crowdfunding_fit = _clamp(cf_base + fb_boost)
+
+    # 一般販売適性：日用品・実用寄りは加点、要注意は小減点
+    retail_fit = _clamp(
+        50 + (10 + 3 * min(len(high_hits), 2) if high_hits else 0)
+        - (5 if caution_hits else 0)
+    )
+
+    # 規制リスクの低さ：要注意カテゴリで大きく下げる（高い=安全）
+    reg_rule = 75
+    if caution_hits:
+        reg_rule -= 30 + 10 * min(len(caution_hits), 3)
+    regulatory_safety = _or_rule(d_reg, reg_rule)
+
+    # 輸送しやすさ：小型・軽量で加点、技適/PSE/大型電池等で減点
+    log_rule = 55 + (10 if high_hits else 0) - (20 if logistics_heavy else 0)
+    logistics = _or_rule(d_logistics, log_rule)
+
+    # 競合リスクの低さ：Discovery 値 or 中立（未検索のため中立寄り）
+    competition_gap = _or_rule(d_comp, 55)
+
+    # 日本未進出可能性：Discovery 値 or 中立（実未上陸判定は v1-5 で確定）
+    japan_entry_gap = _or_rule(d_entry, 60)
+
+    # 利益率見込み：仕入/売価が未確定のため中立。市場性（funding）で微加点
+    margin_potential = _clamp(50 + (5 if (funding or 0) >= 100_000 else 0))
+
+    # 営業成功可能性：連絡先探索未実行のため中立＋実績（funding/backers）で加点
+    sales_success = _clamp(50 + fb_boost)
+
+    axes = {
+        "japan_market_fit_score": japan_market_fit,
+        "japan_entry_gap_score": japan_entry_gap,
+        "crowdfunding_fit_score": crowdfunding_fit,
+        "retail_fit_score": retail_fit,
+        "regulatory_safety_score": regulatory_safety,
+        "logistics_score": logistics,
+        "margin_potential_score": margin_potential,
+        "competition_gap_score": competition_gap,
+        "sales_success_score": sales_success,
+    }
+    overall = sum(axes[k] * w for k, w in _OVERALL_WEIGHTS.items())
+    overall_opportunity = _clamp(overall)
+
+    # --- confidence（情報の充実度。不明が多いほど低い） ---
+    has_discovery = any(
+        v is not None
+        for v in (d_japan_fit, d_cf, d_logistics, d_reg, d_comp, d_entry)
+    )
+    confidence = 50
+    if has_discovery:
+        confidence += 15
+    confidence += 10 if not short_desc else -15
+    if funding is not None or backers is not None:
+        confidence += 10
+    if product.category:
+        confidence += 5
+    confidence_score = _clamp(confidence)
+
+    # --- 根拠テキスト・evidence ---
+    summaries = _build_summaries(
+        product=product,
+        high_hits=high_hits,
+        caution_hits=caution_hits,
+        logistics_heavy=logistics_heavy,
+        funding=funding,
+        backers=backers,
+        short_desc=short_desc,
+        overall=overall_opportunity,
+    )
+    evidence = {
+        "engine": RULE_ENGINE_NAME,
+        "product_category_signals": {
+            "high_fit_categories": high_hits,
+            "matched_high_fit": bool(high_hits),
+        },
+        "risk_signals": {
+            "caution_categories": caution_hits,
+            "logistics_heavy_categories": logistics_heavy,
+        },
+        "funding_signals": {
+            "funding_amount": funding,
+            "backers_count": backers,
+            "status": product.status,
+        },
+        "discovery_scores_used": {
+            "japan_fit_score": d_japan_fit,
+            "crowdfunding_fit_score": d_cf,
+            "logistics_score": d_logistics,
+            "regulatory_risk_score": d_reg,
+            "competition_risk_score": d_comp,
+            "japan_entry_risk_score": d_entry,
+            "overall_discovery_score": product.overall_discovery_score,
+        },
+        "confidence_factors": {
+            "has_discovery_scores": has_discovery,
+            "description_length": len(desc),
+            "short_description": short_desc,
+            "has_funding_info": funding is not None or backers is not None,
+            "has_category": bool(product.category),
+        },
+    }
+
+    data = {**axes,
+            "overall_opportunity_score": overall_opportunity,
+            "confidence_score": confidence_score,
+            **summaries,
+            "evidence_json": evidence}
+    return create_analysis(db, discovered_product_id, data)
+
+
+def _build_summaries(
+    *,
+    product: DiscoveredProduct,
+    high_hits: list[str],
+    caution_hits: list[str],
+    logistics_heavy: list[str],
+    funding: float | None,
+    backers: int | None,
+    short_desc: bool,
+    overall: int,
+) -> dict:
+    """根拠テキスト（各 summary / reasoning / strategy / next_action）を組み立てる。"""
+    # 日本進出状況（v1-3 では実検索しないため未確定と明記）
+    japan_presence = (
+        "日本進出状況はルールベース（v1-3）では未確認です。実際の未上陸判定"
+        "（Amazon.co.jp / 楽天 / Makuake 等の検索）は今後のバージョンで確定します。"
+    )
+    if product.country:
+        japan_presence += f" 発掘元の国: {product.country}。"
+
+    competition = (
+        "国内競合はルールベースでは実検索していないため中立に評価しました。"
+        if not high_hits
+        else "日用品・実用カテゴリのため一定の需要が見込めますが、"
+             "競合状況は実検索で要確認です。"
+    )
+
+    if caution_hits:
+        regulatory = (
+            "規制・輸入で確認が必要なカテゴリ（"
+            + " / ".join(caution_hits)
+            + "）を含みます。該当は販売不可を意味しませんが、許認可・輸入要件の"
+            "確認が必要です（断定はしません）。"
+        )
+    else:
+        regulatory = "明確な規制カテゴリは検出されませんでしたが、最終的な確認は必要です。"
+
+    if logistics_heavy:
+        logistics_s = (
+            "技適 / PSE / 大型バッテリー等に該当する可能性があり、輸送・認証の"
+            "負担が大きい見込みです（" + " / ".join(logistics_heavy) + "）。"
+        )
+    elif high_hits:
+        logistics_s = "小型・軽量が想定され、輸入・国内配送はしやすい見込みです。"
+    else:
+        logistics_s = "輸送しやすさは中立に評価しました（寸法・重量が不明）。"
+
+    parts = []
+    if funding is not None:
+        parts.append(f"調達額 {funding:,.0f}")
+    if backers is not None:
+        parts.append(f"支援者 {backers:,} 人")
+    pricing = (
+        ("海外CF実績（" + " / ".join(parts) + "）から市場性は一定あります。")
+        if parts
+        else "海外CFの実績データが乏しく、市場性は判断材料が不足しています。"
+    )
+    pricing += " 粗利は仕入/売価が未確定のため確度は低めです。"
+
+    reason_bits = []
+    if high_hits:
+        reason_bits.append(
+            "日本市場・物流と相性の良いカテゴリ（" + " / ".join(high_hits) + "）に該当。"
+        )
+    if caution_hits:
+        reason_bits.append(
+            "規制・輸入で注意が必要なカテゴリ（" + " / ".join(caution_hits)
+            + "）を含み、規制安全度を低めに評価。"
+        )
+    if not high_hits and not caution_hits:
+        reason_bits.append("カテゴリからは明確な適合/リスク要因を検出できず中立評価。")
+    if backers is not None and backers >= 1000:
+        reason_bits.append(f"支援者数 {backers:,} 人と実績があり CF/営業に加点。")
+    if short_desc:
+        reason_bits.append("説明文が短く情報不足のため confidence は低め。")
+    opportunity_reasoning = " ".join(reason_bits)
+
+    if overall >= 70:
+        strategy = (
+            "優先度高。Makuake / GREEN FUNDING での日本先行クラファンを前提に、"
+            "メーカーへ日本展開・独占販売を打診する。"
+        )
+        next_action = (
+            "Contact Intelligence を開始してメーカーの連絡先を特定し、"
+            "日本展開・独占販売の打診メールを準備する。"
+        )
+    elif overall >= 45:
+        strategy = (
+            "有望。日本未上陸か・競合・規制を確認したうえでアプローチを検討する。"
+        )
+        next_action = (
+            "日本未上陸判定・競合・規制の追加確認を行い、良好なら Contact "
+            "Intelligence を開始する。"
+        )
+    else:
+        strategy = "現時点では優先度低。規制・競合リスクを精査し保留候補とする。"
+        next_action = "規制・競合・市場性の追加情報を集め、再評価する。"
+    if caution_hits:
+        next_action += (
+            "（規制対応：" + " / ".join(caution_hits) + " の許認可・輸入要件を要確認）"
+        )
+
+    return {
+        "japan_presence_summary": japan_presence,
+        "competition_summary": competition,
+        "regulatory_summary": regulatory,
+        "logistics_summary": logistics_s,
+        "pricing_summary": pricing,
+        "opportunity_reasoning": opportunity_reasoning,
+        "recommended_strategy": strategy,
+        "recommended_next_action": next_action,
+    }

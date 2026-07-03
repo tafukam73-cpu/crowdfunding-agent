@@ -37,6 +37,25 @@ def create_analysis(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post(
+    "/analyze/{discovered_product_id}",
+    response_model=JapanOpportunityAnalysisOut,
+)
+def analyze_product(
+    discovered_product_id: int, db: Session = Depends(get_db)
+) -> JapanOpportunityAnalysisOut:
+    """発掘商品をルールベースで評価し、分析を作成して返す（v1-3）。
+
+    発掘商品が存在しなければ 404。AI・実検索は使わない（実ネットワークなし）。
+    """
+    try:
+        return japan_opportunity_service.analyze_product_rules(
+            db, discovered_product_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/analyses", response_model=list[JapanOpportunityAnalysisOut])
 def list_analyses(
     discovered_product_id: int | None = Query(
