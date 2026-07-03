@@ -17,6 +17,7 @@ from app.schemas.discovery import (
     DiscoveredProductCreate,
     DiscoveredProductOut,
     DiscoveredProductUpdate,
+    DiscoveryContactIntelligenceResult,
     DiscoveryRunRequest,
     DiscoveryRunResult,
 )
@@ -100,6 +101,27 @@ def score_product(
     if product is None:
         raise HTTPException(status_code=404, detail="商品候補が見つかりません")
     return product
+
+
+@router.post(
+    "/products/{product_id}/contact-intelligence",
+    response_model=DiscoveryContactIntelligenceResult,
+)
+def start_contact_intelligence(
+    product_id: int, db: Session = Depends(get_db)
+) -> DiscoveryContactIntelligenceResult:
+    """発掘商品から Contact Intelligence（連絡先探索）を開始する。
+
+    official_website_url（無ければ source_url）を使って既存の Contact Discovery を
+    起動し、作成された contact_discovery_id を商品に保存する。すでに連携済みなら
+    既存 id を返す。商品が無ければ 404、URL が無ければ 400。
+    """
+    result = discovery_service.start_contact_intelligence_from_product(db, product_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="商品候補が見つかりません")
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
 
 
 @router.patch("/products/{product_id}", response_model=DiscoveredProductOut)

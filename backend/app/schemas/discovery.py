@@ -167,6 +167,17 @@ class DiscoveryRunResult(BaseModel):
     finished_at: datetime | None = None
 
 
+class DiscoveryContactIntelligenceResult(BaseModel):
+    """発掘商品から Contact Intelligence を開始した結果。"""
+
+    product_id: int
+    contact_discovery_id: int | None = None
+    used_url: str | None = None
+    # started（新規開始）/ existing（既存連携あり）/ error（URL 未設定 等）
+    status: str
+    message: str
+
+
 class DiscoveredProductOut(BaseModel):
     id: int
 

@@ -18,6 +18,7 @@ from app.models.discovered_product import (
     DiscoveredProductStatus,
     DiscoverySourcePlatform,
 )
+from app.models.project import SourceSite
 from app.services import discovery_scoring_service
 
 logger = logging.getLogger("discovery")
@@ -127,6 +128,140 @@ def update(db: Session, product_id: int, updates: dict) -> DiscoveredProduct | N
     db.commit()
     db.refresh(product)
     return product
+
+
+# --- Contact Intelligence 連携（Discovery Engine v1-5） -----------------------
+# 発掘元プラットフォーム → 案件（Project）の SourceSite。対応が無いものは other。
+_PLATFORM_TO_SOURCE_SITE = {
+    "kickstarter": SourceSite.kickstarter,
+    "indiegogo": SourceSite.indiegogo,
+}
+
+
+def _map_platform_to_source_site(platform: str | None) -> SourceSite:
+    return _PLATFORM_TO_SOURCE_SITE.get((platform or "").lower(), SourceSite.other)
+
+
+def _ensure_project_for_product(
+    db: Session, product: DiscoveredProduct, used_url: str
+) -> "Project":
+    """発掘商品に対応する案件（Project）を用意する（source_url 一致で再利用）。
+
+    Contact Discovery は project_id（NOT NULL FK）を要求するため、既存の Contact
+    Intelligence へ橋渡しする最小の Project を作る。Project.source_url は一意なので、
+    同一 URL の案件が既にあれば再作成せず再利用する（二重登録防止）。
+    """
+    from app.models.project import Project
+    from app.schemas.project import ProjectCreate
+    from app.services import project_service
+
+    src = product.source_url or used_url
+    if src:
+        existing = db.scalar(select(Project).where(Project.source_url == src))
+        if existing is not None:
+            return existing
+
+    title = (
+        product.product_name
+        or product.project_title
+        or product.creator_name
+        or f"発掘商品 #{product.id}"
+    )
+    data = ProjectCreate(
+        title=title[:500],
+        source_site=_map_platform_to_source_site(product.source_platform),
+        source_url=src,
+        category=product.category,
+        description=product.description,
+        # company_name は creator_name を優先（探索の company/maker 名に使う）
+        maker_name=product.creator_name,
+        # official_website_url を優先、無ければ source_url を営業先 URL に使う
+        maker_url=product.official_website_url or product.source_url,
+    )
+    return project_service.create_project(db, data)
+
+
+def start_contact_intelligence_from_product(
+    db: Session,
+    product_id: int,
+    *,
+    discovery_fn: Callable[..., Any] | None = None,
+) -> dict | None:
+    """発掘商品から Contact Intelligence（連絡先探索）を開始する。
+
+    - official_website_url があればそれを、無ければ source_url を used_url に使う。
+    - 既存の Contact Discovery 起動処理（contact_discovery_service.run_discovery）を
+      再利用して ContactDiscovery を作成し、その id を discovered_products.
+      contact_discovery_id に保存する。
+    - すでに contact_discovery_id があれば再作成せず既存 id を返す。
+
+    Returns（router がステータスで 404/400 を判定する）:
+      - 商品が無い          → None（router で 404）
+      - URL が無い          → status="error"（router で 400）
+      - 既存連携あり        → status="existing"
+      - 新規に開始          → status="started"
+    dict のキー: product_id / contact_discovery_id / used_url / status / message
+
+    discovery_fn を注入すると run_discovery の代わりに使う（テストで実ネットワークを
+    避けるため。既定は既存の contact_discovery_service.run_discovery）。
+    """
+    product = db.get(DiscoveredProduct, product_id)
+    if product is None:
+        return None
+
+    # すでに Contact Intelligence 連携済みなら再作成しない（既存 id を返す）
+    if product.contact_discovery_id is not None:
+        from app.models.contact_discovery import ContactDiscovery
+
+        existing = db.get(ContactDiscovery, product.contact_discovery_id)
+        if existing is not None:
+            used = (
+                product.official_website_url
+                or product.source_url
+                or existing.official_site_url
+            )
+            return {
+                "product_id": product.id,
+                "contact_discovery_id": existing.id,
+                "used_url": used,
+                "status": "existing",
+                "message": "既存の Contact Intelligence 調査があります。",
+            }
+
+    used_url = product.official_website_url or product.source_url
+    if not used_url:
+        return {
+            "product_id": product.id,
+            "contact_discovery_id": None,
+            "used_url": None,
+            "status": "error",
+            "message": (
+                "official_website_url も source_url も未設定のため、"
+                "Contact Intelligence を開始できません。"
+            ),
+        }
+
+    project = _ensure_project_for_product(db, product, used_url)
+
+    from app.services import contact_discovery_service
+
+    run = discovery_fn or contact_discovery_service.run_discovery
+    row = run(db, project)
+
+    product.contact_discovery_id = row.id
+    db.commit()
+    db.refresh(product)
+    logger.info(
+        "contact intelligence started from product: product=%s contact_discovery=%s",
+        product.id, row.id,
+    )
+    return {
+        "product_id": product.id,
+        "contact_discovery_id": row.id,
+        "used_url": used_url,
+        "status": "started",
+        "message": "Contact Intelligence 調査を開始しました。",
+    }
 
 
 def list_products(

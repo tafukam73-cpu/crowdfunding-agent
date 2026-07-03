@@ -2488,3 +2488,29 @@ export async function runDiscovery(
   }
   return res.json();
 }
+
+// 発掘商品から Contact Intelligence を開始した結果
+// （backend DiscoveryContactIntelligenceResult に対応）。
+export type DiscoveryContactIntelligenceResult = {
+  product_id: number;
+  contact_discovery_id: number | null;
+  used_url: string | null;
+  // started（新規開始）/ existing（既存連携あり）/ error（URL 未設定 等）
+  status: string;
+  message: string;
+};
+
+// POST /discovery/products/{id}/contact-intelligence
+export async function startDiscoveryContactIntelligence(
+  productId: number
+): Promise<DiscoveryContactIntelligenceResult> {
+  const res = await fetch(
+    `${API_BASE}/discovery/products/${productId}/contact-intelligence`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}

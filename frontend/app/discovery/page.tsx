@@ -20,6 +20,7 @@ import {
   listDiscoveredProducts,
   runDiscovery,
   scoreDiscoveredProduct,
+  startDiscoveryContactIntelligence,
 } from "@/lib/api";
 
 // 発掘元の読みやすい表示（未定義キーはそのまま）。
@@ -381,6 +382,9 @@ function ProductCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ciBusy, setCiBusy] = useState(false);
+  const [ciError, setCiError] = useState<string | null>(null);
+  const [ciMessage, setCiMessage] = useState<string | null>(null);
 
   async function score() {
     setBusy(true);
@@ -395,7 +399,30 @@ function ProductCard({
     }
   }
 
+  async function startContactIntelligence() {
+    setCiBusy(true);
+    setCiError(null);
+    setCiMessage(null);
+    try {
+      const res = await startDiscoveryContactIntelligence(product.id);
+      setCiMessage(
+        `${res.message}（Contact Discovery ID: ${res.contact_discovery_id ?? "-"}）`
+      );
+      // 一覧カードの連携バッジに反映
+      onChanged({ ...product, contact_discovery_id: res.contact_discovery_id });
+    } catch (e) {
+      setCiError(
+        "Contact Intelligence の開始に失敗しました：" + String(e)
+      );
+    } finally {
+      setCiBusy(false);
+    }
+  }
+
   const title = product.product_name || product.project_title || "(名称未設定)";
+  // official_website_url も source_url も無ければ探索できない
+  const hasUrl = Boolean(product.official_website_url || product.source_url);
+  const linked = product.contact_discovery_id != null;
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -452,7 +479,23 @@ function ProductCard({
 
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      {/* Contact Intelligence 連携状態 */}
+      <div className="mt-2 text-xs">
+        {linked ? (
+          <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 font-medium text-green-700">
+            Contact Intelligence 連携済み（ID: {product.contact_discovery_id}）
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 font-medium text-slate-500">
+            Contact Intelligence 未連携
+          </span>
+        )}
+      </div>
+
+      {ciError && <p className="mt-2 text-xs text-red-600">{ciError}</p>}
+      {ciMessage && <p className="mt-2 text-xs text-green-700">{ciMessage}</p>}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           onClick={score}
           disabled={busy}
@@ -460,14 +503,20 @@ function ProductCard({
         >
           {busy ? "スコアリング中…" : "スコアリング実行"}
         </button>
-        {/* D. Contact Intelligence 起動は次フェーズ（v1-5）で実装 */}
+        {/* D. Contact Intelligence 起動（URL が無ければ無効） */}
         <button
-          disabled
-          title="次フェーズ（v1-5）で実装予定"
-          className="cursor-not-allowed rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-400"
+          onClick={startContactIntelligence}
+          disabled={ciBusy || !hasUrl}
+          title={hasUrl ? undefined : "official_website_url も source_url も未設定です"}
+          className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Contact Intelligence 開始（次フェーズで実装）
+          {ciBusy
+            ? "開始中…"
+            : linked
+            ? "Contact Intelligence を再実行"
+            : "Contact Intelligence 開始"}
         </button>
+        {!hasUrl && <span className="text-xs text-amber-600">URL未設定</span>}
       </div>
     </div>
   );
