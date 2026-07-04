@@ -40,14 +40,28 @@ export default function TodaySalesPanel({
   const [items, setItems] = useState<TodayProject[] | null>(null);
   const [dash, setDash] = useState<SalesDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    // 案件一覧の取得（失敗しても空配列にフォールバックし、画面は壊さない）
     fetchTodayProjects(5)
-      .then(setItems)
-      .catch((e) => setError(String(e)));
+      .then((d) => active && setItems(d))
+      .catch(() => {
+        if (!active) return;
+        setItems([]);
+        setError("案件情報を取得できませんでした");
+      })
+      .finally(() => active && setLoading(false));
+    // ダッシュボード集計は失敗時 null（非表示）にするだけで全体は壊さない
     fetchSalesDashboard()
-      .then(setDash)
-      .catch(() => setDash(null));
+      .then((d) => active && setDash(d))
+      .catch(() => active && setDash(null));
+    return () => {
+      active = false;
+    };
   }, [reloadKey]);
 
   return (
@@ -69,7 +83,10 @@ export default function TodaySalesPanel({
 
       {/* 優先順位順の案件 */}
       <div className="mt-4 space-y-2">
-        {items && items.length === 0 && (
+        {loading && (
+          <p className="text-sm text-slate-400">読み込み中…</p>
+        )}
+        {!loading && items && items.length === 0 && !error && (
           <p className="text-sm text-slate-500">
             今日営業すべき準備完了の案件はありません。企業リサーチ・連絡先探索・営業メール生成を進めてください。
           </p>
