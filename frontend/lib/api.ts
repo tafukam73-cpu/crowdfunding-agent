@@ -2311,6 +2311,59 @@ export function mockSalesActivities(): SalesActivity[] {
   ];
 }
 
+// ===== Company Intelligence（メーカーAI分析・フロントモック） =====
+// 営業前に必要な会社情報を1枚で確認するためのAI分析結果。
+// 今回は実APIを接続せず、buildMockCompanyIntelligence でモック生成する。
+
+export type CompanyIntelligence = {
+  company_overview: string; // 会社概要
+  representative: string; // 代表者
+  location: string; // 所在地
+  founded_year: string; // 設立年
+  employee_count: string; // 社員数（不明なら空欄 ""）
+  main_products: string; // 主力商品
+  price_range: string; // 価格帯
+  brand_image: string; // ブランドイメージ
+  competitors: string; // 競合
+  japan_market_fit: string; // 日本市場との相性
+  sales_points: string[]; // 営業ポイント
+  concerns: string[]; // 懸念点
+  recommended_approach: string; // 推奨アプローチ
+};
+
+// モックの Company Intelligence を生成する（会社名・商品名があれば反映）。
+export function buildMockCompanyIntelligence(seed?: {
+  company_name?: string;
+  product_name?: string;
+}): CompanyIntelligence {
+  const company = (seed?.company_name ?? "").trim() || "対象メーカー";
+  const product = (seed?.product_name ?? "").trim() || "主力プロダクト";
+  return {
+    company_overview: `${company} は、独自性の高いプロダクトを展開する海外クラウドファンディング発のメーカー。デザイン性と機能性を両立した製品で、支援者から高い評価を得ている。`,
+    representative: "Alex Morgan（CEO / 共同創業者）",
+    location: "アメリカ・カリフォルニア州",
+    founded_year: "2019年",
+    employee_count: "", // 不明のため空欄
+    main_products: `${product}、および周辺アクセサリー`,
+    price_range: "中〜高価格帯（1万〜3万円相当）",
+    brand_image: "革新的・ミニマル・サステナブル志向。若年〜ミドル層の感度の高いユーザーに支持されている。",
+    competitors: "大手ガジェットブランド、同カテゴリのクラウドファンディング発ブランド",
+    japan_market_fit: "高い。品質重視・デザイン志向の日本市場と親和性が高く、ギフト需要も見込める。",
+    sales_points: [
+      "日本未発売のため先行独占の余地が大きい",
+      "クラウドファンディング実績があり話題性を訴求しやすい",
+      "デザイン性が日本の感性に合致",
+    ],
+    concerns: [
+      "技適・PSE 等の国内規制対応の要確認",
+      "価格帯がやや高く、初動の販促設計が重要",
+      "既存の日本代理店の有無を要確認",
+    ],
+    recommended_approach:
+      "まず英語での初回コンタクトで日本市場のポテンシャルとローカライズ支援を提示。独占販売権と Makuake 等での立ち上げをセットで提案するのが有効。",
+  };
+}
+
 export type Maker = {
   id: number;
   name: string;

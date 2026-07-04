@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import CompanyIntelligence from "@/components/CompanyIntelligence";
 import Header from "@/components/Header";
 import SalesActivityTimeline from "@/components/SalesActivityTimeline";
 import SalesMakerPanel from "@/components/SalesMakerPanel";
@@ -286,6 +287,14 @@ export default function MakerDetailPage() {
               next_action: maker.next_action ?? "",
               notes: maker.notes ?? "",
             }}
+          />
+        </div>
+
+        {/* Company Intelligence（メーカーAI分析・モック） */}
+        <div className="mt-6">
+          <CompanyIntelligence
+            makerId={maker.id}
+            seed={{ company_name: maker.name }}
           />
         </div>
 
