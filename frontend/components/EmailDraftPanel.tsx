@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 
 import { gmailToKey } from "@/components/ContactDiscoveryPanel";
 import {
-  createProviderDraft,
   EMAIL_TONE_LABELS,
   EMAIL_TONE_ORDER,
   EMAIL_TYPE_LABELS,
@@ -12,15 +11,13 @@ import {
   fetchCompanyResearch,
   fetchContactDiscovery,
   fetchEmailDrafts,
-  fetchEmailProvider,
   formatDateTime,
   generateEmailDrafts,
+  openGmailCompose,
   selectEmailSubject,
   type EmailDraft,
-  type EmailProviderInfo,
   type EmailTone,
   type EmailType,
-  type ProviderDraftResult,
 } from "@/lib/api";
 
 // 個別化ポイントの表示（送信前に「なぜ個別化されているか」を確認できる）
@@ -81,20 +78,22 @@ function PersonalizationBox({ draft }: { draft: EmailDraft }) {
 function DraftCard({
   draft,
   to,
-  providerLabel,
   onCreated,
   noEmailChannel = false,
 }: {
   draft: EmailDraft;
   to: string;
-  providerLabel: string;
   onCreated: () => void;
   noEmailChannel?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ProviderDraftResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 宛先未登録メッセージ
+  const [noAddress, setNoAddress] = useState(false);
+  // ポップアップがブロックされたときに手動クリック用リンクを表示する
+  const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
+  // 作成画面を開いた旨のフィードバック
+  const [opened, setOpened] = useState(false);
 
   // 件名候補（無い古い下書きは subject 単体にフォールバック）
   const options =
@@ -132,26 +131,35 @@ function DraftCard({
     }
   }
 
-  async function makeDraft() {
-    if (busy) return; // 二重クリック防止
-    setBusy(true);
-    setResult(null);
+  // Gmail の作成画面を新規タブで開く（送信はしない）。
+  // API 連携ではなく compose URL を直接開くことで確実に Gmail に遷移させる。
+  function openInGmail() {
     setError(null);
-    try {
-      // 選択中の件名を確実に反映してから下書き作成
-      await selectEmailSubject(draft.id, subject);
-      const r = await createProviderDraft(draft.id, to || undefined);
-      setResult(r);
-      onCreated();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+    setBlockedUrl(null);
+    setOpened(false);
+    setNoAddress(false);
+
+    const recipient = to.trim();
+    if (!recipient) {
+      // 宛先メールが未登録
+      setNoAddress(true);
+      return;
+    }
+
+    const { opened: didOpen, url } = openGmailCompose({
+      to: recipient,
+      subject,
+      body: draft.body,
+    });
+    if (didOpen) {
+      setOpened(true);
+    } else {
+      // ポップアップがブロックされた → 手動クリック用リンクを表示
+      setBlockedUrl(url);
     }
   }
 
-  const isGmail = result?.provider === "gmail";
-  // メールアドレスが無い（推奨チャネルがメール以外）かつ手入力も無ければ Gmail 下書き不可
+  // メールアドレスが無い（推奨チャネルがメール以外）かつ手入力も無ければ Gmail 作成不可
   const gmailDisabled = noEmailChannel && !to.trim();
 
   return (
@@ -169,16 +177,16 @@ function DraftCard({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={makeDraft}
-            disabled={busy || gmailDisabled}
+            onClick={openInGmail}
+            disabled={gmailDisabled}
             title={
               gmailDisabled
                 ? "Gmail下書きにはメールアドレスが必要です"
-                : undefined
+                : "Gmailの作成画面を新規タブで開きます（送信はしません）"
             }
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            className="rounded border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
           >
-            {busy ? "作成中…" : `${providerLabel}に下書き作成`}
+            Gmailで下書きを開く
           </button>
           <button
             onClick={copy}
@@ -244,45 +252,51 @@ function DraftCard({
         </div>
       )}
 
-      {result && (
-        <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-800">
-          <p className="font-semibold">
-            {isGmail
-              ? "Gmailの下書きを作成しました。"
-              : "モック下書きを作成しました。Gmailには保存されず、この画面上で確認できます。"}
+      {/* 宛先メール未登録 */}
+      {noAddress && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-semibold">メールアドレスが未登録です</p>
+          <p className="mt-1">
+            上の「宛先」欄にメールアドレスを入力するか、連絡先候補を選択してから
+            もう一度お試しください。
           </p>
-          <p className="mt-1 text-green-700">宛先: {result.to}</p>
-          <p className="text-green-700">件名: {subject}</p>
-          {isGmail && result.web_link && (
-            <a
-              href={result.web_link}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 inline-block font-medium text-blue-700 hover:underline"
-            >
-              Gmailで開く ↗
-            </a>
-          )}
-          {!isGmail && (
-            <button
-              onClick={copy}
-              className="mt-2 rounded border border-green-300 bg-white px-2 py-1 font-medium text-green-700 hover:bg-green-100"
-            >
-              {copied ? "コピーしました" : "Subject / Body をコピー"}
-            </button>
-          )}
         </div>
       )}
+
+      {/* 作成画面を開いた（正常） */}
+      {opened && (
+        <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-xs text-green-800">
+          <p className="font-semibold">
+            Gmailの作成画面を新規タブで開きました（送信はされていません）。
+          </p>
+          <p className="mt-1 text-green-700">
+            宛先: {to.trim()} ／ 件名: {subject}
+          </p>
+        </div>
+      )}
+
+      {/* ポップアップがブロックされた → 手動クリック用リンク */}
+      {blockedUrl && (
+        <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+          <p className="font-semibold">
+            ポップアップがブロックされました。下のリンクから手動で開いてください。
+          </p>
+          <a
+            href={blockedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-block font-medium text-blue-700 hover:underline"
+          >
+            Gmailで下書きを開く ↗
+          </a>
+        </div>
+      )}
+
       {error && (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
           <p className="font-semibold">処理に失敗しました。</p>
           <p className="mt-1 break-all">{error}</p>
         </div>
-      )}
-      {draft.provider_draft_id && !result && !error && (
-        <p className="mt-2 text-xs text-slate-400">
-          {draft.provider} 下書き作成済み（id: {draft.provider_draft_id}）
-        </p>
       )}
 
       <p className="mt-2 text-right text-xs text-slate-400">
@@ -304,7 +318,6 @@ export default function EmailDraftPanel({
   const [drafts, setDrafts] = useState<EmailDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [provider, setProvider] = useState<EmailProviderInfo | null>(null);
   const [to, setTo] = useState("");
   const [tone, setTone] = useState<EmailTone>("professional");
   // 企業リサーチが反映可能か（completed が存在するか）
@@ -330,9 +343,6 @@ export default function EmailDraftPanel({
 
   useEffect(() => {
     reload();
-    fetchEmailProvider()
-      .then(setProvider)
-      .catch(() => setProvider(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -410,8 +420,6 @@ export default function EmailDraftPanel({
     if (!latestByType[d.email_type]) latestByType[d.email_type] = d;
   }
   const hasAny = drafts.length > 0;
-  const providerLabel =
-    provider?.provider === "gmail" ? "Gmail" : "メール（モック）";
 
   return (
     <div className="mt-8">
@@ -453,8 +461,8 @@ export default function EmailDraftPanel({
 
       <p className="mt-1 text-xs text-slate-400">
         ※ 自動送信はしません。トーンを選び「下書きを生成」すると、件名3案・本文・
-        日本語要約を作成します。「{providerLabel}に下書き作成」で下書きを作り、送信は
-        {provider?.provider === "gmail" ? "Gmail 上で" : "メールサービス上で"}最終確認のうえ行ってください。
+        日本語要約を作成します。「Gmailで下書きを開く」で Gmail の作成画面が新規タブで開くので、
+        内容を確認のうえ Gmail 上で送信してください。
       </p>
 
       <div className="mt-2 flex items-end gap-2">
@@ -470,11 +478,9 @@ export default function EmailDraftPanel({
             }}
           />
         </label>
-        {provider && (
-          <span className="pb-1 text-xs text-slate-400">
-            下書き先: {providerLabel}
-          </span>
-        )}
+        <span className="pb-1 text-xs text-slate-400">
+          下書き先: Gmail
+        </span>
       </div>
       {primaryEmail && (
         <p className="mt-1 text-xs text-slate-500">
@@ -542,7 +548,6 @@ export default function EmailDraftPanel({
                 key={`${t}-${d.id}`}
                 draft={d}
                 to={to}
-                providerLabel={providerLabel}
                 onCreated={reload}
                 noEmailChannel={noEmailChannel}
               />

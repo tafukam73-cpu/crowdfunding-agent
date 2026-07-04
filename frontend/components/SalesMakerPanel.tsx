@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   buildMockSalesEmail,
   emptySalesMakerProfile,
+  openGmailCompose,
   SALES_MAKER_STATUS_COLORS,
   SALES_MAKER_STATUS_LABELS,
   SALES_MAKER_STATUS_ORDER,
@@ -74,6 +75,10 @@ export default function SalesMakerPanel({
     null
   );
   const [copied, setCopied] = useState(false);
+  // Gmail 作成画面を開いた／宛先未登録／ポップアップブロック時の状態
+  const [gmailOpened, setGmailOpened] = useState(false);
+  const [gmailNoAddress, setGmailNoAddress] = useState(false);
+  const [gmailBlockedUrl, setGmailBlockedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = loadProfile(makerId);
@@ -106,10 +111,39 @@ export default function SalesMakerPanel({
 
   function onGenerateEmail() {
     setCopied(false);
+    setGmailOpened(false);
+    setGmailNoAddress(false);
+    setGmailBlockedUrl(null);
     setEmail(buildMockSalesEmail(form));
     // メール案を作ったらステータスを「メール作成済み」へ進める（未送信段階まで）。
     if (form.status === "not_started" || form.status === "researching") {
       set("status", "email_drafted");
+    }
+  }
+
+  // Gmail の作成画面を新規タブで開く（送信はしない）。
+  function onOpenGmail() {
+    if (!email) return;
+    setGmailOpened(false);
+    setGmailNoAddress(false);
+    setGmailBlockedUrl(null);
+
+    const recipient = form.email.trim();
+    if (!recipient) {
+      setGmailNoAddress(true);
+      return;
+    }
+
+    const { opened, url } = openGmailCompose({
+      to: recipient,
+      subject: email.subject,
+      body: email.body,
+    });
+    if (opened) {
+      setGmailOpened(true);
+    } else {
+      // ポップアップがブロックされた → 手動クリック用リンクを表示
+      setGmailBlockedUrl(url);
     }
   }
 
@@ -284,7 +318,14 @@ export default function SalesMakerPanel({
               className="input mt-0.5 min-h-[220px] w-full whitespace-pre-wrap font-mono text-xs"
             />
           </div>
-          <div className="mt-2 flex items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              onClick={onOpenGmail}
+              title="Gmailの作成画面を新規タブで開きます（送信はしません）"
+              className="rounded border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+            >
+              Gmailで下書きを開く
+            </button>
             <button
               onClick={onCopyEmail}
               className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
@@ -293,6 +334,40 @@ export default function SalesMakerPanel({
             </button>
             {copied && <span className="text-xs text-green-700">コピーしました</span>}
           </div>
+
+          {/* 宛先メール未登録 */}
+          {gmailNoAddress && (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+              <p className="font-semibold">メールアドレスが未登録です</p>
+              <p className="mt-0.5">
+                上の「メールアドレス」欄に宛先を入力してから、もう一度お試しください。
+              </p>
+            </div>
+          )}
+
+          {/* 作成画面を開いた（正常） */}
+          {gmailOpened && (
+            <p className="mt-2 rounded-md border border-green-200 bg-green-50 p-2 text-xs text-green-800">
+              Gmailの作成画面を新規タブで開きました（送信はされていません）。
+            </p>
+          )}
+
+          {/* ポップアップがブロックされた → 手動クリック用リンク */}
+          {gmailBlockedUrl && (
+            <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-800">
+              <p className="font-semibold">
+                ポップアップがブロックされました。下のリンクから手動で開いてください。
+              </p>
+              <a
+                href={gmailBlockedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-0.5 inline-block font-medium text-blue-700 hover:underline"
+              >
+                Gmailで下書きを開く ↗
+              </a>
+            </div>
+          )}
         </div>
       )}
     </section>

@@ -816,6 +816,36 @@ export async function fetchEmailProvider(): Promise<EmailProviderInfo> {
   return res.json();
 }
 
+// Gmail の「作成（compose）」画面を開く URL を生成する。
+// view=cm&fs=1 で新規メール作成画面（送信ではない）を開く。
+// to / su(件名) / body は必ず encodeURIComponent する。
+export function buildGmailComposeUrl(params: {
+  to?: string;
+  subject?: string;
+  body?: string;
+}): string {
+  const parts = ["view=cm", "fs=1"];
+  if (params.to) parts.push(`to=${encodeURIComponent(params.to)}`);
+  if (params.subject) parts.push(`su=${encodeURIComponent(params.subject)}`);
+  if (params.body) parts.push(`body=${encodeURIComponent(params.body)}`);
+  return `https://mail.google.com/mail/?${parts.join("&")}`;
+}
+
+// Gmail 作成画面を新規タブで開く。ポップアップブロックで開けなかった場合は false を返す。
+export function openGmailCompose(params: {
+  to?: string;
+  subject?: string;
+  body?: string;
+}): { opened: boolean; url: string } {
+  const url = buildGmailComposeUrl(params);
+  // noopener,noreferrer で開き元ページを保護する。
+  const win =
+    typeof window !== "undefined"
+      ? window.open(url, "_blank", "noopener,noreferrer")
+      : null;
+  return { opened: Boolean(win), url };
+}
+
 // ===== AI 企業リサーチ =====
 export type ResearchStatus = "pending" | "completed" | "failed";
 
