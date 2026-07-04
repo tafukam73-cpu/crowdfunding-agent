@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import Header from "@/components/Header";
+import SalesMakerPanel from "@/components/SalesMakerPanel";
 import {
   ACTIVITY_KIND_LABELS,
   addActivity,
@@ -270,6 +271,21 @@ export default function MakerDetailPage() {
               </span>
             )}
           </div>
+        </div>
+
+        {/* 営業メーカー管理（拡張フィールド + AI営業メール生成） */}
+        <div className="mt-6">
+          <SalesMakerPanel
+            makerId={maker.id}
+            seed={{
+              company_name: maker.name,
+              official_url: maker.website_url ?? "",
+              contact_name: maker.contacts[0]?.name ?? "",
+              email: maker.contacts[0]?.email ?? "",
+              next_action: maker.next_action ?? "",
+              notes: maker.notes ?? "",
+            }}
+          />
         </div>
 
         {/* 担当者 */}

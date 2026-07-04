@@ -2050,6 +2050,137 @@ export const ACTIVITY_KIND_LABELS: Record<ActivityKind, string> = {
   other: "その他",
 };
 
+// ===== 営業メーカー管理（拡張フィールド・フロント保持） =====
+// 既存 Maker / Contact に無い項目（商品名・CF URL・代表者名・LinkedIn 等）も
+// 含め、営業対象メーカーを 1 枚のカードで管理するための型・ラベル。
+// 現状はフロント（localStorage）保持。将来バックエンド項目化する余地を残す。
+
+// 8 段階の営業ステータス（依頼仕様）。
+export type SalesMakerStatus =
+  | "not_started"
+  | "researching"
+  | "email_drafted"
+  | "sent"
+  | "replied"
+  | "meeting"
+  | "negotiating"
+  | "declined";
+
+export const SALES_MAKER_STATUS_LABELS: Record<SalesMakerStatus, string> = {
+  not_started: "未着手",
+  researching: "調査中",
+  email_drafted: "メール作成済み",
+  sent: "送信済み",
+  replied: "返信あり",
+  meeting: "商談中",
+  negotiating: "契約交渉中",
+  declined: "見送り",
+};
+
+export const SALES_MAKER_STATUS_ORDER: SalesMakerStatus[] = [
+  "not_started",
+  "researching",
+  "email_drafted",
+  "sent",
+  "replied",
+  "meeting",
+  "negotiating",
+  "declined",
+];
+
+export const SALES_MAKER_STATUS_COLORS: Record<SalesMakerStatus, string> = {
+  not_started: "bg-slate-100 text-slate-600",
+  researching: "bg-sky-100 text-sky-700",
+  email_drafted: "bg-indigo-100 text-indigo-700",
+  sent: "bg-amber-100 text-amber-700",
+  replied: "bg-teal-100 text-teal-700",
+  meeting: "bg-violet-100 text-violet-700",
+  negotiating: "bg-fuchsia-100 text-fuchsia-700",
+  declined: "bg-red-100 text-red-700",
+};
+
+// 営業メーカー管理カードで扱う全項目（フロント保持）。
+export type SalesMakerProfile = {
+  company_name: string;
+  product_name: string;
+  official_url: string;
+  crowdfunding_url: string;
+  representative_name: string;
+  contact_name: string;
+  email: string;
+  linkedin_url: string;
+  status: SalesMakerStatus;
+  next_action: string;
+  notes: string;
+};
+
+// 空のプロフィール（フォーム初期値）。
+export function emptySalesMakerProfile(): SalesMakerProfile {
+  return {
+    company_name: "",
+    product_name: "",
+    official_url: "",
+    crowdfunding_url: "",
+    representative_name: "",
+    contact_name: "",
+    email: "",
+    linkedin_url: "",
+    status: "not_started",
+    next_action: "",
+    notes: "",
+  };
+}
+
+// モックの AI 営業メール生成（API 未接続時のフォールバック文面）。
+// メーカー情報から日本語の初回営業メール案（件名・本文）を組み立てる。
+export function buildMockSalesEmail(p: SalesMakerProfile): {
+  subject: string;
+  body: string;
+} {
+  const company = p.company_name.trim() || "貴社";
+  const product = p.product_name.trim();
+  const greetingName = p.contact_name.trim() || p.representative_name.trim();
+  const greeting = greetingName
+    ? `${greetingName} 様`
+    : `${company} ご担当者様`;
+  const productLine = product
+    ? `貴社の「${product}」を拝見し、その独自性と完成度に大きな可能性を感じております。`
+    : "貴社のプロダクトを拝見し、日本市場での大きな可能性を感じております。";
+  const refs = [
+    p.crowdfunding_url.trim() && `・クラウドファンディング: ${p.crowdfunding_url.trim()}`,
+    p.official_url.trim() && `・公式サイト: ${p.official_url.trim()}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const subject = product
+    ? `【日本市場でのお取り扱いのご相談】${product}について`
+    : `【日本市場でのお取り扱いのご相談】${company} 御中`;
+
+  const body = [
+    `${greeting}`,
+    "",
+    "突然のご連絡失礼いたします。",
+    "日本にてクラウドファンディング商品の輸入・販売支援を行っております、株式会社〇〇の営業担当でございます。",
+    "",
+    productLine,
+    "つきましては、日本国内での独占的なお取り扱い・販売パートナーシップについて、ぜひ一度ご相談させていただけないでしょうか。",
+    refs ? "\n拝見した情報：\n" + refs : "",
+    "",
+    "・日本語でのマーケティング / カスタマーサポート",
+    "・国内クラウドファンディング（Makuake 等）での立ち上げ支援",
+    "・国内小売 / EC への販路展開",
+    "",
+    "上記のようなご支援が可能です。ご興味をお持ちいただけましたら、オンラインにて詳細をご説明させていただきます。",
+    "",
+    "ご検討のほど、よろしくお願い申し上げます。",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+
+  return { subject, body };
+}
+
 export type Maker = {
   id: number;
   name: string;
