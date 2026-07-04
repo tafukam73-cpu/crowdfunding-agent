@@ -19,6 +19,12 @@ export default function Header() {
               商品発掘
             </Link>
             <Link
+              href="/discovery-dashboard"
+              className="text-slate-600 hover:text-slate-900"
+            >
+              商品ランキング
+            </Link>
+            <Link
               href="/japanese-success"
               className="text-slate-600 hover:text-slate-900"
             >

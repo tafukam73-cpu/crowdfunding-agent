@@ -2514,3 +2514,81 @@ export async function startDiscoveryContactIntelligence(
   }
   return res.json();
 }
+
+// ===== Japan Opportunity Engine（日本市場機会 分析）v1-2〜v1-4 =====
+
+// 分析の全スコア軸（backend schemas.japan_opportunity._AnalysisScores に対応）。
+// すべて 0〜100（高いほど日本展開/営業に有利）。未評価は null。
+export type JapanOpportunityAnalysis = {
+  id: number;
+  discovered_product_id: number;
+  japan_market_fit_score: number | null;
+  japan_entry_gap_score: number | null;
+  crowdfunding_fit_score: number | null;
+  retail_fit_score: number | null;
+  regulatory_safety_score: number | null;
+  logistics_score: number | null;
+  margin_potential_score: number | null;
+  competition_gap_score: number | null;
+  sales_success_score: number | null;
+  overall_opportunity_score: number | null;
+  confidence_score: number | null;
+  // 根拠テキスト
+  japan_presence_summary: string | null;
+  competition_summary: string | null;
+  regulatory_summary: string | null;
+  logistics_summary: string | null;
+  pricing_summary: string | null;
+  opportunity_reasoning: string | null;
+  recommended_strategy: string | null;
+  recommended_next_action: string | null;
+  // 根拠明細（dict / list を許容）
+  evidence_json: unknown | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// GET /japan-opportunity/products/{product_id}/latest
+// 発掘商品の最新分析を返す。未分析なら 204 → null。
+export async function fetchLatestJapanOpportunity(
+  productId: number
+): Promise<JapanOpportunityAnalysis | null> {
+  const res = await apiFetch(
+    `/japan-opportunity/products/${productId}/latest`
+  );
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// POST /japan-opportunity/analyze/{discovered_product_id}
+// ルールベースで評価し、分析を作成して返す（実 AI・実検索なし）。
+export async function analyzeJapanOpportunityRules(
+  productId: number
+): Promise<JapanOpportunityAnalysis> {
+  const res = await fetch(
+    `${API_BASE}/japan-opportunity/analyze/${productId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// POST /japan-opportunity/analyze-ai/{discovered_product_id}
+// AI 評価（未接続時はルールベースへフォールバック）で分析を作成して返す。
+export async function analyzeJapanOpportunityAi(
+  productId: number
+): Promise<JapanOpportunityAnalysis> {
+  const res = await fetch(
+    `${API_BASE}/japan-opportunity/analyze-ai/${productId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
