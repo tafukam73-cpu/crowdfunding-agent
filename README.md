@@ -155,9 +155,40 @@ docker compose up --build
 - `http://localhost:3000` の一覧でフィルタ・並び替え・ページングが動く
 - 案件詳細でステータスボタンを押すと `PATCH /projects/{id}/status` が走り表示が更新される
 
+## データベース バックアップ / 復元
+
+`crowdfunding` DB（PostgreSQL）を `pg_dump` で保存・復元するスクリプトを用意しています。
+バックアップは `backups/*.sql`（`.gitignore` 済み・コミットされない）に出力されます。
+
+```bash
+# バックアップ（backups/crowdfunding_YYYYmmdd_HHMMSS.sql と latest.sql を作成）
+./scripts/backup-db.sh
+./scripts/backup-db.sh before-migration   # ラベル付きも可
+
+# 復元（既定は backups/latest.sql から。復元前に現在DBを自動バックアップします）
+./scripts/restore-db.sh                        # latest.sql から復元
+./scripts/restore-db.sh backups/xxx.sql        # ファイル指定
+./scripts/restore-db.sh backups/xxx.sql --yes  # 確認プロンプトを省略
+```
+
+- スクリプトは db サービス（`cfagent-db`）が起動している前提で動きます。
+- 出力は plain SQL（`--clean --if-exists`）で、`restore-db.sh` はそのまま流し込んで復元します。
+- `restore-db.sh` は破壊的操作の前に **現在DBを `backups/pre_restore_*.sql` へ必ず退避** します。
+- 定期的に（特に作業前・マイグレーション前に）`./scripts/backup-db.sh` を実行してください。
+
+## ⚠️ 開発時の注意（DB を消さないために）
+
+過去に開発中の操作で DB データ（メーカー・発掘商品・分析結果）を喪失した事例があります。
+以下を厳守してください。
+
+- **`docker compose down -v` は実行しない** … `-v` は `db_data` ボリュームごと削除し、DB が全消去されます。コンテナを止めるだけなら `docker compose down`（`-v` なし）を使う。
+- **`docker volume prune` は実行しない** … 使われていない判定のボリュームを一括削除し、旧DBを巻き込む恐れがあります。
+- **DB をリセット/作り直す前は必ず `./scripts/backup-db.sh`** … いかなる破壊的操作の前にも pg_dump を取る。
+- `db_data` ボリュームは手動削除しない。
+
 ## 停止
 
 ```bash
-docker compose down        # コンテナ停止
-docker compose down -v     # DB データも削除
+docker compose down        # コンテナ停止（DB データは保持される・推奨）
+# docker compose down -v   # ← 使用禁止：DB データ(db_data)ごと削除されます
 ```

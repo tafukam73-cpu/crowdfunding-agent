@@ -1,0 +1,3 @@
+# シェルスクリプトは常に LF で保存する（Windows の CRLF だと
+# コンテナ内 sh/bash が shebang を解釈できず実行に失敗するため）。
+*.sh text eol=lf
