@@ -2181,6 +2181,136 @@ export function buildMockSalesEmail(p: SalesMakerProfile): {
   return { subject, body };
 }
 
+// ===== 営業活動タイムライン（メーカー単位・フロント保持） =====
+// 「いつ・何をしたか・次に何をするか」を時系列で管理するための型・ラベル・モック。
+// 現状は画面ローカル state（DB 未保存）。
+
+// 活動タイプ（依頼仕様の 8 種）。
+export type SalesActivityType =
+  | "research"
+  | "email_draft"
+  | "email_sent"
+  | "replied"
+  | "followup"
+  | "meeting"
+  | "negotiation"
+  | "note";
+
+export const SALES_ACTIVITY_TYPE_LABELS: Record<SalesActivityType, string> = {
+  research: "調査",
+  email_draft: "メール作成",
+  email_sent: "メール送信",
+  replied: "返信あり",
+  followup: "フォローアップ",
+  meeting: "商談",
+  negotiation: "契約交渉",
+  note: "メモ",
+};
+
+export const SALES_ACTIVITY_TYPE_ORDER: SalesActivityType[] = [
+  "research",
+  "email_draft",
+  "email_sent",
+  "replied",
+  "followup",
+  "meeting",
+  "negotiation",
+  "note",
+];
+
+export const SALES_ACTIVITY_TYPE_COLORS: Record<SalesActivityType, string> = {
+  research: "bg-sky-100 text-sky-700",
+  email_draft: "bg-indigo-100 text-indigo-700",
+  email_sent: "bg-amber-100 text-amber-700",
+  replied: "bg-teal-100 text-teal-700",
+  followup: "bg-orange-100 text-orange-700",
+  meeting: "bg-violet-100 text-violet-700",
+  negotiation: "bg-fuchsia-100 text-fuchsia-700",
+  note: "bg-slate-100 text-slate-600",
+};
+
+// 活動タイプ → 営業ステータスの目安（新規追加時の自動設定に使う）。
+export const SALES_ACTIVITY_STATUS_HINT: Record<
+  SalesActivityType,
+  SalesMakerStatus | null
+> = {
+  research: "researching",
+  email_draft: "email_drafted",
+  email_sent: "sent",
+  replied: "replied",
+  followup: "sent",
+  meeting: "meeting",
+  negotiation: "negotiating",
+  note: null,
+};
+
+// 1 件の営業活動（タイムライン項目）。
+export type SalesActivity = {
+  id: string;
+  date: string; // 表示用の日付（YYYY/MM/DD）
+  type: SalesActivityType;
+  title: string;
+  content: string;
+  assignee: string | null; // 担当者
+  next_action: string | null; // 次回アクション
+  status: SalesMakerStatus | null; // その時点の営業ステータス
+};
+
+// Date を YYYY/MM/DD 表記へ（タイムラインの日付表示に使う）。
+export function formatDateYmd(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}/${m}/${day}`;
+}
+
+// 初期表示用のモック営業活動（依頼の例に対応）。
+export function mockSalesActivities(): SalesActivity[] {
+  return [
+    {
+      id: "mock-1",
+      date: "2026/07/04",
+      type: "research",
+      title: "公式サイトとクラファンページを確認",
+      content:
+        "公式サイトとクラウドファンディングページを確認し、商品概要・価格帯・実績を把握。",
+      assignee: "自分",
+      next_action: "AIで初回営業メールを作成する",
+      status: "researching",
+    },
+    {
+      id: "mock-2",
+      date: "2026/07/04",
+      type: "email_draft",
+      title: "AIで初回営業メールを作成",
+      content: "AI営業メール生成を利用し、初回営業メールの案を作成。",
+      assignee: "自分",
+      next_action: "担当者へ初回メールを送信する",
+      status: "email_drafted",
+    },
+    {
+      id: "mock-3",
+      date: "2026/07/05",
+      type: "email_sent",
+      title: "担当者へ初回メール送信",
+      content: "先方の担当者宛に初回営業メールを送信。開封状況を追う。",
+      assignee: "自分",
+      next_action: "3営業日返信が無ければフォローアップ",
+      status: "sent",
+    },
+    {
+      id: "mock-4",
+      date: "2026/07/08",
+      type: "followup",
+      title: "返信がないため再送予定",
+      content: "初回メールに返信が無いため、フォローアップメールの再送を予定。",
+      assignee: "自分",
+      next_action: "フォローアップメールを送付",
+      status: "sent",
+    },
+  ];
+}
+
 export type Maker = {
   id: number;
   name: string;

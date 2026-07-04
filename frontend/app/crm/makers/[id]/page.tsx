@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import Header from "@/components/Header";
+import SalesActivityTimeline from "@/components/SalesActivityTimeline";
 import SalesMakerPanel from "@/components/SalesMakerPanel";
 import {
   ACTIVITY_KIND_LABELS,
@@ -286,6 +287,11 @@ export default function MakerDetailPage() {
               notes: maker.notes ?? "",
             }}
           />
+        </div>
+
+        {/* 営業活動タイムライン（時系列 + 追加フォーム・ローカルstate） */}
+        <div className="mt-6">
+          <SalesActivityTimeline makerId={maker.id} />
         </div>
 
         {/* 担当者 */}
