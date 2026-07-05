@@ -82,7 +82,7 @@ export default function ProjectDetail() {
   async function onLinkMaker() {
     setLinking(true);
     try {
-      const maker = await createMakerFromProject(id);
+      const { maker } = await createMakerFromProject(id);
       window.location.href = `/crm/makers/${maker.id}`;
     } catch (e) {
       setError(String(e));

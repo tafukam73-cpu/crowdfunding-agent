@@ -1730,7 +1730,7 @@ def apply_to_crm(
     メーカー未登録なら案件から作成する。
     Returns: (maker_id, contact_id | None)
     """
-    maker = crm_service.create_from_project(db, project)
+    maker, _created = crm_service.create_from_project(db, project)
 
     # メールが無くても連絡手段を営業履歴として記録（要件 9）
     note = _crm_note(row)

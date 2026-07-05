@@ -151,7 +151,7 @@ def apply_to_crm(
     メーカー未登録なら案件から作成。同名（または同メール）の担当者があれば更新で
     情報を補完する。Returns: (maker_id, contact_id)
     """
-    maker = crm_service.create_from_project(db, project)
+    maker, _created = crm_service.create_from_project(db, project)
 
     existing = None
     if person.email:

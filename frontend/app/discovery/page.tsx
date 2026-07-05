@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import CrmRegisterButton from "@/components/CrmRegisterButton";
 import Header from "@/components/Header";
 import {
   createDiscoveredProduct,
@@ -517,6 +518,8 @@ function ProductCard({
             : "Contact Intelligence 開始"}
         </button>
         {!hasUrl && <span className="text-xs text-amber-600">URL未設定</span>}
+        {/* Discovery → CRM ワンクリック登録 */}
+        <CrmRegisterButton source="discovered_product" id={product.id} />
       </div>
     </div>
   );

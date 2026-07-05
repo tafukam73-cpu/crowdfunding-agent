@@ -2490,12 +2490,37 @@ export async function createMaker(data: Partial<Maker>): Promise<Maker> {
   return res.json();
 }
 
-export async function createMakerFromProject(projectId: number): Promise<Maker> {
+// メーカー作成の結果。created=false は「既存メーカーを再利用した（すでにCRM登録済み）」。
+export type MakerRegisterResult = {
+  maker: Maker;
+  created: boolean;
+};
+
+// 海外案件（Project）からメーカーを作成し CRM に登録する（二重登録防止・冪等）。
+// 新規作成時は 201、既存メーカー再利用時は 200 が返る。
+export async function createMakerFromProject(
+  projectId: number
+): Promise<MakerRegisterResult> {
   const res = await fetch(`${API_BASE}/crm/makers/from-project/${projectId}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+  const maker = (await res.json()) as Maker;
+  return { maker, created: res.status === 201 };
+}
+
+// 発掘商品（DiscoveredProduct）からメーカーを作成し CRM に登録する（二重登録防止）。
+// 新規作成時は 201、既存メーカー再利用時は 200 が返る。
+export async function createMakerFromDiscoveredProduct(
+  productId: number
+): Promise<MakerRegisterResult> {
+  const res = await fetch(
+    `${API_BASE}/crm/makers/from-discovered-product/${productId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const maker = (await res.json()) as Maker;
+  return { maker, created: res.status === 201 };
 }
 
 export async function updateMaker(

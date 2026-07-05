@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.crm import Contact, CrmStatus, Maker, SalesActivity
 from app.models.project import Project
+
+if TYPE_CHECKING:
+    from app.models.discovered_product import DiscoveredProduct
 from app.schemas.crm import (
     ActivityCreate,
     ContactCreate,
@@ -101,18 +105,57 @@ def get_project_ids(db: Session, maker_id: int) -> list[int]:
     )
 
 
-def create_from_project(db: Session, project: Project) -> Maker:
+def find_existing_maker(
+    db: Session, *, website_url: str | None, name: str | None
+) -> Maker | None:
+    """既存メーカーを website_url / 会社名で照合する（二重登録防止）。
+
+    website_url の完全一致を優先し、無ければ会社名（前後空白無視・大文字小文字無視）で照合する。
+    """
+    url = (website_url or "").strip()
+    if url:
+        found = db.scalars(
+            select(Maker).where(Maker.website_url == url).limit(1)
+        ).first()
+        if found is not None:
+            return found
+
+    label = (name or "").strip()
+    if label:
+        found = db.scalars(
+            select(Maker).where(func.lower(Maker.name) == label.lower()).limit(1)
+        ).first()
+        if found is not None:
+            return found
+
+    return None
+
+
+def create_from_project(db: Session, project: Project) -> tuple[Maker, bool]:
     """案件のメーカー情報からメーカーを作成し、案件をリンクする。
 
-    既に同案件がリンク済みならそのメーカーを返す（冪等）。
+    冪等かつ二重登録防止：
+    - 既に案件がメーカーにリンク済みならそのメーカーを返す
+    - website_url / 会社名が一致する既存メーカーがあれば再利用してリンクする
+    - いずれも無ければ新規作成する
+
+    戻り値は (maker, created)。created=True のときのみ新規作成された。
     """
     if project.maker_id:
         existing = db.get(Maker, project.maker_id)
         if existing is not None:
-            return existing
+            return existing, False
+
+    name = project.maker_name or project.title[:255]
+    existing = find_existing_maker(db, website_url=project.maker_url, name=name)
+    if existing is not None:
+        if project.maker_id != existing.id:
+            project.maker_id = existing.id
+            db.commit()
+        return existing, False
 
     maker = Maker(
-        name=project.maker_name or project.title[:255],
+        name=name,
         website_url=project.maker_url,
         status=CrmStatus.lead.value,
         notes=project.contact_info,
@@ -123,7 +166,47 @@ def create_from_project(db: Session, project: Project) -> Maker:
 
     project.maker_id = maker.id
     db.commit()
-    return maker
+    return maker, True
+
+
+def create_from_discovered_product(
+    db: Session, product: "DiscoveredProduct"
+) -> tuple[Maker, bool]:
+    """発掘商品（DiscoveredProduct）のメーカー情報からメーカーを作成する。
+
+    二重登録防止：website_url（official_website_url→source_url）/ 会社名で既存を照合し、
+    見つかればそれを返す。戻り値は (maker, created)。
+    """
+    name = (
+        product.creator_name
+        or product.product_name
+        or product.project_title
+        or "(名称未設定)"
+    )[:255]
+    website_url = product.official_website_url or product.source_url
+
+    existing = find_existing_maker(db, website_url=website_url, name=name)
+    if existing is not None:
+        return existing, False
+
+    note_parts = []
+    if product.source_url:
+        note_parts.append(f"発掘元: {product.source_url}")
+    if product.product_name:
+        note_parts.append(f"商品名: {product.product_name}")
+    notes = "\n".join(note_parts) or None
+
+    maker = Maker(
+        name=name,
+        website_url=website_url,
+        country=product.country,
+        status=CrmStatus.lead.value,
+        notes=notes,
+    )
+    db.add(maker)
+    db.commit()
+    db.refresh(maker)
+    return maker, True
 
 
 # --- 担当者 ---

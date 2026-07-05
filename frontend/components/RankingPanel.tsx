@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import CrmRegisterButton from "@/components/CrmRegisterButton";
 import SourceBadge from "@/components/SourceBadge";
 import {
   EXECUTIVE_CHANNEL_LABELS,
@@ -117,6 +118,8 @@ function RankCard({ item }: { item: RankingItem }) {
         >
           営業開始 →
         </Link>
+        {/* 案件 → CRM ワンクリック登録 */}
+        <CrmRegisterButton source="project" id={item.project_id} />
       </div>
     </div>
   );

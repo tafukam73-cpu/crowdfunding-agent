@@ -171,7 +171,7 @@ export default function SalesModeGuide({
   async function linkMaker() {
     setLinking(true);
     try {
-      const maker = await createMakerFromProject(projectId);
+      const { maker } = await createMakerFromProject(projectId);
       window.location.href = `/crm/makers/${maker.id}`;
     } catch (e) {
       setStatusMsg(`CRM登録に失敗：${String(e)}`);

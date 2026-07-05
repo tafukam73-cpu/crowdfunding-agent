@@ -201,7 +201,7 @@ def update_sales_status(
         return project
 
     # CRM 反映：メーカーが無ければ案件情報から作成・リンク
-    maker = crm_service.create_from_project(db, project)
+    maker, _created = crm_service.create_from_project(db, project)
 
     kind = (
         ActivityKind.email

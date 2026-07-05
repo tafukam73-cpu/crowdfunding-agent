@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import CostPanel from "@/components/CostPanel";
+import CrmRegisterButton from "@/components/CrmRegisterButton";
 import Header from "@/components/Header";
 import RankingPanel from "@/components/RankingPanel";
 import RecBadge from "@/components/RecBadge";
@@ -304,6 +305,7 @@ export default function Home() {
                 <th className="px-4 py-2">支援者</th>
                 <th className="px-4 py-2">ステータス</th>
                 <th className="px-4 py-2">取得日時</th>
+                <th className="px-4 py-2">CRM</th>
               </tr>
             </thead>
             <tbody>
@@ -367,12 +369,19 @@ export default function Home() {
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {formatDateTime(p.updated_at)}
                     </td>
+                    <td className="px-4 py-3">
+                      <CrmRegisterButton
+                        source="project"
+                        id={p.id}
+                        initialMakerId={p.maker_id}
+                      />
+                    </td>
                   </tr>
                 );
               })}
               {!loading && data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
                     該当する案件がありません
                   </td>
                 </tr>
