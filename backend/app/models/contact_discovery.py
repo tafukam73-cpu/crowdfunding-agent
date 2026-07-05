@@ -286,3 +286,41 @@ class ContactDiscovery(Base):
         from app.services.contact_discovery_service import build_sales_contacts
 
         return build_sales_contacts(self)
+
+    # --- 手動検索導線（DB 非保存）。メールが見つからない時の「次の一手」を返す ---
+    @property
+    def fallback_search_queries(self) -> list[dict]:
+        """公式サイト検索 / Google / LinkedIn / site: など、人が続きを探せる導線。
+
+        既知のキーワード候補（web_keyword_candidates）・公式サイト・doc_reader 由来の
+        会社名から組み立てる。営業に使えるメールが 1 件も無いときに UI が表示する。
+        """
+        from app.services.email_validation import build_fallback_search_queries
+
+        kw = self.web_keyword_candidates or {}
+        brands = self.doc_reader_brand_names or kw.get("brand_names") or []
+        company = (
+            self.doc_reader_official_company_name
+            or kw.get("maker_name")
+            or (brands[0] if brands else None)
+        )
+        product = kw.get("project_title") or kw.get("short_title")
+        official_domain = kw.get("official_domain")
+        if not official_domain:
+            site = (
+                self.official_site_url
+                or self.doc_reader_official_site_url
+                or self.search_agent_official_site_url
+            )
+            if site:
+                from urllib.parse import urlparse
+
+                try:
+                    official_domain = urlparse(site).netloc or None
+                except ValueError:
+                    official_domain = None
+        return build_fallback_search_queries(
+            company_name=company,
+            product_name=product,
+            official_domain=official_domain,
+        )

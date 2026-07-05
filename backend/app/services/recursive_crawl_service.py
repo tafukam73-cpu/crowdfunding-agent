@@ -347,6 +347,11 @@ def _make_fetcher():
         status = getattr(client, "last_status", None)
         if status is not None:
             statuses.append(status)
+        # 404/410/5xx のページからはメールを拾わない（要件: 404 URL 由来を採用しない）。
+        # Playwright はステータスを見ず本文を返すため、ここで非 200 系の本文を破棄する。
+        if status is not None and status >= 400:
+            logger.info("recursive_crawl skip non-200 %s: status=%s", url, status)
+            return None
         return html
 
     fetch._client = client  # type: ignore[attr-defined]

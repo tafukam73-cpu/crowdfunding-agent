@@ -23,6 +23,7 @@ from app.services import (
     crm_service,
     usage_service,
 )
+from app.services.email_validation import is_valid_business_email
 
 logger = logging.getLogger("contact_hunter")
 
@@ -153,11 +154,14 @@ def apply_to_crm(
     """
     maker, _created = crm_service.create_from_project(db, project)
 
+    # ダミー / no-reply / 形式不正のメールは CRM に登録しない（要件 9・F）。
+    email = person.email if is_valid_business_email(person.email) else None
+
     existing = None
-    if person.email:
+    if email:
         existing = db.scalar(
             select(Contact).where(
-                Contact.maker_id == maker.id, Contact.email == person.email
+                Contact.maker_id == maker.id, Contact.email == email
             )
         )
     if existing is None and person.name:
@@ -171,7 +175,7 @@ def apply_to_crm(
         existing.role = existing.role or person.title
         existing.department = existing.department or person.department
         existing.linkedin_url = existing.linkedin_url or person.linkedin_url
-        existing.email = existing.email or person.email
+        existing.email = existing.email or email
         contact_id = existing.id
     else:
         contact = Contact(
@@ -180,7 +184,7 @@ def apply_to_crm(
             role=person.title,
             department=person.department,
             linkedin_url=person.linkedin_url,
-            email=person.email,
+            email=email,
             notes=f"Contact Hunter で発見（出典: {person.source_url or '不明'}）",
         )
         db.add(contact)

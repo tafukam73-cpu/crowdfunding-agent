@@ -27,6 +27,11 @@ from app.services.contact_discovery_service import (  # noqa: E402
     score_email,
     source_site_email_domain,
 )
+from app.services.email_validation import (  # noqa: E402
+    build_fallback_search_queries,
+    business_email_reason,
+    is_valid_business_email,
+)
 
 _passed = 0
 _failed = 0
@@ -183,6 +188,78 @@ def test_extract_excludes_platform() -> None:
     check("info@maker.com 採用", "info@maker.com" in emails)
 
 
+def test_business_email_validation() -> None:
+    print("test_business_email_validation")
+    # ダミー / プレースホルダーは無効
+    for a in ("example@example.com", "maker@example.com", "test@example.com",
+              "info@example.org", "hello@example.net", "a@test.com",
+              "x@dummy.com", "y@sample.com", "z@domain.com", "user@yourdomain.com"):
+        check(f"{a} は無効", is_valid_business_email(a) is False)
+        check(f"{a} は除外される", email_exclusion_reason(a) is not None)
+
+    # ローカル部がダミートークン（別ドメインでも無効）
+    for a in ("example@brand.com", "dummy@brand.com", "sample@brand.com",
+              "test@brand.com", "test.user@brand.com"):
+        check(f"{a} は無効(ローカル)", is_valid_business_email(a) is False)
+        check(f"{a} は除外される", email_exclusion_reason(a) is not None)
+
+    # no-reply 系は無効
+    for a in ("noreply@brand.com", "no-reply@brand.com", "donotreply@brand.com",
+              "notifications@brand.com"):
+        check(f"{a} は無効(noreply)", is_valid_business_email(a) is False)
+
+    # 形式不正は無効
+    for a in ("plainaddress", "a@@b.com", "a@b", "@b.com", "a@.com"):
+        check(f"{a!r} は形式不正", is_valid_business_email(a) is False)
+
+    # --- 正常な business email は有効（残す） ---
+    for a in ("sales@vitesy.com", "partnership@brand.co", "hello@example-brand.com",
+              "contact@my-company.io", "info@maker.com", "latest.news@brand.com",
+              "contest@brand.com"):
+        check(f"{a} は有効", is_valid_business_email(a) is True)
+        check(f"{a} は除外されない", email_exclusion_reason(a) is None)
+
+    # business_email_reason の理由が機械可読
+    check("example.com の理由は dummy_domain",
+          business_email_reason("a@example.com") == "dummy_domain:example")
+    check("dummy@ の理由は dummy_local",
+          business_email_reason("dummy@brand.com") == "dummy_local:dummy")
+
+
+def test_extract_filters_dummy() -> None:
+    print("test_extract_filters_dummy")
+    html = """
+    <p>Reach us at example@example.com or maker@example.com</p>
+    <a href="mailto:test@example.com">test</a>
+    <a href="mailto:hello@vitesy.com">real</a>
+    <span>partnership@brand.com dummy@brand.com sample@brand.com</span>
+    """
+    emails = [e.lower() for e in extract_emails(html)]
+    check("example@example.com 除外", "example@example.com" not in emails)
+    check("maker@example.com 除外", "maker@example.com" not in emails)
+    check("test@example.com 除外", "test@example.com" not in emails)
+    check("dummy@brand.com 除外", "dummy@brand.com" not in emails)
+    check("sample@brand.com 除外", "sample@brand.com" not in emails)
+    check("hello@vitesy.com 採用", "hello@vitesy.com" in emails)
+    check("partnership@brand.com 採用", "partnership@brand.com" in emails)
+
+
+def test_fallback_queries() -> None:
+    print("test_fallback_queries")
+    qs = build_fallback_search_queries(
+        company_name="Vitesy", product_name="Natede",
+        official_domain="vitesy.com",
+    )
+    check("fallback は複数返る", len(qs) >= 4)
+    types = {q["type"] for q in qs}
+    check("公式サイト検索を含む", "official_site" in types)
+    check("LinkedIn 検索を含む", "linkedin" in types)
+    check("site: 検索を含む", "site_search" in types)
+    check("全項目に url がある", all(q.get("url") for q in qs))
+    # 会社名も商品もドメインも無ければ空
+    check("情報無しなら空", build_fallback_search_queries() == [])
+
+
 def main() -> int:
     test_exclusion_reasons()
     test_extract_emails_filters()
@@ -191,6 +268,9 @@ def main() -> int:
     test_email_owner()
     test_official_domain_score()
     test_extract_excludes_platform()
+    test_business_email_validation()
+    test_extract_filters_dummy()
+    test_fallback_queries()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

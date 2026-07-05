@@ -8,6 +8,9 @@ import {
   applyDiscoveryToCrm,
   type ContactDiscovery,
   type ContactPerson,
+  EMAIL_CONFIDENCE_COLORS,
+  EMAIL_CONFIDENCE_LABELS,
+  type FallbackSearchQuery,
   fetchContactDiscovery,
   fetchContactPeople,
   fetchOutreachMessage,
@@ -26,6 +29,52 @@ import {
   getLatestContactIntelligenceJob,
   cancelContactIntelligenceJob,
 } from "@/lib/api";
+
+// 信頼度バッジ（高信頼 / 要確認 / 未検証 …）。
+function ConfidenceBadge({ level }: { level: string | null }) {
+  if (!level) return null;
+  const label = EMAIL_CONFIDENCE_LABELS[level] ?? level;
+  const cls = EMAIL_CONFIDENCE_COLORS[level] ?? "bg-slate-100 text-slate-500";
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+// メール未発見時の「次の一手」（公式サイト/Google/LinkedIn/site: 検索導線）。
+function FallbackSearchSection({
+  queries,
+}: {
+  queries: FallbackSearchQuery[] | undefined;
+}) {
+  if (!queries || queries.length === 0) return null;
+  return (
+    <div className="rounded-md border border-sky-200 bg-sky-50/70 p-4">
+      <p className="text-sm font-bold text-sky-900">
+        🔎 メールが未発見のときの次の一手
+      </p>
+      <p className="mt-0.5 text-xs text-sky-700">
+        自動探索でメールが見つからなかったため、以下の検索で営業先の連絡先を手動確認してください（推測メールは候補にしていません）。
+      </p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {queries.map((q) => (
+          <li key={q.url}>
+            <a
+              href={q.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded border border-sky-300 bg-white px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100"
+              title={q.query}
+            >
+              {q.label} ↗
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 // 営業推奨度の星表示（★★★★★〜★☆☆☆☆）。
 function stars(n: number): string {
@@ -1267,6 +1316,7 @@ function SalesRankingSection({
           >
             {top.email}
           </a>
+          <ConfidenceBadge level={top.confidence} />
           <CopyButton text={top.email} label="コピー" />
         </div>
         <p className="mt-1 text-xs text-slate-600">理由：{top.reason}</p>
@@ -1302,6 +1352,7 @@ function SalesRankingSection({
                 {stars(c.stars)}
               </span>
               <span className="text-slate-800">{c.email}</span>
+              <ConfidenceBadge level={c.confidence} />
               <span className="text-xs text-slate-500">— {c.reason}</span>
               <CopyButton text={c.email} />
               <button
@@ -3286,6 +3337,16 @@ export default function ContactDiscoveryPanel({
           />
         </div>
       )}
+      {/* メールが 1 件も見つからない場合は「見つかりませんでした」で終わらせず、
+          手動検索の次の一手（公式サイト/Google/LinkedIn/site:）を提示する。 */}
+      {data &&
+        (!data.sales_contacts || data.sales_contacts.length === 0) &&
+        data.fallback_search_queries &&
+        data.fallback_search_queries.length > 0 && (
+          <div className="mt-4">
+            <FallbackSearchSection queries={data.fallback_search_queries} />
+          </div>
+        )}
       {data && (
         <div className="mt-3">
           <UnifiedResultSummary data={data} searchKeyword={searchKeyword} />

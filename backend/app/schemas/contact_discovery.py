@@ -47,6 +47,18 @@ class SalesContact(BaseModel):
     score: int = 0
     email_owner: str | None = None
     sources: list[str] = []
+    # 取得元による信頼度（high / medium / low / unverified / invalid）
+    confidence: str | None = None
+    confidence_label: str | None = None
+
+
+class FallbackSearchQuery(BaseModel):
+    """メールが見つからない時の手動検索導線（公式サイト/Google/LinkedIn/site:）。"""
+
+    label: str
+    type: str
+    query: str
+    url: str
 
 
 class ApproachOption(BaseModel):
@@ -216,6 +228,8 @@ class ContactDiscoveryOut(BaseModel):
 
     # 🏆 営業推奨連絡先ランキング（発見メールを営業のしやすさ順に格付け）
     sales_contacts: list[SalesContact] = []
+    # 営業に使えるメールが無いときの「次の一手」（手動検索導線）
+    fallback_search_queries: list[FallbackSearchQuery] = []
 
     confidence_score: int | None = None
     # Contact Intelligence
@@ -347,6 +361,20 @@ class ContactDiscoveryOut(BaseModel):
     @classmethod
     def _no_platform_site_queries(cls, v: list[str] | None) -> list[str] | None:
         return _drop_platform_queries(v)
+
+    @field_validator(
+        "primary_email",
+        "ai_primary_email",
+        "web_primary_email",
+    )
+    @classmethod
+    def _no_dummy_primary_email(cls, v: str | None) -> str | None:
+        """古い行に example@ 等のダミーが残っていても UI には出さない（無効扱い）。"""
+        from app.services.email_validation import is_valid_business_email
+
+        if v and not is_valid_business_email(v):
+            return None
+        return v
 
     model_config = ConfigDict(from_attributes=True)
 

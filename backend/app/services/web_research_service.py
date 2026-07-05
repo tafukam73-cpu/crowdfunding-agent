@@ -1633,9 +1633,18 @@ def _make_fetcher():
                 url, getattr(client, "last_status", None), exc,
             )
             return None
+        # 404/410/5xx 等のページからはメールを拾わない（要件: 404 URL 由来を採用しない）。
+        # httpx は raise_for_status で弾くが、Playwright はステータスを見ず本文を返すため、
+        # ここで last_status を確認して非 200 系の本文は破棄する。
+        status = getattr(client, "last_status", None)
+        if status is not None and status >= 400:
+            logger.info(
+                "web_research skip non-200 %s: status=%s (本文を採用しない)", url, status
+            )
+            return None
         logger.info(
             "web_research loaded %s: status=%s content-type=%s chars=%d",
-            url, getattr(client, "last_status", None),
+            url, status,
             getattr(client, "last_content_type", None), len(html or ""),
         )
         return html

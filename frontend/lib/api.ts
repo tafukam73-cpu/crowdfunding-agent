@@ -1056,6 +1056,34 @@ export type SalesContact = {
   score: number;
   email_owner: string | null;
   sources: string[];
+  // 取得元による信頼度（high / medium / low / unverified / invalid）
+  confidence: string | null;
+  confidence_label: string | null;
+};
+
+// メールが見つからない時の手動検索導線（公式サイト/Google/LinkedIn/site:）。
+export type FallbackSearchQuery = {
+  label: string;
+  type: string;
+  query: string;
+  url: string;
+};
+
+// 信頼度レベル → 表示ラベル・バッジ色（UI 共通）。
+export const EMAIL_CONFIDENCE_LABELS: Record<string, string> = {
+  high: "高信頼",
+  medium: "要確認",
+  low: "低信頼",
+  unverified: "未検証",
+  invalid: "無効",
+};
+
+export const EMAIL_CONFIDENCE_COLORS: Record<string, string> = {
+  high: "bg-emerald-100 text-emerald-700",
+  medium: "bg-amber-100 text-amber-700",
+  low: "bg-orange-100 text-orange-700",
+  unverified: "bg-slate-100 text-slate-500",
+  invalid: "bg-red-100 text-red-700",
 };
 
 export type ContactDiscovery = {
@@ -1064,6 +1092,8 @@ export type ContactDiscovery = {
   maker_id: number | null;
   status: DiscoveryStatus;
   sales_contacts: SalesContact[];
+  // 営業に使えるメールが無いときの手動検索導線
+  fallback_search_queries: FallbackSearchQuery[];
   primary_email: string | null;
   primary_contact_form_url: string | null;
   official_site_url: string | null;

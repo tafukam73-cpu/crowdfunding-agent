@@ -29,6 +29,11 @@ from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
 from app.models.crm import ActivityKind, Contact, SalesActivity
 from app.models.project import Project
 from app.services import crm_service, usage_service
+from app.services.email_validation import (
+    business_email_reason,
+    email_confidence,
+    is_valid_business_email,
+)
 
 logger = logging.getLogger("contact_discovery")
 
@@ -222,6 +227,15 @@ def email_exclusion_reason(
     for d in EXCLUDED_EMAIL_DOMAINS:
         if _domain_matches(domain, d):
             return f"excluded_domain:{d}"
+
+    # ダミー / プレースホルダー / 形式不正（example / test / dummy / sample など）。
+    # 共通バリデーション（email_validation）に委譲して一元管理する。no-reply は既存の
+    # auto_reply_local_part 分岐で扱うため、ここでは dummy / format 系のみ採用する。
+    shared_reason = business_email_reason(addr)
+    if shared_reason and shared_reason.startswith(
+        ("dummy_domain", "dummy_local", "format", "asset_file")
+    ):
+        return shared_reason
 
     # 自動送信アドレス（no-reply 系）
     if any(local.startswith(p) for p in _AUTO_REPLY_PREFIXES):
@@ -440,6 +454,11 @@ def build_sales_contacts(row: "ContactDiscovery") -> list[dict]:
     ranked: list[dict] = []
     for rec in best.values():
         rk = rank_sales_email(rec["email"], email_owner=rec.get("email_owner"))
+        conf = email_confidence(
+            email=rec["email"],
+            email_owner=rec.get("email_owner"),
+            sources=rec.get("sources") or [],
+        )
         ranked.append({
             "email": rec["email"],
             "stars": rk["stars"],
@@ -448,6 +467,9 @@ def build_sales_contacts(row: "ContactDiscovery") -> list[dict]:
             "score": rec["score"],
             "email_owner": rec.get("email_owner"),
             "sources": rec.get("sources") or [],
+            # 信頼度（取得元による格付け。UI で「高信頼 / 要確認 / 未検証」表示）
+            "confidence": conf["level"],
+            "confidence_label": conf["label"],
         })
     ranked.sort(key=lambda c: (c["stars"], c["score"], -len(c["email"])), reverse=True)
     return ranked
@@ -1730,6 +1752,11 @@ def apply_to_crm(
     メーカー未登録なら案件から作成する。
     Returns: (maker_id, contact_id | None)
     """
+    # ダミー / no-reply / 形式不正のメールは CRM に登録しない（要件 9・F）。
+    if email and not is_valid_business_email(email):
+        logger.info("apply_to_crm: 無効なメールを無視 %s", email)
+        email = None
+
     maker, _created = crm_service.create_from_project(db, project)
 
     # メールが無くても連絡手段を営業履歴として記録（要件 9）
