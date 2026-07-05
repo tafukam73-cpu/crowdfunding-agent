@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.company_research import ResearchStatus
+from app.services.url_validation import filter_business_urls, is_valid_business_url
 
 
 class CompanyResearchOut(BaseModel):
@@ -32,5 +33,16 @@ class CompanyResearchOut(BaseModel):
     raw_notes: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    # --- ダミー URL サニタイズ（古い行に example URL が残っていても表示しない） ---
+    @field_validator("official_site_url", "project_url")
+    @classmethod
+    def _no_dummy_url(cls, v: str | None) -> str | None:
+        return v if (v and is_valid_business_url(v)) else None
+
+    @field_validator("sources")
+    @classmethod
+    def _clean_sources(cls, v: list[str] | None) -> list[str] | None:
+        return filter_business_urls(v) or None
 
     model_config = ConfigDict(from_attributes=True)

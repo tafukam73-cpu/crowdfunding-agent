@@ -846,6 +846,58 @@ export function openGmailCompose(params: {
   return { opened: Boolean(win), url };
 }
 
+// ===== URL バリデーション（参照元URL・公式サイトのダミー除外） =====
+// example.com / dummy / sample / test / localhost / 127.0.0.1 / githubusercontent
+// や kickstarter.com/projects/example/... などのダミー/プレースホルダーを弾く。
+// バックエンドの url_validation.is_valid_business_url と対になる（表示前の最終防波堤）。
+const DUMMY_URL_HOST_LABELS = new Set([
+  "example", "dummy", "sample", "samples", "test", "tests", "testing",
+  "placeholder", "localhost", "invalid", "yourdomain", "mydomain",
+  "yourcompany", "mycompany", "domain", "acme", "foo", "bar", "baz",
+  "githubusercontent",
+]);
+const DUMMY_URL_HOSTS = new Set(["127.0.0.1", "0.0.0.0", "::1", "localhost"]);
+const DUMMY_URL_PATH_TOKENS = [
+  "/projects/example", "/project/example", "/example/", "/user/example",
+  "/creator/example", "/dummy/", "/sample/", "/test/",
+];
+
+export function isValidBusinessUrl(url: string | null | undefined): boolean {
+  const raw = (url ?? "").trim();
+  if (!raw) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  if (!host || DUMMY_URL_HOSTS.has(host)) return false;
+  if (host.includes("githubusercontent")) return false;
+  for (const label of host.split(".")) {
+    if (DUMMY_URL_HOST_LABELS.has(label)) return false;
+  }
+  const path = parsed.pathname.toLowerCase();
+  if (DUMMY_URL_PATH_TOKENS.some((t) => path.includes(t))) return false;
+  return true;
+}
+
+// 有効なビジネス URL のみを残す（順序維持・重複排除）。
+export function filterBusinessUrls(
+  urls: (string | null | undefined)[] | null | undefined
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const u of urls ?? []) {
+    const s = (u ?? "").trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    if (isValidBusinessUrl(s)) out.push(s);
+  }
+  return out;
+}
+
 // ===== AI 企業リサーチ =====
 export type ResearchStatus = "pending" | "completed" | "failed";
 

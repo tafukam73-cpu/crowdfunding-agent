@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 
 import {
   fetchCompanyResearch,
+  filterBusinessUrls,
   formatDateTime,
+  isValidBusinessUrl,
   runCompanyResearch,
   type CompanyResearch,
 } from "@/lib/api";
@@ -112,6 +114,21 @@ export default function CompanyResearchPanel({
 
       {completed && research && (
         <div className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-5">
+          {/* 公式サイト：ダミー URL は表示せず「公式サイト未確認」を出す（要件 4） */}
+          <Field label="公式サイト">
+            {isValidBusinessUrl(research.official_site_url) ? (
+              <a
+                href={research.official_site_url as string}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-blue-700 hover:underline"
+              >
+                {research.official_site_url}
+              </a>
+            ) : (
+              <span className="text-amber-600">公式サイト未確認</span>
+            )}
+          </Field>
           <Field label="会社・ブランド要約">
             {research.brand_summary ?? "—"}
           </Field>
@@ -145,11 +162,13 @@ export default function CompanyResearchPanel({
             <List items={research.risks_or_cautions} />
           </Field>
           <Field label="参照元 URL">
-            {research.sources && research.sources.length > 0 ? (
-              <ul className="list-disc space-y-0.5 pl-4">
-                {research.sources.map((s, i) => (
-                  <li key={i}>
-                    {s.startsWith("http") ? (
+            {(() => {
+              // ダミー/プレースホルダー URL（example.com 等）は表示しない（要件 1・7）
+              const validSources = filterBusinessUrls(research.sources);
+              return validSources.length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {validSources.map((s, i) => (
+                    <li key={i}>
                       <a
                         href={s}
                         target="_blank"
@@ -158,15 +177,13 @@ export default function CompanyResearchPanel({
                       >
                         {s}
                       </a>
-                    ) : (
-                      <span className="text-slate-500">{s}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <span className="text-slate-400">—</span>
-            )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="text-slate-400">公式サイト未確認</span>
+              );
+            })()}
           </Field>
 
           <p className="text-right text-xs text-slate-400">

@@ -15,24 +15,72 @@ from app.ai.company_researcher import CompanyResearcher, get_company_researcher
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.project import Project
 from app.services import usage_service
+from app.services.url_validation import (
+    filter_business_urls,
+    first_valid_url,
+    is_valid_business_url,
+    verify_url_ok,
+)
 
 logger = logging.getLogger("company_research")
 
 
+def _resolve_official_site_url(
+    db: Session, project: Project, result_url: str | None
+) -> str | None:
+    """公式サイト URL を優先順（project.website → 連絡先探索 → research結果）で解決する。
+
+    ダミー/プレースホルダー URL は採用しない。いずれも無効なら None を返し、
+    UI は「公式サイト未確認」を表示する。
+    """
+    contact_site: str | None = None
+    try:
+        from app.services import contact_discovery_service as cds
+
+        row = cds.get_latest(db, project.id)
+        if row is not None:
+            contact_site = row.official_site_url
+    except Exception as exc:  # noqa: BLE001  連絡先探索が無くても続行
+        logger.info("official site lookup skipped (project=%s): %s", project.id, exc)
+
+    return first_valid_url(project.maker_url, contact_site, result_url)
+
+
+def _clean_sources(urls: list[str] | None, *, verify: bool) -> list[str] | None:
+    """参照元 URL からダミーを除外し、任意で 200 OK のみに絞る（要件 1・5・7）。"""
+    urls = filter_business_urls(urls)
+    if verify:
+        urls = [u for u in urls if verify_url_ok(u)]
+    return urls or None
+
+
 def run_research(
-    db: Session, project: Project, researcher: CompanyResearcher | None = None
+    db: Session,
+    project: Project,
+    researcher: CompanyResearcher | None = None,
+    *,
+    verify_urls: bool = True,
 ) -> CompanyResearch:
     """企業リサーチを実行して保存する（実行のたびに履歴を追加）。
 
     成功時は research_status=completed、失敗時は failed で保存する。いずれも
     例外は外へ送出せず、保存した CompanyResearch を返す。
+
+    参照元 URL・公式サイト URL は必ず URL バリデーションを通し、example.com 等の
+    ダミー/プレースホルダーは保存しない（AI が生成した場合もここで除外）。
+    verify_urls=True のときは 200 OK（2xx/3xx）で到達できる URL のみ残す。
     """
     researcher = researcher or get_company_researcher()
+    # 初期値もダミーを弾いて保存（pending 表示でも example URL を出さない）
     row = CompanyResearch(
         project_id=project.id,
         maker_name=project.maker_name,
-        official_site_url=project.maker_url,
-        project_url=project.source_url,
+        official_site_url=project.maker_url
+        if is_valid_business_url(project.maker_url)
+        else None,
+        project_url=project.source_url
+        if is_valid_business_url(project.source_url)
+        else None,
         research_status=ResearchStatus.pending.value,
         model=researcher.name,
     )
@@ -42,8 +90,12 @@ def run_research(
         result = researcher.research(project)
         row.research_status = ResearchStatus.completed.value
         row.maker_name = result.maker_name or project.maker_name
-        row.official_site_url = result.official_site_url or project.maker_url
-        row.project_url = result.project_url or project.source_url
+        # 公式サイトは優先順で解決し、ダミーは採用しない（無ければ None＝未確認）
+        row.official_site_url = _resolve_official_site_url(
+            db, project, result.official_site_url
+        )
+        # 案件 URL は実 campaign_url を使い、ダミー/プレースホルダーは採用しない
+        row.project_url = first_valid_url(result.project_url, project.source_url)
         row.brand_summary = result.brand_summary
         row.company_mission = result.company_mission
         row.product_summary = result.product_summary
@@ -54,7 +106,8 @@ def run_research(
         row.personalized_compliment = result.personalized_compliment
         row.outreach_angles = result.outreach_angles or None
         row.risks_or_cautions = result.risks_or_cautions or None
-        row.sources = result.sources or None
+        # 参照元 URL はダミー除外＋（可能なら）200 OK のみに絞る
+        row.sources = _clean_sources(result.sources, verify=verify_urls)
         row.model = result.model or researcher.name
         row.raw_notes = result.raw_notes or None
 
