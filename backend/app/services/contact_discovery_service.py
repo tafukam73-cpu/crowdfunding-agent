@@ -103,6 +103,64 @@ EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 MAILTO_RE = re.compile(r"""mailto:([^"'>?\s]+)""", re.IGNORECASE)
 HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 
+# ---- 難読化メールのデコード（改善: 実発見率向上） ----
+# サイトはスパム避けにメールを難読化する。実サイト調査で最多だったのは Cloudflare の
+# Email Protection（data-cfemail の 16 進 XOR）で、次いで [at]/(at)/＠/[dot] などの
+# テキスト難読化。これらを復号して素の user@domain へ戻し、通常の抽出に載せる。
+_CF_ATTR_RE = re.compile(r'data-cfemail="([0-9a-fA-F]{8,})"')
+_CF_HREF_RE = re.compile(r'/cdn-cgi/l/email-protection#([0-9a-fA-F]{8,})')
+
+# テキスト難読化：local (at) domain (dot) tld。誤検出を避けるため最終的に EMAIL_RE で
+# 妥当性を検証し、除外フィルタも通す。
+_OBF_AT = (
+    r"(?:\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\}|＠|&#0*64;|&commat;)\s*"
+    r"|\s+at\s+)"
+)
+_OBF_DOT = (
+    r"(?:\s*(?:\[\s*dot\s*\]|\(\s*dot\s*\)|\{\s*dot\s*\}|&#0*46;)\s*"
+    r"|\s+dot\s+)"
+)
+_OBF_EMAIL_RE = re.compile(
+    r"([A-Za-z0-9._%+\-]+)"
+    + _OBF_AT
+    + r"([A-Za-z0-9.\-]+(?:" + _OBF_DOT + r"[A-Za-z0-9.\-]+)*"
+    + r"(?:" + _OBF_DOT + r"|\.)[A-Za-z]{2,})",
+    re.IGNORECASE,
+)
+_OBF_AT_SUB = re.compile(_OBF_AT, re.IGNORECASE)
+_OBF_DOT_SUB = re.compile(_OBF_DOT, re.IGNORECASE)
+
+
+def _cf_decode(hexstr: str) -> str:
+    """Cloudflare Email Protection の 16 進文字列を復号する（先頭バイトが XOR 鍵）。"""
+    try:
+        key = int(hexstr[:2], 16)
+        raw = bytes(int(hexstr[i:i + 2], 16) ^ key for i in range(2, len(hexstr), 2))
+        s = raw.decode("utf-8", "ignore")
+        return s if "@" in s else ""
+    except Exception:  # noqa: BLE001  不正な hex は無視
+        return ""
+
+
+def deobfuscate_emails(html: str) -> list[str]:
+    """HTML から難読化されたメールを復号して素アドレスの一覧で返す（重複排除なし）。
+
+    - Cloudflare Email Protection（data-cfemail / email-protection#hex）
+    - テキスト難読化（support [at] company [dot] com / ＠ / &#64; 等）
+    妥当性は呼び出し側（extract_emails）で EMAIL_RE + 除外フィルタにより最終検証する。
+    """
+    out: list[str] = []
+    text = html or ""
+    for hx in _CF_ATTR_RE.findall(text) + _CF_HREF_RE.findall(text):
+        dec = _cf_decode(hx)
+        if dec:
+            out.append(dec)
+    for local, domain in _OBF_EMAIL_RE.findall(text):
+        cand = local + "@" + _OBF_DOT_SUB.sub(".", domain)
+        cand = re.sub(r"\s+", "", cand)
+        out.append(cand)
+    return out
+
 # 画像やアセットに紛れる「メールっぽい文字列」を除外する拡張子
 _BAD_EMAIL_SUFFIX = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js")
 
@@ -475,6 +533,120 @@ def build_sales_contacts(row: "ContactDiscovery") -> list[dict]:
     return ranked
 
 
+# ---------------- 営業可能チャネルの優先順位付け（要件 9・10） ----------------
+# 「メールが無い＝終了」ではなく、到達可能な営業チャネルを優先順位付けして提示する。
+# priority が小さいほど先に試すべきチャネル（要件 9 の順序）。
+# score は営業のしやすさ（要件 10）。
+_CHANNEL_PRIORITY = {
+    "email": 1,
+    "contact_form": 2,
+    "linkedin_company": 3,
+    "linkedin_person": 4,
+    "instagram": 5,
+    "facebook": 5,
+    "twitter": 6,
+    "youtube": 6,
+    "tiktok": 6,
+    "pinterest": 6,
+    "manual_search": 7,
+}
+
+
+def rank_sales_channels(
+    *,
+    emails: list[dict] | None = None,
+    forms: list[str] | None = None,
+    linkedin_company_url: str | None = None,
+    linkedin_person_url: str | None = None,
+    socials: dict | None = None,
+    search_queries: list[str] | None = None,
+) -> list[dict]:
+    """到達可能な営業チャネルを優先順位（要件 9）とスコア（要件 10）で並べて返す。
+
+    メールが見つからなくても探索を打ち切らず、フォーム→LinkedIn 会社→LinkedIn 担当者
+    →Instagram/Facebook DM→その他 SNS→手動検索 の順に営業チャネルを提示する。
+    各要素は {channel, priority, score, target, reason}。priority 昇順・score 降順。
+    """
+    emails = emails or []
+    forms = forms or []
+    socials = socials or {}
+    out: list[dict] = []
+
+    # 1. 有効な営業向けメール（confidence_source / sales_stars でスコア調整）
+    for e in emails:
+        addr = e.get("email") if isinstance(e, dict) else None
+        if not addr:
+            continue
+        src = (e.get("confidence_source") or e.get("tier") or "").lower()
+        # 要件 10：公式 Contact/Footer/About は高、Privacy/Terms は低〜中
+        if "contact" in src:
+            score = 100
+        elif "about" in src or "footer" in src:
+            score = 88
+        elif "legal" in src or "privacy" in src or "terms" in src:
+            score = 55
+        else:
+            score = 70
+        # 営業向けローカル部（sales/partnership 等）を加点、非営業（採用/法務）を減点。
+        # 取得元（source）のスコアを主軸に保つため加点は控えめ（±8 まで）。
+        rk = rank_sales_email(addr, email_owner=e.get("email_owner"))
+        score = max(20, min(100, score + (rk["stars"] - 3) * 4))
+        out.append({
+            "channel": "email", "priority": _CHANNEL_PRIORITY["email"],
+            "score": score, "target": addr,
+            "reason": f"営業向けメール（{rk['reason']}）",
+        })
+
+    # 2. 公式問い合わせフォーム
+    for f in forms:
+        out.append({
+            "channel": "contact_form", "priority": _CHANNEL_PRIORITY["contact_form"],
+            "score": 82, "target": f, "reason": "公式問い合わせフォーム",
+        })
+
+    # 3. LinkedIn 会社ページ
+    if linkedin_company_url:
+        out.append({
+            "channel": "linkedin_company",
+            "priority": _CHANNEL_PRIORITY["linkedin_company"],
+            "score": 68, "target": linkedin_company_url,
+            "reason": "LinkedIn 会社ページ（メッセージ/求人窓口）",
+        })
+    # 4. LinkedIn 担当者
+    if linkedin_person_url:
+        out.append({
+            "channel": "linkedin_person",
+            "priority": _CHANNEL_PRIORITY["linkedin_person"],
+            "score": 72, "target": linkedin_person_url,
+            "reason": "LinkedIn 担当者（直接コンタクト可能）",
+        })
+
+    # 5〜6. SNS DM（Instagram/Facebook は DM 到達性が高い＝中、その他は低〜中）
+    _sns_score = {
+        "instagram": 58, "facebook": 55, "twitter": 45,
+        "youtube": 38, "tiktok": 42, "pinterest": 35,
+    }
+    for plat, url in socials.items():
+        if not url or plat == "linkedin" or plat not in _CHANNEL_PRIORITY:
+            continue
+        out.append({
+            "channel": plat, "priority": _CHANNEL_PRIORITY[plat],
+            "score": _sns_score.get(plat, 35), "target": url,
+            "reason": f"{plat} DM",
+        })
+
+    # 7. 手動検索候補（最後の手段）
+    if not out and search_queries:
+        out.append({
+            "channel": "manual_search", "priority": _CHANNEL_PRIORITY["manual_search"],
+            "score": 15, "target": search_queries[0],
+            "reason": "自動発見なし。検索クエリ候補で手動リサーチ",
+        })
+
+    out.sort(key=lambda c: (c["priority"], -c["score"]))
+    return out
+
+
 SOCIAL_PATTERNS = {
     "instagram": re.compile(r"instagram\.com", re.IGNORECASE),
     "facebook": re.compile(r"facebook\.com", re.IGNORECASE),
@@ -482,6 +654,7 @@ SOCIAL_PATTERNS = {
     "linkedin": re.compile(r"linkedin\.com", re.IGNORECASE),
     "youtube": re.compile(r"(?:youtube\.com|youtu\.be)", re.IGNORECASE),
     "tiktok": re.compile(r"tiktok\.com", re.IGNORECASE),
+    "pinterest": re.compile(r"(?:pinterest\.com|pin\.it)", re.IGNORECASE),
 }
 # 共有/インテント等は本人アカウントではないので除外
 _SOCIAL_EXCLUDE = re.compile(
@@ -537,6 +710,19 @@ def extract_emails(html: str, source_site_domain: str | None = None) -> list[str
         found.append(addr)
     for m in EMAIL_RE.findall(html or ""):
         addr = m.strip().strip(".")
+        key = addr.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if email_exclusion_reason(addr, source_site_domain):
+            continue
+        found.append(addr)
+    # 難読化メール（Cloudflare / [at] 等）を復号し、素メールと同じ検証で採用する。
+    for dec in deobfuscate_emails(html):
+        m = EMAIL_RE.search(dec)
+        if not m:
+            continue
+        addr = m.group(0).strip().strip(".")
         key = addr.lower()
         if key in seen:
             continue
@@ -659,19 +845,53 @@ def _matches_hints(url: str, hints: tuple[str, ...]) -> bool:
     return any(h in path for h in hints)
 
 
+def is_dummy_domain(domain: str | None) -> bool:
+    """domain が example / dummy / test / localhost 等のプレースホルダーか。
+
+    site: 検索を生成しても無意味（要件 8）なため、ここで判定して弾く。
+    ラベル単位で判定するので example-brand.com のような正規ドメインは弾かない。
+    """
+    from app.services.url_validation import is_valid_business_url
+
+    if not domain:
+        return True
+    return not is_valid_business_url(f"https://{domain}")
+
+
 def build_search_queries(maker_name: str | None, official_domain: str | None) -> list[str]:
-    """手動検索用の Google 検索クエリ候補を生成する（API は使わない）。"""
+    """手動検索用の Google 検索クエリ候補を生成する（API は使わない）。
+
+    メールが見つからない時に営業チャネルを広く探すため、会社名/商品名/ドメインを
+    組み合わせて 20 種類以上のクエリを生成する（要件 8）。domain が example/dummy/
+    test の場合は site: 検索を生成しない（無意味な検索を避ける）。
+    """
     queries: list[str] = []
+    seen: set[str] = set()
+
+    def add(q: str) -> None:
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            queries.append(q)
+
     name = (maker_name or "").strip()
     if name:
-        for kw in ("email", "contact", "partnership", "wholesale", "distributor", "press"):
-            queries.append(f'"{name}" {kw}')
-    if official_domain:
-        queries.append(f'"{official_domain}" contact email')
-        queries.append(f"site:{official_domain} email")
-        queries.append(f"site:{official_domain} partnership")
-        queries.append(f"site:{official_domain} wholesale")
-        queries.append(f"site:{official_domain} distributor filetype:pdf")
+        # 連絡先・営業窓口・担当者を広く探す（要件 8：最低 20 種類以上）
+        for kw in (
+            "email", "contact", "founder", "CEO", "partnership", "distributor",
+            "wholesale", "export", "press kit", "media kit", "LinkedIn",
+        ):
+            add(f'"{name}" {kw}')
+        # SNS プロフィール（DM 経由の営業チャネル）
+        for site in ("linkedin.com", "facebook.com", "instagram.com"):
+            add(f'site:{site} "{name}"')
+
+    if official_domain and not is_dummy_domain(official_domain):
+        add(f'"{official_domain}" contact email')
+        for kw in ("email", "contact", "partnership", "wholesale", "distributor"):
+            add(f"site:{official_domain} {kw}")
+        add(f"site:{official_domain} filetype:pdf")
+        add(f"site:{official_domain} distributor filetype:pdf")
     return queries
 
 

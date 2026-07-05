@@ -20,6 +20,7 @@ DMARC) を確認して「メール運用の有無」を把握する。
 """
 from __future__ import annotations
 
+import heapq
 import logging
 import re
 from datetime import datetime, timezone
@@ -34,53 +35,126 @@ from app.services import web_research_service as wrs
 
 logger = logging.getLogger("recursive_crawl")
 
-# --- 安全設計のパラメータ（.env で上書き可能。既定 50 URL / 深さ 2） ---
-DEFAULT_MAX_URLS = 50
+# --- 安全設計のパラメータ（.env で上書き可能。既定 100 URL / 深さ 2） ---
+# Phase 1：発見率を上げるため既定を 50→100 に引き上げ。無限ループは queued 集合の
+# 重複排除・同一ドメイン優先・深さ上限・1URL タイムアウト・レート制限で防ぐ。
+DEFAULT_MAX_URLS = 100
 DEFAULT_MAX_DEPTH = 2
 FETCH_TIMEOUT = 12.0        # 1 URL のタイムアウト（秒）
 RATE_LIMIT_SECONDS = 1.0    # ページ間隔（過度なアクセスを避ける）
-MAX_PDF_PARSE = 6           # 本文解析する PDF の上限
-MAX_SITEMAP_URLS = 40       # sitemap から取り込む優先 URL の上限
+MAX_PDF_PARSE = 8           # 本文解析する PDF の上限（Phase 1：6→8）
+MAX_SITEMAP_URLS = 60       # sitemap から取り込む優先 URL の上限（Phase 1：40→60）
 
-# 優先巡回パス（要件 2）。sitemap.xml / robots.txt は HTML クロールせず別処理。
+# 優先巡回パス（要件 4）。sitemap.xml / robots.txt は HTML クロールせず別処理。
+# Phase 2：メールが載るページへの到達率を上げるため、Contact 系を最優先に並べ替え、
+# Shopify（/policies/contact-information・/pages/*）と WordPress（/imprint 等）の
+# 定番パスを追加する。実際の巡回順は _url_tier による優先度付きキューが決めるため、
+# ここでの並びは同 tier 内の探索順（seq）を決める。
 PRIORITY_PATHS = [
+    # --- Contact（最優先・要件 1/3/4） ---
     "/contact",
     "/contact-us",
+    "/contactus",
+    "/pages/contact",
+    "/pages/contact-us",
+    "/policies/contact-information",  # Shopify（会社の連絡先・住所・メール）
+    # --- Support / Help（次点） ---
+    "/support",
+    "/help",
+    "/customer-service",
+    "/customer-care",
+    "/faq",
+    # --- About / Company（担当者・会社メール） ---
     "/about",
     "/about-us",
+    "/pages/about",
+    "/pages/about-us",
+    "/company",
     "/team",
-    "/press",
-    "/media",
+    "/leadership",
+    "/our-story",
+    "/imprint",  # WordPress/独 EU 系の運営者情報（メール必須掲載が多い）
+    # --- 流通・取引（営業窓口） ---
     "/wholesale",
+    "/pages/wholesale",
     "/distributor",
     "/distributors",
+    "/distribution",
+    "/partner",
     "/partners",
     "/partnership",
+    "/retailer",
+    "/retailers",
+    "/stockists",
+    "/dealers",
+    "/where-to-buy",
     "/affiliate",
-    "/support",
-    "/faq",
+    # --- 広報・その他 ---
+    "/press",
+    "/media",
+    "/newsroom",
+    "/news",
+    "/blog",
     "/privacy",
     "/privacy-policy",
     "/terms",
     "/legal",
     "/careers",
     "/jobs",
-    "/pages/contact",
-    "/pages/about",
 ]
 
-# ページ内リンク再帰で優先するアンカー語（要件 3）。
+# locale 付きページ探索（要件 2）。root のリンクから検出した locale と、代表的な
+# 英語 locale を Contact パスに前置して seed する。誤検出を避けるため既知 locale の
+# みを採用する。
+_LOCALE_SEG_RE = re.compile(r"^/([a-z]{2}(?:-[a-zA-Z]{2})?)(?:/|$)")
+_KNOWN_LOCALES = {
+    "en", "en-us", "en-gb", "en-ca", "en-au", "us", "uk", "gb", "ca", "au",
+    "ja", "ja-jp", "fr", "fr-fr", "de", "de-de", "es", "es-es", "it", "it-it",
+    "nl", "eu", "global", "int", "row", "world",
+}
+# root にリンクが無くても試す最小の locale フォールバック（JS ナビ対策）。
+_LOCALE_FALLBACK = ("en-US", "en-us", "en", "us")
+_LOCALE_CONTACT_PATHS = ("/contact-us", "/contact", "/pages/contact-us", "/pages/contact")
+
+
+def _url_tier(url: str) -> int:
+    """巡回優先度（小さいほど先に巡回）。Contact 0 / Support 1 / About・流通 2 / 汎用 3。
+
+    メールが載る可能性が高いページ（Contact→Support→会社/流通）を先に取り、
+    商品・コレクション・記事などの汎用ページ（tier 3）は後回し・打ち切り対象にする。
+    """
+    low = url.lower()
+    if "contact" in low or "kontakt" in low or "nous-contacter" in low:
+        return 0
+    if any(k in low for k in ("support", "/help", "customer-service",
+                              "customer-care", "/faq", "kundenservice")):
+        return 1
+    if any(k in low for k in (
+        "about", "company", "/team", "leadership", "our-story", "founder",
+        "management", "imprint", "impressum", "wholesale", "distributor",
+        "distribution", "partner", "retailer", "stockist", "dealer", "reseller",
+        "where-to-buy", "press", "/media", "newsroom", "/news", "privacy",
+        "terms", "legal", "policies",
+    )):
+        return 2
+    return 3
+
+# ページ内リンク再帰で優先するアンカー語（要件 4）。
 LINK_PRIORITY_KEYWORDS = (
-    "contact", "about", "team", "press", "media", "wholesale", "distributor",
-    "partner", "privacy", "terms", "legal", "careers", "jobs", "faq", "support",
+    "contact", "about", "company", "team", "leadership", "press", "media",
+    "newsroom", "news", "blog", "wholesale", "distributor", "distribution",
+    "partner", "retailer", "stockist", "where-to-buy", "privacy", "terms",
+    "legal", "imprint", "careers", "jobs", "faq", "support", "help",
     "pdf", "catalog", "brochure", "manual", "pitch", "investor", "press-kit",
-    "media-kit",
+    "media-kit", "linesheet", "lookbook",
 )
 
-# sitemap / PDF で優先する URL 語（要件 4）。
+# sitemap / robots 由来 URL で優先する語（要件 5）。
 SITEMAP_PRIORITY_KEYWORDS = (
-    "contact", "about", "press", "privacy", "terms", ".pdf", "media",
-    "wholesale", "distributor", "team", "support",
+    "contact", "support", "help", "about", "company", "team", "leadership",
+    "press", "media", "newsroom", "news", "privacy", "terms", "legal", ".pdf",
+    "wholesale", "distributor", "distribution", "partner", "retailer",
+    "stockist", "dealer",
 )
 
 # 入ってはいけない / 営業に無関係なパス語（要件 1）。login/cart/checkout/account/admin。
@@ -112,6 +186,26 @@ FAILURE_CODES = (
     "TIMEOUT",
     "RATE_LIMITED",
 )
+
+
+# 無限ページ（?page=2… / /page/2 / 日付アーカイブ / tag・category 一覧）は巡回しない
+# （要件 7：無限ループ防止）。これらは連絡先価値が低い一方で URL を無限生成し、
+# URL 予算とベンチ時間を食い潰してハングの温床になるため、明示的に除外する。
+_PAGINATION_RE = re.compile(
+    r"[?&](?:page|paged|start|offset)=\d+"    # ?page=2 / &offset=40
+    r"|/page/\d+"                              # /page/2
+    r"|/\d{4}/\d{2}(?:/\d{2})?(?:/|$)"         # /2023/05/ 等の日付アーカイブ
+)
+_PAGINATION_PATH_HINTS = (
+    "/archive", "/tag/", "/tags/", "/category/", "/categories/",
+)
+
+
+def _is_infinite_pagination(url: str) -> bool:
+    low = url.lower()
+    if any(h in low for h in _PAGINATION_PATH_HINTS):
+        return True
+    return bool(_PAGINATION_RE.search(low))
 
 
 # ---------------- URL 判定 ----------------
@@ -419,6 +513,7 @@ def recursive_crawl(
         "recursive_failure_reasons": [],
         "recursive_summary": "",
         "recursive_people": [],
+        "recursive_sales_channels": [],
     }
 
     def emit(msg: str, pct: float | None = None) -> None:
@@ -475,9 +570,13 @@ def recursive_crawl(
         pdf_map: dict[str, dict] = {}
         crawled: list[str] = []
         skipped: list[str] = []
-        queue: list[tuple[str, int]] = []
+        # 優先度付きキュー（要件 1〜5）：(tier, seq, url, depth)。tier が小さいほど先に
+        # 巡回する（Contact→Support→About/流通→汎用）。seq は同 tier 内の安定順序。
+        queue: list[tuple[int, int, str, int]] = []
         queued: set[str] = set()
         skip_seen: set[str] = set()
+        seq = [0]
+        seeded_locales: set[str] = set()
 
         def add_skip(u: str, reason: str) -> None:
             if u not in skip_seen:
@@ -485,7 +584,7 @@ def recursive_crawl(
                 skipped.append(u)
                 logger.info("recursive_crawl skip (%s): %s", reason, u)
 
-        def enqueue(u: str, depth: int, *, front: bool = False) -> None:
+        def enqueue(u: str, depth: int) -> None:
             u = (u or "").split("#", 1)[0]
             if not u.startswith(("http://", "https://")) or u in queued:
                 return
@@ -516,19 +615,32 @@ def recursive_crawl(
             if _is_skip_url(u):
                 add_skip(u, "login/cart/checkout/account/admin")
                 return
+            if _is_infinite_pagination(u):
+                add_skip(u, "infinite pagination/archive")
+                return
             if _robots_blocked(u):
                 add_skip(u, "robots disallow")
                 return
             queued.add(u)
-            if front:
-                queue.insert(0, (u, depth))
-            else:
-                queue.append((u, depth))
+            tier = -1 if depth <= 0 else _url_tier(u)
+            heapq.heappush(queue, (tier, seq[0], u, depth))
+            seq[0] += 1
 
-        # seeds：root（深さ0）＋ 優先巡回パス（深さ1）＋ sitemap 優先 URL（深さ1）
+        def seed_locale_contacts(loc: str) -> None:
+            """検出/フォールバックの locale で Contact 系パスを seed する（要件 2）。"""
+            if not loc or loc in seeded_locales:
+                return
+            seeded_locales.add(loc)
+            for p in _LOCALE_CONTACT_PATHS:
+                enqueue(f"{root}/{loc}{p}", 1)
+
+        # seeds：root（深さ0）＋ 優先巡回パス（深さ1）＋ locale フォールバック Contact ＋
+        # sitemap 優先 URL（深さ1）。実巡回順は tier 優先度が決める。
         enqueue(root, 0)
         for path in PRIORITY_PATHS:
             enqueue(root + path, 1)
+        for loc in _LOCALE_FALLBACK:
+            seed_locale_contacts(loc)
         for u in sitemap_urls:
             enqueue(u, 1)
 
@@ -536,11 +648,18 @@ def recursive_crawl(
 
         ok_count = 0
         fail_count = 0
-        found_email_before_forms = False
-        i = 0
         while queue and len(crawled) < max_urls:
-            url, depth = queue.pop(0)
-            i += 1
+            tier, _seq, url, depth = heapq.heappop(queue)
+            # 早期打ち切り（要件 6・7）：メール/フォーム/LinkedIn のいずれかを確保済みなら
+            # tier 3（商品・記事等の汎用ページ）の深掘りは不要 → 次案件へ。tier 優先度により
+            # この時点で tier 0〜2（Contact/Support/About/流通）は巡回済み。
+            has_email = any(
+                e["email_owner"] != "platform" for e in email_map.values()
+            )
+            has_channel = has_email or bool(forms) or bool(socials.get("linkedin"))
+            if tier >= 3 and has_channel:
+                emit("営業可能チャネルを確保 → 汎用ページの深掘りを打ち切り", pct=0.8)
+                break
             emit(f"巡回中 ({len(crawled) + 1}/{max_urls}): {url}",
                  pct=0.1 + 0.7 * (len(crawled) / max_urls))
             html = fetch(url)
@@ -549,6 +668,16 @@ def recursive_crawl(
                 fail_count += 1
                 continue
             ok_count += 1
+
+            # root のリンクから locale（/en-US/ 等）を検出し、その locale の Contact を
+            # seed する（要件 2：JS ナビ以外はこれで到達）。
+            if depth == 0:
+                for lnk in cds.extract_links(html, url):
+                    if not cds._same_domain(lnk, domain):
+                        continue
+                    m = _LOCALE_SEG_RE.match(urlparse(lnk).path)
+                    if m and m.group(1).lower() in _KNOWN_LOCALES:
+                        seed_locale_contacts(m.group(1))
 
             # メール抽出（既存フィルタを必ず通す・出典付き）
             page_emails = 0
@@ -573,10 +702,27 @@ def recursive_crawl(
                 forms.append(url)
                 emit(f"フォーム抽出: {url}", pct=None)
 
-            # リンク抽出 → SNS / PDF / 再帰
+            # 担当者候補（氏名+役職）は About/Team/Leadership/Company 系ページの
+            # 本文からも抽出する（要件 6：従来は PDF 本文のみ）。ノイズを避けるため
+            # 対象ページを限定し、HTML タグを除いたテキストで照合する。
+            _low_path = urlparse(url).path.lower()
+            if any(k in _low_path for k in (
+                "about", "team", "leadership", "company", "our-story", "people",
+                "founder", "management",
+            )):
+                page_text = cds._TAGSTRIP_RE.sub(" ", html)
+                for person in extract_people(page_text):
+                    person = {**person, "source": url}
+                    if not any(
+                        p["name"].lower() == person["name"].lower()
+                        for p in result["recursive_people"]
+                    ):
+                        result["recursive_people"].append(person)
+
+            # リンク抽出 → SNS / PDF / 再帰。巡回順は tier 優先度付きキューが決めるため
+            # ここでの並べ替えは不要（Contact 等は tier 0 として自動的に先に巡回される）。
             links = cds.extract_links(html, url)
-            # 巡回優先度の高い順に並べて enqueue（contact/about/press 等を先に）
-            for link in sorted(links, key=_link_priority, reverse=True):
+            for link in links:
                 if cds._same_domain(link, domain) and cds._is_contact_url(link):
                     if link not in forms:
                         forms.append(link)
@@ -610,7 +756,11 @@ def recursive_crawl(
                     socials.setdefault(plat, norm)
             people = extract_people(got.get("text") or "") if got.get("text") else []
             for person in people:
-                if person not in result["recursive_people"]:
+                person = {**person, "source": pdf["url"]}
+                if not any(
+                    p["name"].lower() == person["name"].lower()
+                    for p in result["recursive_people"]
+                ):
                     result["recursive_people"].append(person)
 
         # 運営会社（platform）のメールは営業候補に含めない
@@ -625,6 +775,18 @@ def recursive_crawl(
         result["recursive_forms"] = forms
         result["recursive_socials"] = socials
         result["recursive_pdfs"] = pdfs[:12]
+
+        # 営業可能チャネルを優先順位付け（要件 9・10）。メールが無くても
+        # フォーム→LinkedIn→SNS DM の順で到達可能な連絡手段を提示する。
+        li = socials.get("linkedin") or ""
+        li_low = li.lower()
+        li_company = li if ("/company/" in li_low or "/school/" in li_low) else None
+        li_person = li if ("/in/" in li_low or "/pub/" in li_low) else None
+        result["recursive_sales_channels"] = cds.rank_sales_channels(
+            emails=emails, forms=forms,
+            linkedin_company_url=li_company, linkedin_person_url=li_person,
+            socials=socials,
+        )
 
         # 6. 失敗理由コード（要件 8）
         reasons: list[str] = []

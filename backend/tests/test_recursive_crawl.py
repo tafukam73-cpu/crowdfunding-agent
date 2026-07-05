@@ -307,14 +307,133 @@ def test_db_persist():
         db.close()
 
 
+def test_expanded_priority_paths():
+    """Phase 1：拡充した優先パス（/company /leadership /news 等）を巡回し、
+    そこにしか無いメールも発見できる。"""
+    print("test_expanded_priority_paths")
+    pages = {
+        "https://exp.com": "<html><body><a href='/'>home</a></body></html>",
+        # 新規追加パスにだけ営業メールを置く（旧パス集合では取れない）
+        "https://exp.com/company": "<html><body>ir@exp.com</body></html>",
+        "https://exp.com/leadership":
+            "<html><body>Jane Roe, CEO — jane@exp.com</body></html>",
+        "https://exp.com/news": "<html><body>press@exp.com</body></html>",
+        "https://exp.com/where-to-buy": "<html><body>retail@exp.com</body></html>",
+        "https://exp.com/robots.txt": "",
+        "https://exp.com/sitemap.xml": "",
+    }
+
+    class P(FakeProject):
+        maker_url = "https://exp.com"
+
+    res = rcs.recursive_crawl(
+        "https://exp.com", P(), fetch_fn=lambda u: pages.get(u),
+        resolve_fn=fake_resolve, pdf_fn=_empty_pdf,
+    )
+    crawled = res["recursive_crawled_urls"]
+    check("/company を巡回", "https://exp.com/company" in crawled)
+    check("/leadership を巡回", "https://exp.com/leadership" in crawled)
+    check("/news を巡回", "https://exp.com/news" in crawled)
+    check("/where-to-buy を巡回", "https://exp.com/where-to-buy" in crawled)
+    emails = {e["email"].lower() for e in res["recursive_emails"]}
+    check("company ページの ir@ を発見", "ir@exp.com" in emails)
+    check("leadership ページの jane@ を発見", "jane@exp.com" in emails)
+    check("news ページの press@ を発見", "press@exp.com" in emails)
+    check("where-to-buy の retail@ を発見", "retail@exp.com" in emails)
+
+
+def test_default_max_urls_100():
+    print("test_default_max_urls_100")
+    from app.config import settings
+    check("DEFAULT_MAX_URLS = 100", rcs.DEFAULT_MAX_URLS == 100)
+    check("settings 既定 100", int(settings.recursive_crawl_max_urls) == 100)
+
+
+def test_pinterest_and_sales_channels():
+    """要件 7・9・10：Pinterest を検出し、営業チャネルを優先順位付けする。"""
+    print("test_pinterest_and_sales_channels")
+    pages = {
+        "https://ch.com": (
+            "<html><body>"
+            "<a href='/contact'>Contact</a>"
+            "<a href='https://www.pinterest.com/chbrand/'>Pinterest</a>"
+            "<a href='https://www.linkedin.com/company/chbrand/'>LinkedIn</a>"
+            "</body></html>"
+        ),
+        "https://ch.com/contact":
+            "<html><body><a href='mailto:sales@ch.com'>sales</a></body></html>",
+        "https://ch.com/robots.txt": "",
+        "https://ch.com/sitemap.xml": "",
+    }
+
+    class P(FakeProject):
+        maker_url = "https://ch.com"
+
+    res = rcs.recursive_crawl(
+        "https://ch.com", P(), fetch_fn=lambda u: pages.get(u),
+        resolve_fn=fake_resolve, pdf_fn=_empty_pdf,
+    )
+    check("Pinterest を検出", "pinterest" in res["recursive_socials"])
+    channels = res["recursive_sales_channels"]
+    check("営業チャネルを算出", len(channels) > 0)
+    check("メールが最優先チャネル", channels[0]["channel"] == "email")
+    kinds = {c["channel"] for c in channels}
+    check("LinkedIn 会社チャネルを含む", "linkedin_company" in kinds)
+    check("Pinterest チャネルを含む", "pinterest" in kinds)
+
+
+def test_infinite_pagination_skipped():
+    """要件 7：?page=2 / /page/2 / 日付アーカイブ / tag・category 一覧は巡回しない。"""
+    print("test_infinite_pagination_skipped")
+    pages = {
+        "https://pg.com": (
+            "<html><body>"
+            "<a href='/contact'>Contact</a>"
+            "<a href='/blog?page=2'>next</a>"
+            "<a href='/blog/page/3'>next3</a>"
+            "<a href='/2023/05/old-post'>archive</a>"
+            "<a href='/tag/news'>tag</a>"
+            "<a href='/category/updates'>cat</a>"
+            "</body></html>"
+        ),
+        "https://pg.com/contact":
+            "<html><body><a href='mailto:sales@pg.com'>sales</a></body></html>",
+        "https://pg.com/robots.txt": "",
+        "https://pg.com/sitemap.xml": "",
+    }
+
+    class P(FakeProject):
+        maker_url = "https://pg.com"
+
+    res = rcs.recursive_crawl(
+        "https://pg.com", P(), fetch_fn=lambda u: pages.get(u),
+        resolve_fn=fake_resolve, pdf_fn=_empty_pdf,
+    )
+    crawled = res["recursive_crawled_urls"]
+    check("?page=2 を巡回しない", all("page=2" not in u for u in crawled))
+    check("/page/3 を巡回しない", all("/page/3" not in u for u in crawled))
+    check("日付アーカイブを巡回しない", all("/2023/05/" not in u for u in crawled))
+    check("/tag/ を巡回しない", all("/tag/" not in u for u in crawled))
+    check("/category/ を巡回しない", all("/category/" not in u for u in crawled))
+    check("/contact は巡回する", "https://pg.com/contact" in crawled)
+    # 純粋関数単体
+    check("page= 判定", rcs._is_infinite_pagination("https://x.com/a?page=2"))
+    check("/pages/contact は誤検出しない",
+          not rcs._is_infinite_pagination("https://x.com/pages/contact"))
+
+
 def main() -> int:
     test_recursive_picks_contact_privacy_terms()
+    test_infinite_pagination_skipped()
     test_login_cart_checkout_skipped()
     test_sitemap_and_robots()
     test_dns_mx_spf_dmarc()
     test_pdf_extraction()
     test_platform_url_not_official()
     test_failure_reasons_no_email()
+    test_expanded_priority_paths()
+    test_default_max_urls_100()
+    test_pinterest_and_sales_channels()
     test_db_persist()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0

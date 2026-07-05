@@ -22,6 +22,7 @@ sys.path.insert(0, str(BACKEND))
 
 from app.services.contact_discovery_service import (  # noqa: E402
     classify_email_owner,
+    deobfuscate_emails,
     email_exclusion_reason,
     extract_emails,
     score_email,
@@ -244,6 +245,51 @@ def test_extract_filters_dummy() -> None:
     check("partnership@brand.com 採用", "partnership@brand.com" in emails)
 
 
+def _cf_encode(email: str, key: int = 0x42) -> str:
+    """Cloudflare Email Protection 形式にエンコード（テスト用の逆変換）。"""
+    out = "%02x" % key
+    for ch in email:
+        out += "%02x" % (ord(ch) ^ key)
+    return out
+
+
+def test_deobfuscate_emails() -> None:
+    print("test_deobfuscate_emails")
+    # Cloudflare Email Protection（data-cfemail / email-protection#hex）
+    enc = _cf_encode("hello@brandco.com")
+    html_cf = (
+        f'<a href="/cdn-cgi/l/email-protection" class="__cf_email__" '
+        f'data-cfemail="{enc}">[email&#160;protected]</a>'
+    )
+    emails = [e.lower() for e in extract_emails(html_cf)]
+    check("Cloudflare 難読化を復号して抽出", "hello@brandco.com" in emails)
+
+    # 実サイト由来の hex（Loftie）でも '@' を含む妥当な文字列に復号できる
+    real = deobfuscate_emails('data-cfemail="cdbeb8bdbda2bfb98da1a2abb9a4a8e3aea2a0"')
+    check("実 Cloudflare hex を復号（@ を含む）", any("@" in x for x in real))
+
+    # テキスト難読化：[at] / (at) / ＠ / [dot] / spaced
+    check("[at]/[dot] 形式を復号",
+          "sales@brandco.com" in
+          [e.lower() for e in extract_emails("Reach sales [at] brandco [dot] com now")])
+    check("(at) 形式を復号",
+          "info@brandco.com" in
+          [e.lower() for e in extract_emails("mail: info(at)brandco.com")])
+    check("全角＠ を復号",
+          "hi@brandco.com" in
+          [e.lower() for e in extract_emails("<p>hi＠brandco.com</p>")])
+    check("spaced 'at'/'dot' を復号",
+          "team@brandco.com" in
+          [e.lower() for e in extract_emails("Email team at brandco dot com")])
+    # 除外フィルタは難読化経由でも効く（no-reply は復号しても除外）
+    check("難読化 no-reply は除外",
+          "no-reply@brandco.com" not in
+          [e.lower() for e in extract_emails("no-reply [at] brandco.com")])
+    # 通常の散文を誤検出しない
+    check("散文を誤検出しない（'meet at noon'）",
+          extract_emails("Let's meet at noon today") == [])
+
+
 def test_fallback_queries() -> None:
     print("test_fallback_queries")
     qs = build_fallback_search_queries(
@@ -270,6 +316,7 @@ def main() -> int:
     test_extract_excludes_platform()
     test_business_email_validation()
     test_extract_filters_dummy()
+    test_deobfuscate_emails()
     test_fallback_queries()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0

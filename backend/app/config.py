@@ -71,7 +71,9 @@ class Settings(BaseSettings):
 
     # --- Contact Intelligence v3：公式サイト再帰クロールの上限（発見率と安全性） ---
     # 公式サイトが見つかった場合に、サイト全体を再帰巡回する際の上限。.env で変更可。
-    recursive_crawl_max_urls: int = 50
+    # Phase 1：発見率を上げるため 50→100 に引き上げ（重複排除・同一ドメイン優先・
+    # 1URL タイムアウト・レート制限で安全性は担保）。
+    recursive_crawl_max_urls: int = 100
     recursive_crawl_max_depth: int = 2
 
     # --- AI Search Agent の探索上限（発見率と安全性のバランス） ---

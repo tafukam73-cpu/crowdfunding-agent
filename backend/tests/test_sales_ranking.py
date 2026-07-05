@@ -18,7 +18,10 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 from app.services.contact_discovery_service import (  # noqa: E402
+    build_search_queries,
     build_sales_contacts,
+    is_dummy_domain,
+    rank_sales_channels,
     rank_sales_email,
 )
 
@@ -128,10 +131,85 @@ def test_empty() -> None:
     check("None -> []", build_sales_contacts(None) == [])
 
 
+def test_rank_sales_channels() -> None:
+    """要件 9・10：営業可能チャネルの優先順位・スコア。"""
+    print("test_rank_sales_channels")
+    # メール無し → フォーム→LinkedIn 会社→LinkedIn 担当者→Instagram DM の順
+    ch = rank_sales_channels(
+        emails=[],
+        forms=["https://brandco.com/contact"],
+        linkedin_company_url="https://www.linkedin.com/company/brandco/",
+        linkedin_person_url="https://www.linkedin.com/in/jane/",
+        socials={
+            "instagram": "https://www.instagram.com/brandco/",
+            "facebook": "https://www.facebook.com/brandco",
+            "linkedin": "https://www.linkedin.com/company/brandco/",
+            "pinterest": "https://www.pinterest.com/brandco/",
+        },
+    )
+    order = [c["channel"] for c in ch]
+    check("メール無しでも終了しない（チャネルあり）", len(ch) > 0)
+    check("フォームが最優先", order[0] == "contact_form")
+    check("LinkedIn 会社がフォームの次", order[1] == "linkedin_company")
+    check("LinkedIn 担当者が会社の次", order[2] == "linkedin_person")
+    check("SNS(instagram) を含む", "instagram" in order)
+    check("linkedin プラットフォームは SNS 二重計上しない", "linkedin" not in order)
+    # priority 昇順で並ぶ
+    prio = [c["priority"] for c in ch]
+    check("priority 昇順", prio == sorted(prio))
+
+    # 有効メールがあれば最優先・スコア最高（Contact 由来）
+    ch2 = rank_sales_channels(
+        emails=[{"email": "sales@brandco.com", "email_owner": "maker",
+                 "confidence_source": "official_site_contact"}],
+        forms=["https://brandco.com/contact"],
+    )
+    check("メールが最優先", ch2[0]["channel"] == "email")
+    check("Contact 由来メールは高スコア", ch2[0]["score"] >= 90)
+
+    # Privacy/Terms 由来のメールは低〜中スコア
+    ch3 = rank_sales_channels(
+        emails=[{"email": "info@brandco.com", "email_owner": "maker",
+                 "confidence_source": "official_site_legal"}],
+    )
+    check("Privacy/Terms 由来は低〜中スコア", ch3[0]["score"] <= 65)
+
+    # 手動検索のみ（何も無い）
+    ch4 = rank_sales_channels(emails=[], search_queries=['"BrandCo" email'])
+    check("手動検索候補が最後の手段", ch4 and ch4[0]["channel"] == "manual_search")
+    check("完全に空 → []", rank_sales_channels() == [])
+
+
+def test_search_query_dummy_guard() -> None:
+    """要件 8：site: 検索は example/dummy/test ドメインでは生成しない。"""
+    print("test_search_query_dummy_guard")
+    check("example.com はダミー", is_dummy_domain("example.com") is True)
+    check("test.io はダミー", is_dummy_domain("test.io") is True)
+    check("dummy.net はダミー", is_dummy_domain("dummy.net") is True)
+    check("空はダミー扱い", is_dummy_domain("") is True)
+    check("正規ドメインはダミーでない", is_dummy_domain("brandco.com") is False)
+    check("example-brand.com は正規", is_dummy_domain("example-brand.com") is False)
+
+    qs = build_search_queries("BrandCo", "example.com")
+    check("example.com で site: を生成しない",
+          not any(q.startswith("site:example.com") for q in qs))
+    # 会社名クエリは 20 種類以上（要件 8）
+    check("最低 20 クエリ（会社名+ドメイン）",
+          len(build_search_queries("BrandCo", "brandco.com")) >= 20)
+    qs2 = build_search_queries("BrandCo", "brandco.com")
+    check("正規ドメインで site: を生成する",
+          any(q.startswith("site:brandco.com") for q in qs2))
+    check("filetype:pdf クエリを含む", any("filetype:pdf" in q for q in qs2))
+    check("founder/CEO クエリを含む",
+          any("founder" in q for q in qs2) and any("CEO" in q for q in qs2))
+
+
 def main() -> int:
     test_rank_examples()
     test_build_ranking()
     test_empty()
+    test_rank_sales_channels()
+    test_search_query_dummy_guard()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 
