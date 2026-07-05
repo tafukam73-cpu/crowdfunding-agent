@@ -24,6 +24,7 @@ import {
   formatMoney,
   fundingRate,
   htmlToText,
+  isValidBusinessUrl,
   siteLabel,
   STATUS_LABELS,
   updateProjectStatus,
@@ -278,18 +279,19 @@ export default function ProjectDetail() {
               ))}
             </dl>
             <div className="mt-4 flex flex-wrap gap-4 text-sm">
-              {project.source_url && (
-                <a className="text-blue-700 hover:underline" href={project.source_url} target="_blank" rel="noreferrer">
+              {/* ダミー/プレースホルダー URL（example.com 等）はリンク表示しない */}
+              {isValidBusinessUrl(project.source_url) && (
+                <a className="text-blue-700 hover:underline" href={project.source_url as string} target="_blank" rel="noreferrer">
                   案件ページ ↗
                 </a>
               )}
-              {project.maker_url && (
-                <a className="text-blue-700 hover:underline" href={project.maker_url} target="_blank" rel="noreferrer">
+              {isValidBusinessUrl(project.maker_url) && (
+                <a className="text-blue-700 hover:underline" href={project.maker_url as string} target="_blank" rel="noreferrer">
                   メーカー公式 ↗
                 </a>
               )}
-              {project.video_url && (
-                <a className="text-blue-700 hover:underline" href={project.video_url} target="_blank" rel="noreferrer">
+              {isValidBusinessUrl(project.video_url) && (
+                <a className="text-blue-700 hover:underline" href={project.video_url as string} target="_blank" rel="noreferrer">
                   動画 ↗
                 </a>
               )}
