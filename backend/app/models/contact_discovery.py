@@ -269,6 +269,49 @@ class ContactDiscovery(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- Contact Discovery v2：人間の検索手順に近い一本道フロー ---
+    # 公式サイト候補探索 → 優先クロール(Contact/About/...) → LinkedIn → メール抽出
+    # → 検証 → 取得元による信頼度(★1〜5)。既存レイヤーとは独立して v2_* に保存する。
+    v2_researched: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    v2_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 探索ステップ（どこを探索しているかの進捗）[{step,phase,label,status,detail,urls}]
+    v2_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    v2_company_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_campaign_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 確定した公式サイトと、その取得元（project_website / search）
+    v2_official_site_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_official_site_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # 公式サイト候補 [{url,score,source,adopted,reason,query,title}]
+    v2_official_site_candidates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 巡回したページ [{url,kind,ok,emails}]
+    v2_crawled_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 発見メール（信頼度ソース付き。検証済み）
+    # [{email,stars,confidence_source,confidence_label,confidence_level,source_url,
+    #   email_owner,sales_stars,sales_reason,sources}]
+    v2_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    v2_socials: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    v2_forms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    v2_linkedin_company_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_linkedin_person_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # LinkedIn 候補 [{type,url,name,source}]
+    v2_linkedin_candidates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    v2_searched_queries: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    v2_search_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 代表値（最上位信頼度のメール）
+    v2_primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_primary_source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_primary_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    v2_confidence_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    v2_recommended_channel: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    v2_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    v2_researched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

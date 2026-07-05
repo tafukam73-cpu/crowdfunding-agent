@@ -3,26 +3,59 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.models.contact_discovery import DiscoveryStatus
 from app.services.contact_discovery_service import (
     NON_OFFICIAL_PLATFORM_DOMAINS,
     official_site_or_none,
 )
+from app.services.url_validation import (
+    filter_business_urls,
+    is_valid_business_url,
+)
+
+
+def _url_or_none(v: str | None) -> str | None:
+    """example.com / dummy / test / localhost 等のダミー URL なら None にする。"""
+    return v if (v and is_valid_business_url(v)) else None
+
+
+def _scrub_url_list(v: list[str] | None) -> list[str] | None:
+    """URL リストから無効/ダミー URL を除去する（空なら None）。"""
+    if not v:
+        return v
+    cleaned = filter_business_urls(v)
+    return cleaned or None
+
+
+def _scrub_socials(v: dict | None) -> dict | None:
+    """SNS 辞書の値がダミー URL のものを除去する（空なら None）。"""
+    if not v:
+        return v
+    cleaned = {k: url for k, url in v.items() if is_valid_business_url(url)}
+    return cleaned or None
+
+
+# site: クエリ等に含まれると無効なダミー/プレースホルダーのドメイン断片。
+# site:greenlab.example.com のようなクエリを UI に出さないため（要件4）。
+_DUMMY_QUERY_FRAGMENTS = (
+    ".example.", "example.com", "example.org", "example.net",
+    "dummy.", "sample.", "test.", "localhost", "127.0.0.1",
+    "yourdomain", "mydomain", "yourcompany", "mycompany",
+)
 
 
 def _drop_platform_queries(queries: list[str] | None) -> list[str] | None:
-    """Google 検索アシスト用クエリから site:<クラファンドメイン> を取り除く。
-
-    過去に保存した行（公式サイトをプラットフォーム URL と誤判定していた頃の
-    site:kickstarter.com など）が UI に出ないようにするための後方互換サニタイズ。
+    """Google/LinkedIn 検索アシスト用クエリから、プラットフォーム/ダミードメインを
+    含むもの（site:kickstarter.com / site:greenlab.example.com 等）を取り除く（要件4）。
     """
     if not queries:
         return queries
     cleaned = [
         q for q in queries
         if not any(d in q for d in NON_OFFICIAL_PLATFORM_DOMAINS)
+        and not any(f in (q or "").lower() for f in _DUMMY_QUERY_FRAGMENTS)
     ]
     return cleaned or None
 
@@ -205,6 +238,58 @@ class SearchAgentStep(BaseModel):
     missing: list[str] | None = None
 
 
+class V2Step(BaseModel):
+    """Contact Discovery v2 の探索ステップ（UI 進捗表示用）。"""
+
+    step: int | None = None
+    phase: str | None = None       # collect / official_site / crawl / linkedin / extract
+    label: str | None = None
+    status: str | None = None      # done / empty / running
+    detail: str | None = None
+    urls: list[str] = []
+
+
+class V2Email(BaseModel):
+    """v2 が発見・検証したメール（取得元による信頼度★付き）。"""
+
+    email: str
+    stars: int = 0                 # 1〜5（取得元による信頼度）
+    confidence_source: str | None = None   # official_site_contact / footer / about ...
+    confidence_label: str | None = None    # 公式サイト Contact 等
+    confidence_level: str | None = None     # high / medium / low / unverified
+    source_url: str | None = None
+    email_owner: str | None = None
+    sales_stars: int | None = None          # 営業のしやすさ（別軸）
+    sales_reason: str | None = None
+    sources: list[str] = []
+
+
+class V2Candidate(BaseModel):
+    """公式サイト候補（探索元・採用可否つき）。"""
+
+    url: str
+    score: int = 0
+    source: str | None = None       # project_website / search
+    adopted: bool = False
+    reason: str | None = None
+    query: str | None = None
+    title: str | None = None
+
+
+class V2CrawledPage(BaseModel):
+    url: str
+    kind: str | None = None         # root / contact / about / legal / other
+    ok: bool | None = None
+    emails: int | None = None
+
+
+class V2LinkedIn(BaseModel):
+    type: str                       # company / person
+    url: str
+    name: str | None = None
+    source: str | None = None
+
+
 class ContactDiscoveryOut(BaseModel):
     id: int
     project_id: int
@@ -341,6 +426,34 @@ class ContactDiscoveryOut(BaseModel):
     recursive_summary: str | None = None
     recursive_crawled_at: datetime | None = None
 
+    # --- Contact Discovery v2（人間の検索手順に近い一本道フロー） ---
+    v2_researched: bool = False
+    v2_status: str | None = None
+    v2_steps: list[V2Step] | None = None
+    v2_company_name: str | None = None
+    v2_product_name: str | None = None
+    v2_campaign_url: str | None = None
+    v2_official_site_url: str | None = None
+    v2_official_site_source: str | None = None
+    v2_official_site_candidates: list[V2Candidate] | None = None
+    v2_crawled_pages: list[V2CrawledPage] | None = None
+    v2_emails: list[V2Email] | None = None
+    v2_socials: dict[str, str] | None = None
+    v2_forms: list[str] | None = None
+    v2_linkedin_company_url: str | None = None
+    v2_linkedin_person_url: str | None = None
+    v2_linkedin_candidates: list[V2LinkedIn] | None = None
+    v2_searched_queries: list[str] | None = None
+    v2_search_provider: str | None = None
+    v2_primary_email: str | None = None
+    v2_primary_source_url: str | None = None
+    v2_primary_stars: int | None = None
+    v2_confidence_score: int | None = None
+    v2_recommended_channel: str | None = None
+    v2_summary: str | None = None
+    v2_error: str | None = None
+    v2_researched_at: datetime | None = None
+
     created_at: datetime
     updated_at: datetime
 
@@ -349,6 +462,7 @@ class ContactDiscoveryOut(BaseModel):
         "official_site_url",
         "doc_reader_official_site_url",
         "search_agent_official_site_url",
+        "v2_official_site_url",
     )
     @classmethod
     def _no_platform_official(cls, v: str | None) -> str | None:
@@ -356,7 +470,11 @@ class ContactDiscoveryOut(BaseModel):
         return official_site_or_none(v) if v else v
 
     @field_validator(
-        "search_queries", "web_searched_queries", "web_generated_queries"
+        "search_queries",
+        "web_searched_queries",
+        "web_generated_queries",
+        "v2_searched_queries",
+        "ai_search_queries",
     )
     @classmethod
     def _no_platform_site_queries(cls, v: list[str] | None) -> list[str] | None:
@@ -375,6 +493,141 @@ class ContactDiscoveryOut(BaseModel):
         if v and not is_valid_business_email(v):
             return None
         return v
+
+    @model_validator(mode="after")
+    def _scrub_dummy_urls(self):
+        """API 境界の最終防波堤：全 URL フィールドからダミー/プレースホルダー URL
+        （example.com / dummy / sample / test / localhost 等）を除去する（要件5・6）。
+
+        既存 DB に example URL が残っていても、レスポンスでは必ず null / [] にする。
+        Contact Discovery / Document Reader / Search Agent / v2 / CRM 反映候補の
+        すべてに横断適用する。
+        """
+        # --- 単一 URL フィールド（無効なら None） ---
+        scalar_urls = (
+            "primary_contact_form_url",
+            "instagram_url", "facebook_url", "twitter_url", "linkedin_url",
+            "youtube_url",
+            "ai_contact_form_url", "ai_instagram_url", "ai_facebook_url",
+            "ai_linkedin_url",
+            "web_primary_contact_form_url",
+            "v2_primary_source_url",
+            "v2_linkedin_company_url", "v2_linkedin_person_url",
+        )
+        for name in scalar_urls:
+            if getattr(self, name, None):
+                setattr(self, name, _url_or_none(getattr(self, name)))
+
+        # --- URL リストフィールド（無効な URL を除去） ---
+        list_urls = (
+            "searched_urls", "discovered_forms",
+            "web_searched_urls", "web_discovered_forms",
+            "search_agent_searched_urls",
+            "recursive_crawled_urls", "recursive_skipped_urls",
+            "recursive_forms", "recursive_sitemap_urls",
+            "recursive_robots_sitemaps",
+            "v2_forms",
+        )
+        for name in list_urls:
+            if getattr(self, name, None):
+                setattr(self, name, _scrub_url_list(getattr(self, name)))
+
+        # --- SNS 辞書（値がダミー URL のものを除去） ---
+        for name in (
+            "discovered_socials", "web_discovered_socials",
+            "doc_reader_socials", "search_agent_socials",
+            "recursive_socials", "v2_socials",
+        ):
+            if getattr(self, name, None):
+                setattr(self, name, _scrub_socials(getattr(self, name)))
+
+        # --- 出典リスト（AiSource.url がダミーの項目を除去） ---
+        for name in ("ai_sources", "doc_reader_sources"):
+            items = getattr(self, name, None)
+            if items:
+                setattr(self, name,
+                        [s for s in items if is_valid_business_url(s.url)] or None)
+
+        # --- メール候補の sources / source_url ---
+        for e in (self.discovered_emails or []):
+            e.sources = filter_business_urls(e.sources)
+        for e in (self.sales_contacts or []):
+            e.sources = filter_business_urls(e.sources)
+        for e in (self.web_discovered_emails or []):
+            e.sources = filter_business_urls(e.sources)
+        for e in (self.recursive_emails or []):
+            e.sources = filter_business_urls(e.sources)
+        for coll in (self.ai_candidate_emails, self.doc_reader_emails,
+                     self.search_agent_emails):
+            for e in (coll or []):
+                if getattr(e, "source_url", None) and not is_valid_business_url(
+                    e.source_url
+                ):
+                    e.source_url = None
+        for e in (self.v2_emails or []):
+            if e.source_url and not is_valid_business_url(e.source_url):
+                e.source_url = None
+            e.sources = filter_business_urls(e.sources)
+
+        # --- 外部連絡先リンク（approach_options / contact_forms / people） ---
+        if self.approach_options:
+            self.approach_options = [
+                o for o in self.approach_options
+                if o.url is None or is_valid_business_url(o.url)
+            ] or None
+        for name in ("doc_reader_contact_forms", "search_agent_contact_forms"):
+            items = getattr(self, name, None)
+            if items:
+                setattr(self, name,
+                        [f for f in items if is_valid_business_url(f.url)] or None)
+        for name in ("doc_reader_people", "search_agent_people"):
+            for p in (getattr(self, name, None) or []):
+                if getattr(p, "linkedin_url", None) and not is_valid_business_url(
+                    p.linkedin_url
+                ):
+                    p.linkedin_url = None
+                if getattr(p, "source_url", None) and not is_valid_business_url(
+                    p.source_url
+                ):
+                    p.source_url = None
+
+        # --- 調査ページ / 検索結果 / PDF（url がダミーの項目を除去） ---
+        for name in ("web_candidate_pages", "web_search_results",
+                     "web_discovered_pdfs", "recursive_pdfs",
+                     "v2_official_site_candidates", "v2_crawled_pages"):
+            items = getattr(self, name, None)
+            if items:
+                setattr(self, name,
+                        [i for i in items if is_valid_business_url(i.url)] or None)
+
+        # --- v2 LinkedIn 候補 / 検索診断 URL ---
+        if self.v2_linkedin_candidates:
+            self.v2_linkedin_candidates = [
+                li for li in self.v2_linkedin_candidates
+                if is_valid_business_url(li.url)
+            ] or None
+        for d in (self.web_search_diagnostics or []):
+            d.urls = filter_business_urls(d.urls)
+
+        # --- Search Agent ステップの URL ---
+        for st in (self.search_agent_steps or []):
+            if getattr(st, "url", None) and not is_valid_business_url(st.url):
+                st.url = None
+
+        # --- v2 探索ステップの URL 群 ---
+        for st in (self.v2_steps or []):
+            if getattr(st, "urls", None):
+                st.urls = filter_business_urls(st.urls)
+
+        # --- 手動検索導線（site:greenlab.example.com 等を除去） ---
+        if self.fallback_search_queries:
+            self.fallback_search_queries = [
+                q for q in self.fallback_search_queries
+                if is_valid_business_url(q.url)
+                and not any(f in (q.query or "").lower()
+                            for f in _DUMMY_QUERY_FRAGMENTS)
+            ]
+        return self
 
     model_config = ConfigDict(from_attributes=True)
 

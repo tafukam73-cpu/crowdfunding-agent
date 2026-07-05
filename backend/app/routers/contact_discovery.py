@@ -29,6 +29,7 @@ from app.schemas.contact_person import (
 )
 from app.services import (
     contact_discovery_service,
+    contact_discovery_v2_service,
     contact_hunter_service,
     document_reader_service,
     email_service,
@@ -112,6 +113,42 @@ def run_web_research(
 )
 def get_web_research(project_id: int, db: Session = Depends(get_db)):
     """最新の探索結果（web_* を含む）を返す。未実行なら 204。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    row = contact_discovery_service.get_latest(db, project_id)
+    if row is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return row
+
+
+@router.post(
+    "/projects/{project_id}/contact-discovery/v2",
+    response_model=ContactDiscoveryOut,
+)
+def run_contact_discovery_v2(
+    project_id: int, db: Session = Depends(get_db)
+) -> ContactDiscoveryOut:
+    """Contact Discovery v2 を実行して最新の探索結果の v2_* に保存する（同期）。
+
+    人が担当者を探す手順（公式サイト候補探索 → 優先クロール(Contact/About/...) →
+    LinkedIn → メール抽出 → 検証）を「どこを探索しているか」を逐次記録しながら実行し、
+    取得元による信頼度（★1〜5）と取得元 URL を付けて返す。404/非200 ページは解析せず、
+    example / dummy / test / no-reply 等のメールは必ず排除する。既存の探索結果が無ければ
+    先に自動探索を実行する。失敗時も v2_error に記録し 200 で返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return contact_discovery_v2_service.run_contact_discovery_v2(db, project)
+
+
+@router.get(
+    "/projects/{project_id}/contact-discovery/v2",
+    response_model=ContactDiscoveryOut,
+)
+def get_contact_discovery_v2(project_id: int, db: Session = Depends(get_db)):
+    """最新の探索結果（v2_* を含む）を返す。未実行なら 204。"""
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")

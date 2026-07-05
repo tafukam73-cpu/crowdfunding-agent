@@ -147,7 +147,13 @@ def create_from_project(db: Session, project: Project) -> tuple[Maker, bool]:
             return existing, False
 
     name = project.maker_name or project.title[:255]
-    existing = find_existing_maker(db, website_url=project.maker_url, name=name)
+    # example.com / dummy / test 等のダミー URL は CRM の公式サイトに保存しない。
+    from app.services.url_validation import is_valid_business_url
+
+    website_url = (
+        project.maker_url if is_valid_business_url(project.maker_url) else None
+    )
+    existing = find_existing_maker(db, website_url=website_url, name=name)
     if existing is not None:
         if project.maker_id != existing.id:
             project.maker_id = existing.id
@@ -156,7 +162,7 @@ def create_from_project(db: Session, project: Project) -> tuple[Maker, bool]:
 
     maker = Maker(
         name=name,
-        website_url=project.maker_url,
+        website_url=website_url,
         status=CrmStatus.lead.value,
         notes=project.contact_info,
     )

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.crm import ActivityKind, CrmStatus
+from app.services.url_validation import is_valid_business_url
 
 
 # --- 担当者 ---
@@ -39,6 +40,12 @@ class ContactOut(ContactBase):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("linkedin_url")
+    @classmethod
+    def _no_dummy_linkedin(cls, v: str | None) -> str | None:
+        # example.com 等のダミー URL は表示しない。
+        return v if (v and is_valid_business_url(v)) else None
 
 
 # --- 営業履歴 ---
@@ -96,6 +103,12 @@ class MakerOut(MakerBase):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("website_url")
+    @classmethod
+    def _no_dummy_website(cls, v: str | None) -> str | None:
+        # 既存 DB に example.com 等が残っていても公式サイトとして表示しない（要件5）。
+        return v if (v and is_valid_business_url(v)) else None
 
 
 class MakerDetailOut(MakerOut):

@@ -935,12 +935,37 @@ export async function fetchCompanyResearch(
   return res.json();
 }
 
+// ブラウザ↔サーバ間の接続断（長時間の同期処理でよく起きる）を判定する。
+// これらは「バックエンドが失敗した」ではなく「応答を受け取れなかった」ケース。
+// 生の TypeError: Failed to fetch を画面に出さないための共通判定。
+export function isNetworkDropError(e: unknown): boolean {
+  const msg = String(e);
+  return (
+    msg.includes("Failed to fetch") ||
+    msg.includes("NetworkError") ||
+    msg.includes("network error") ||
+    msg.includes("ERR_") ||
+    msg.includes("AbortError") ||
+    msg.includes("aborted") ||
+    msg.includes("タイムアウト")
+  );
+}
+
 // 企業リサーチを実行（同期）。失敗時も failed として 200 で返る。
+// バックエンドがエラー本文を返す場合はそれを含めて投げる（画面で詳細表示するため）。
 export async function runCompanyResearch(id: number): Promise<CompanyResearch> {
   const res = await fetch(`${API_BASE}/projects/${id}/company-research`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = await res.text();
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`API error: ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
   return res.json();
 }
 
@@ -1138,6 +1163,53 @@ export const EMAIL_CONFIDENCE_COLORS: Record<string, string> = {
   invalid: "bg-red-100 text-red-700",
 };
 
+// --- Contact Discovery v2（人間の検索手順に近い一本道フロー） ---
+export type V2Step = {
+  step: number | null;
+  phase: string | null; // collect / official_site / crawl / linkedin / extract
+  label: string | null;
+  status: string | null; // done / empty / running
+  detail: string | null;
+  urls: string[];
+};
+
+export type V2Email = {
+  email: string;
+  stars: number; // 1〜5（取得元による信頼度）
+  confidence_source: string | null; // official_site_contact / footer / about ...
+  confidence_label: string | null; // 公式サイト Contact 等
+  confidence_level: string | null; // high / medium / low / unverified
+  source_url: string | null;
+  email_owner: string | null;
+  sales_stars: number | null;
+  sales_reason: string | null;
+  sources: string[];
+};
+
+export type V2Candidate = {
+  url: string;
+  score: number;
+  source: string | null; // project_website / search
+  adopted: boolean;
+  reason: string | null;
+  query: string | null;
+  title: string | null;
+};
+
+export type V2CrawledPage = {
+  url: string;
+  kind: string | null; // root / contact / about / legal / other
+  ok: boolean | null;
+  emails: number | null;
+};
+
+export type V2LinkedIn = {
+  type: string; // company / person
+  url: string;
+  name: string | null;
+  source: string | null;
+};
+
 export type ContactDiscovery = {
   id: number;
   project_id: number;
@@ -1260,6 +1332,33 @@ export type ContactDiscovery = {
   recursive_failure_reasons: string[] | null;
   recursive_summary: string | null;
   recursive_crawled_at: string | null;
+  // --- Contact Discovery v2（人間の検索手順に近い一本道フロー） ---
+  v2_researched: boolean;
+  v2_status: string | null;
+  v2_steps: V2Step[] | null;
+  v2_company_name: string | null;
+  v2_product_name: string | null;
+  v2_campaign_url: string | null;
+  v2_official_site_url: string | null;
+  v2_official_site_source: string | null;
+  v2_official_site_candidates: V2Candidate[] | null;
+  v2_crawled_pages: V2CrawledPage[] | null;
+  v2_emails: V2Email[] | null;
+  v2_socials: Record<string, string> | null;
+  v2_forms: string[] | null;
+  v2_linkedin_company_url: string | null;
+  v2_linkedin_person_url: string | null;
+  v2_linkedin_candidates: V2LinkedIn[] | null;
+  v2_searched_queries: string[] | null;
+  v2_search_provider: string | null;
+  v2_primary_email: string | null;
+  v2_primary_source_url: string | null;
+  v2_primary_stars: number | null;
+  v2_confidence_score: number | null;
+  v2_recommended_channel: string | null;
+  v2_summary: string | null;
+  v2_error: string | null;
+  v2_researched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1417,6 +1516,23 @@ export async function runContactDiscovery(
     method: "POST",
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// Contact Discovery v2 を実行（同期）。人間の検索手順に近い一本道フロー
+// （公式サイト候補探索 → 優先クロール → LinkedIn → メール抽出 → 検証）を実行し、
+// 取得元による信頼度（★1〜5）と取得元 URL 付きで返す。失敗時も v2_error を記録して
+// 200 で返る。
+export async function runContactDiscoveryV2(
+  id: number
+): Promise<ContactDiscovery> {
+  const res = await fetch(`${API_BASE}/projects/${id}/contact-discovery/v2`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
   return res.json();
 }
 

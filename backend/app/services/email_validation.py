@@ -263,6 +263,13 @@ def build_fallback_search_queries(
     domain = (official_domain or "").strip().lower().lstrip("@")
     if domain.startswith("www."):
         domain = domain[4:]
+    # 公式ドメインが example.com / dummy / sample / test / localhost 等の
+    # プレースホルダーなら site: クエリを一切生成しない（要件4）。
+    if domain:
+        from app.services.url_validation import is_valid_business_url
+
+        if not is_valid_business_url(f"https://{domain}"):
+            domain = ""
 
     def add(label: str, kind: str, query: str, url: str) -> None:
         key = url

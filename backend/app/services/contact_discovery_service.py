@@ -741,10 +741,23 @@ def is_platform_url(url: str | None) -> bool:
 
 
 def official_site_or_none(url: str | None) -> str | None:
-    """公式サイト候補。プラットフォーム URL（kickstarter/profile 等）なら None。"""
+    """公式サイト候補。プラットフォーム URL（kickstarter/profile 等）やダミー/
+    プレースホルダー URL（example.com / dummy / sample / test / localhost 等）なら None。
+
+    これが「公式サイト」を採用する唯一の入口。ここでダミーを弾くことで、
+    Contact Discovery / Document Reader / Search Agent / v2 / CRM 反映のすべての経路で
+    example.com のようなプレースホルダーが公式サイトとして表示されないようにする。
+    """
+    from app.services.url_validation import is_valid_business_url
+
     if not url or not str(url).startswith(("http://", "https://")):
         return None
-    return None if is_platform_url(url) else url
+    if is_platform_url(url):
+        return None
+    # example.com / dummy / sample / test / localhost / 127.0.0.1 等は公式サイトにしない
+    if not is_valid_business_url(url):
+        return None
+    return url
 
 
 def significant_terms(*texts: str) -> set[str]:

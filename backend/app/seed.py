@@ -30,8 +30,8 @@ MOCK_PROJECTS = [
         start_date=date(2026, 5, 1),
         end_date=date(2026, 6, 30),
         maker_name="SunPack Inc.",
-        maker_url="https://sunpack.example.com",
-        contact_info="hello@sunpack.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
+        contact_info=None,  # ダミーメールは投入しない
         status=ProjectStatus.reviewing.value,
     ),
     dict(
@@ -49,8 +49,8 @@ MOCK_PROJECTS = [
         start_date=date(2026, 4, 15),
         end_date=date(2026, 6, 15),
         maker_name="AudioMind",
-        maker_url="https://audiomind.example.com",
-        contact_info="partnership@audiomind.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
+        contact_info=None,  # ダミーメールは投入しない
         status=ProjectStatus.new.value,
     ),
     dict(
@@ -68,7 +68,7 @@ MOCK_PROJECTS = [
         start_date=date(2026, 5, 20),
         end_date=date(2026, 7, 10),
         maker_name="EDC Works",
-        maker_url="https://edcworks.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
         contact_info=None,
         status=ProjectStatus.contacted.value,
     ),
@@ -87,8 +87,8 @@ MOCK_PROJECTS = [
         start_date=date(2026, 3, 1),
         end_date=date(2026, 5, 31),
         maker_name="GreenLab",
-        maker_url="https://greenlab.example.com",
-        contact_info="contact@greenlab.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
+        contact_info=None,  # ダミーメールは投入しない
         status=ProjectStatus.negotiating.value,
     ),
     dict(
@@ -110,8 +110,8 @@ MOCK_PROJECTS = [
         start_date=date(2026, 5, 10),
         end_date=date(2026, 6, 25),
         maker_name="Atelier Vert",
-        maker_url="https://ateliervert.example.com",
-        contact_info="hello@ateliervert.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
+        contact_info=None,  # ダミーメールは投入しない
         status=ProjectStatus.new.value,
     ),
     dict(
@@ -129,7 +129,7 @@ MOCK_PROJECTS = [
         start_date=date(2026, 6, 1),
         end_date=date(2026, 7, 20),
         maker_name="LeviDesign",
-        maker_url="https://levidesign.example.com",
+        maker_url=None,  # 公式サイト未確認（ダミーURLは投入しない）
         contact_info=None,
         status=ProjectStatus.rejected.value,
     ),

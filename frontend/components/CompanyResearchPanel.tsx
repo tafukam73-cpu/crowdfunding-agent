@@ -6,6 +6,7 @@ import {
   fetchCompanyResearch,
   filterBusinessUrls,
   formatDateTime,
+  isNetworkDropError,
   isValidBusinessUrl,
   runCompanyResearch,
   type CompanyResearch,
@@ -62,7 +63,27 @@ export default function CompanyResearchPanel({
       setResearch(r);
       onResearched?.();
     } catch (e) {
-      setError(String(e));
+      // 企業リサーチは公式サイト解析などで時間がかかり、ブラウザ↔サーバの接続が
+      // 先に切れて TypeError: Failed to fetch になることがある。バックエンドは処理を
+      // 継続・保存している場合が多いので、生のエラーは出さず最新結果を取り込み直す。
+      if (isNetworkDropError(e)) {
+        try {
+          const latest = await fetchCompanyResearch(projectId);
+          if (latest) {
+            setResearch(latest);
+            onResearched?.();
+          }
+        } catch {
+          /* 再取得も失敗した場合は下の案内文のみ表示 */
+        }
+        setError(
+          "企業リサーチの取得に失敗しました（応答を受け取れませんでした）。" +
+            "バックエンドでは処理が継続・保存されている場合があります。" +
+            "数十秒おいて「再リサーチ」または再読み込みで最新状態を確認してください。"
+        );
+      } else {
+        setError(`企業リサーチの取得に失敗しました：${String(e)}`);
+      }
     } finally {
       setBusy(false);
     }

@@ -11,6 +11,8 @@ import {
   EMAIL_CONFIDENCE_COLORS,
   EMAIL_CONFIDENCE_LABELS,
   type FallbackSearchQuery,
+  filterBusinessUrls,
+  isValidBusinessUrl,
   fetchContactDiscovery,
   fetchContactPeople,
   fetchOutreachMessage,
@@ -18,8 +20,11 @@ import {
   type OutreachMessage,
   runAiContactResearch,
   runContactDiscovery,
+  runContactDiscoveryV2,
   runContactHunter,
   runDocumentReader,
+  type V2Email,
+  type V2Step,
   type SalesContact,
   type ContactIntelligenceJob,
   type CIJobType,
@@ -48,7 +53,24 @@ function FallbackSearchSection({
 }: {
   queries: FallbackSearchQuery[] | undefined;
 }) {
-  if (!queries || queries.length === 0) return null;
+  // site:greenlab.example.com のようなダミードメイン入りクエリ・無効 URL を除外（要件2/4）。
+  const DUMMY_FRAGMENTS = [
+    ".example.",
+    "example.com",
+    "dummy.",
+    "sample.",
+    "test.",
+    "localhost",
+    "127.0.0.1",
+    "yourdomain",
+    "mydomain",
+  ];
+  const cleaned = (queries ?? []).filter(
+    (q) =>
+      isValidBusinessUrl(q.url) &&
+      !DUMMY_FRAGMENTS.some((f) => (q.query ?? "").toLowerCase().includes(f))
+  );
+  if (cleaned.length === 0) return null;
   return (
     <div className="rounded-md border border-sky-200 bg-sky-50/70 p-4">
       <p className="text-sm font-bold text-sky-900">
@@ -58,7 +80,7 @@ function FallbackSearchSection({
         自動探索でメールが見つからなかったため、以下の検索で営業先の連絡先を手動確認してください（推測メールは候補にしていません）。
       </p>
       <ul className="mt-2 flex flex-wrap gap-2">
-        {queries.map((q) => (
+        {cleaned.map((q) => (
           <li key={q.url}>
             <a
               href={q.url}
@@ -202,7 +224,9 @@ function QuickContactLinks({
   // 各リンクを open（URLあり）/ search（URLなし＋検索可）に振り分ける。
   const items = QUICK_LINKS.map((l) => {
     const url = data[l.key];
-    if (typeof url === "string" && url.length > 0) {
+    // example.com / dummy / test 等のダミー URL は「開く」対象にしない（要件2）。
+    // 検索フォールバックがあれば検索モードに、無ければ非表示にする。
+    if (typeof url === "string" && isValidBusinessUrl(url)) {
       return { link: l, href: url, mode: "open" as const };
     }
     if (l.searchUrl && keyword) {
@@ -1235,7 +1259,13 @@ function DeepInvestigationSection({
           {job.status === "completed" && (
             <div className="rounded-md border border-indigo-200 bg-white p-2 text-xs text-slate-700">
               <span className="font-semibold text-indigo-800">結果:</span>{" "}
-              公式サイト {String(result.official_site_url ?? "未発見")} / 推奨連絡先{" "}
+              公式サイト{" "}
+              {isValidBusinessUrl(
+                result.official_site_url as string | null | undefined
+              )
+                ? String(result.official_site_url)
+                : "未確認"}{" "}
+              / 推奨連絡先{" "}
               {result.top_contact
                 ? String(
                     (result.top_contact as Record<string, unknown>).email ?? "-"
@@ -1739,17 +1769,20 @@ function DocumentReaderSection({
                 </span>
               )}
               <span className="text-slate-400">公式サイト：</span>
-              {data.doc_reader_official_site_url ? (
+              {isValidBusinessUrl(data.doc_reader_official_site_url) ? (
                 <a
-                  href={data.doc_reader_official_site_url}
+                  href={data.doc_reader_official_site_url as string}
                   target="_blank"
                   rel="noreferrer"
                   className="text-blue-700 hover:underline"
                 >
-                  {data.doc_reader_official_site_url.replace(/^https?:\/\//, "")}
+                  {(data.doc_reader_official_site_url as string).replace(
+                    /^https?:\/\//,
+                    ""
+                  )}
                 </a>
               ) : (
-                <span className="text-slate-400">未発見</span>
+                <span className="text-slate-400">公式サイト未確認</span>
               )}
             </div>
           )}
@@ -2714,12 +2747,14 @@ function UnifiedResultSummary({
   data: ContactDiscovery;
   searchKeyword: string;
 }) {
-  // 公式サイト（プラットフォームURLはサーバ側で除外済み）
+  // 公式サイト（プラットフォーム/ダミーURLは除外。有効な URL のみ採用）
   const official =
-    data.official_site_url ||
-    data.search_agent_official_site_url ||
-    data.doc_reader_official_site_url ||
-    null;
+    [
+      data.official_site_url,
+      data.search_agent_official_site_url,
+      data.doc_reader_official_site_url,
+      data.v2_official_site_url,
+    ].find((u) => isValidBusinessUrl(u)) ?? null;
 
   // メール（営業先のみ。platform 所有は除外）
   const emails: string[] = [];
@@ -2937,10 +2972,10 @@ function UnifiedResultSummary({
                   rel="noreferrer"
                   className="text-xs text-slate-400 hover:underline"
                 >
-                  未発見（Googleで「{keyword} official site」を検索）
+                  公式サイト未確認（Googleで「{keyword} official site」を検索）
                 </a>
               ) : (
-                <span className="text-slate-400">未発見</span>
+                <span className="text-slate-400">公式サイト未確認</span>
               )}
             </dd>
           </div>
@@ -3026,6 +3061,321 @@ function isNetworkDropError(e: unknown): boolean {
   );
 }
 
+// ★1〜5 の星表示（取得元による信頼度）。
+function Stars({ n }: { n: number }) {
+  const stars = Math.max(0, Math.min(5, n || 0));
+  return (
+    <span className="text-amber-500" title={`信頼度 ${stars}/5`}>
+      {"★".repeat(stars)}
+      <span className="text-slate-300">{"☆".repeat(5 - stars)}</span>
+    </span>
+  );
+}
+
+// v2 の探索フェーズ → 日本語ラベル・アイコン（進捗表示用）。
+const V2_PHASE_LABELS: Record<string, string> = {
+  collect: "案件情報を取得",
+  official_site: "公式サイト候補を探索",
+  crawl: "公式サイトを優先クロール",
+  linkedin: "LinkedInを探索",
+  extract: "メールを抽出・検証",
+};
+const V2_PHASE_ICONS: Record<string, string> = {
+  collect: "📋",
+  official_site: "🌐",
+  crawl: "🔍",
+  linkedin: "💼",
+  extract: "✉️",
+};
+
+// v2 探索ステップ（どこを探索しているか）を時系列で表示する。
+function V2Steps({ steps, busy }: { steps: V2Step[] | null; busy: boolean }) {
+  if (!steps || steps.length === 0) {
+    if (busy) {
+      return (
+        <p className="mt-2 animate-pulse text-xs text-violet-700">
+          探索中… 公式サイト候補 → Contact/About → LinkedIn → メールの順に調べています。
+        </p>
+      );
+    }
+    return null;
+  }
+  return (
+    <ol className="mt-2 space-y-1.5">
+      {steps.map((s) => {
+        const icon = V2_PHASE_ICONS[s.phase ?? ""] ?? "•";
+        const empty = s.status === "empty";
+        return (
+          <li
+            key={s.step ?? s.label}
+            className="flex gap-2 rounded border border-violet-100 bg-white/70 px-2 py-1.5 text-xs"
+          >
+            <span className="shrink-0">{icon}</span>
+            <div className="min-w-0">
+              <p
+                className={`font-medium ${
+                  empty ? "text-slate-500" : "text-violet-900"
+                }`}
+              >
+                {s.step != null ? `${s.step}. ` : ""}
+                {s.label ?? V2_PHASE_LABELS[s.phase ?? ""] ?? s.phase}
+                {empty && (
+                  <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-400">
+                    該当なし
+                  </span>
+                )}
+              </p>
+              {s.detail && <p className="mt-0.5 text-slate-500">{s.detail}</p>}
+              {filterBusinessUrls(s.urls).length > 0 && (
+                <ul className="mt-0.5 space-y-0.5">
+                  {filterBusinessUrls(s.urls)
+                    .slice(0, 5)
+                    .map((u) => (
+                    <li key={u} className="truncate">
+                      <a
+                        href={u}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-blue-600 hover:underline"
+                      >
+                        {u}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+// Contact Discovery v2：人間の検索手順に近い一本道フローの実行・結果表示。
+// 探索中は「どこを探索しているか」を進捗表示し、結果は取得元による信頼度（★1〜5）と
+// 取得元 URL を付けて表示。メールはワンクリックで CRM 反映できる。
+function ContactDiscoveryV2Section({
+  data,
+  busy,
+  error,
+  onRun,
+  onApply,
+}: {
+  data: ContactDiscovery | null;
+  busy: boolean;
+  error: string | null;
+  onRun: () => void;
+  onApply: (email: string) => void;
+}) {
+  const researched = data?.v2_researched;
+  const failed = data?.v2_status === "failed";
+  const emails = (data?.v2_emails ?? []) as V2Email[];
+  const socials = Object.entries(data?.v2_socials ?? {});
+  const li = data?.v2_linkedin_candidates ?? [];
+
+  return (
+    <div className="rounded-lg border border-violet-300 bg-gradient-to-b from-violet-50/80 to-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900">
+            🧭 Contact Discovery v2（人が探すように探索）
+          </p>
+          <p className="mt-0.5 text-xs text-violet-700">
+            公式サイト候補（案件の登録サイト → 検索）→ Contact/About/Team/Support/Privacy
+            の優先クロール（header/footer/meta/schema.org 解析）→ LinkedIn → メール抽出・
+            検証、の順に人の手順で探索します。取得元により信頼度（★1〜5）を付け、
+            example/dummy/test・404 ページは採用しません。
+          </p>
+        </div>
+        <button
+          onClick={onRun}
+          disabled={busy}
+          className="shrink-0 rounded bg-violet-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-600 disabled:opacity-50"
+        >
+          {busy ? "探索中…" : researched ? "v2で再探索" : "v2で探索を実行"}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {/* 探索中／実行後の進捗（どこを探索しているか） */}
+      {(busy || researched) && (
+        <V2Steps steps={data?.v2_steps ?? null} busy={busy} />
+      )}
+
+      {!researched && !busy && !error && (
+        <p className="mt-3 text-xs text-violet-700">
+          まだ実行されていません。上のボタンで、人間の検索手順に近い探索を実行できます。
+        </p>
+      )}
+
+      {researched && data && (
+        <div className="mt-3 space-y-3 text-sm">
+          {failed && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              <p className="font-semibold">v2 探索でエラーが発生しました。</p>
+              <p className="mt-1 whitespace-pre-wrap break-all">{data.v2_error}</p>
+            </div>
+          )}
+
+          {/* サマリ & スコア */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+              信頼度スコア: {data.v2_confidence_score ?? 0} / 100
+            </span>
+            {data.v2_search_provider && (
+              <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                検索: {data.v2_search_provider}
+              </span>
+            )}
+            {data.v2_recommended_channel && (
+              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                推奨チャネル:{" "}
+                {CHANNEL_LABELS[data.v2_recommended_channel] ??
+                  data.v2_recommended_channel}
+              </span>
+            )}
+          </div>
+          {data.v2_summary && (
+            <div className="rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-violet-900">
+              {data.v2_summary}
+            </div>
+          )}
+
+          {/* 公式サイト */}
+          <div className="text-xs">
+            <span className="font-semibold text-slate-500">公式サイト：</span>{" "}
+            {isValidBusinessUrl(data.v2_official_site_url) ? (
+              <>
+                <a
+                  href={data.v2_official_site_url as string}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-all text-blue-700 hover:underline"
+                >
+                  {data.v2_official_site_url}
+                </a>
+                {data.v2_official_site_source && (
+                  <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">
+                    {data.v2_official_site_source === "project_website"
+                      ? "案件登録"
+                      : "検索発見"}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-400">公式サイト未確認</span>
+            )}
+          </div>
+
+          {/* 発見メール（信頼度★＋取得元URL＋CRM反映） */}
+          {emails.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold text-slate-500">
+                発見したメール（取得元による信頼度順）
+              </p>
+              <ul className="mt-1 space-y-1.5">
+                {emails.map((e) => (
+                  <li
+                    key={e.email}
+                    className="rounded-md border border-slate-200 bg-white p-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Stars n={e.stars} />
+                          <span className="break-all font-medium text-slate-800">
+                            {e.email}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          {e.confidence_label && (
+                            <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">
+                              {e.confidence_label}
+                            </span>
+                          )}
+                          <ConfidenceBadge level={e.confidence_level} />
+                          {e.source_url && (
+                            <a
+                              href={e.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate text-[11px] text-blue-600 hover:underline"
+                            >
+                              取得元
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => onApply(e.email)}
+                        className="shrink-0 rounded bg-violet-700 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-600"
+                      >
+                        CRMに反映
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            researched &&
+            !failed && (
+              <p className="text-xs text-slate-500">
+                有効なメールは見つかりませんでした（推測メールは作成していません）。
+                {(li.length > 0 || socials.length > 0) &&
+                  " LinkedIn / SNS から接触を検討してください。"}
+              </p>
+            )
+          )}
+
+          {/* LinkedIn（会社 / 担当者） */}
+          {li.length > 0 && (
+            <div className="text-xs">
+              <p className="font-semibold text-slate-500">LinkedIn</p>
+              <ul className="mt-1 space-y-0.5">
+                {li.map((l) => (
+                  <li key={l.url} className="flex items-center gap-1.5">
+                    <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-700">
+                      {l.type === "company" ? "会社" : "担当者"}
+                    </span>
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-blue-700 hover:underline"
+                    >
+                      {l.name || l.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* SNS */}
+          {socials.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {socials.map(([platform, url]) => (
+                <a
+                  key={platform}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border border-slate-200 bg-white px-2 py-0.5 text-blue-700 hover:underline"
+                >
+                  {platform}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -3048,6 +3398,8 @@ export default function ContactDiscoveryPanel({
   const [docError, setDocError] = useState<string | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [v2Busy, setV2Busy] = useState(false);
+  const [v2Error, setV2Error] = useState<string | null>(null);
   // Web調査 / Search Agent の非同期ジョブ ポーリング用インターバル
   const webJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const agentJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -3249,6 +3601,9 @@ export default function ContactDiscoveryPanel({
     runResearch(() => runDocumentReader(projectId), setDocBusy, setDocError);
   const onRunAgent = () =>
     runAsJob("search_agent", agentJobRef, setAgentBusy, setAgentError);
+  // Contact Discovery v2（人間の検索手順に近い一本道フロー・同期実行）
+  const onRunV2 = () =>
+    runResearch(() => runContactDiscoveryV2(projectId), setV2Busy, setV2Error);
 
   async function onApply(email?: string) {
     setApplyMsg(null);
@@ -3324,6 +3679,17 @@ export default function ContactDiscoveryPanel({
         <DeepInvestigationSection
           projectId={projectId}
           onDone={refetchDiscovery}
+        />
+      </div>
+
+      {/* 🧭 Contact Discovery v2（人が探すように探索。進捗＋信頼度★＋取得元URL＋CRM反映） */}
+      <div className="mt-3">
+        <ContactDiscoveryV2Section
+          data={data}
+          busy={v2Busy}
+          error={v2Error}
+          onRun={onRunV2}
+          onApply={onApply}
         />
       </div>
 
@@ -3517,17 +3883,17 @@ export default function ContactDiscoveryPanel({
               取得できない場合は「公式サイト未発見」と表示する。 */}
           <div className="text-xs">
             <span className="font-semibold text-slate-500">公式サイト：</span>{" "}
-            {data.official_site_url ? (
+            {isValidBusinessUrl(data.official_site_url) ? (
               <a
-                href={data.official_site_url}
+                href={data.official_site_url as string}
                 target="_blank"
                 rel="noreferrer"
                 className="break-all text-blue-700 hover:underline"
               >
-                {data.official_site_url.replace(/^https?:\/\//, "")}
+                {(data.official_site_url as string).replace(/^https?:\/\//, "")}
               </a>
             ) : (
-              <span className="text-slate-400">公式サイト未発見</span>
+              <span className="text-slate-400">公式サイト未確認</span>
             )}
           </div>
 
