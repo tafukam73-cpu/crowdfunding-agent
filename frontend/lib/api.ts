@@ -1947,6 +1947,35 @@ export async function fetchSalesTasks(perGroup = 5): Promise<TodayTasks> {
   return res.json();
 }
 
+// フォローアップメール作成の結果（backend FollowupEmailResult に対応）。
+export type FollowupEmailResult = {
+  draft: EmailDraft;
+  stage: "light" | "repropose" | "final";
+  stage_label: string;
+  days_since_last_outreach: number;
+  follow_up_level: FollowUpLevel;
+  gmail_compose_url: string;
+  recipient: string | null;
+  sales_status: SalesStatus;
+};
+
+// フォローアップメール（2通目・3通目）を作成する。経過日数で文面段階が変わる。
+export async function createFollowupEmail(
+  projectId: number,
+  opts?: { days?: number | null; set_awaiting_reply?: boolean; to?: string | null }
+): Promise<FollowupEmailResult> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/followup-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts ?? {}),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
 // AI 営業優先ランキングを取得（Executive Summary を統合してスコア順）。
 export async function fetchSalesRanking(
   params: RankingParams = {}

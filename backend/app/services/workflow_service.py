@@ -435,6 +435,21 @@ def _days_since(now: datetime, ts: datetime | None) -> int | None:
     return max(0, delta.days)
 
 
+def last_outreach_days(db: Session, project: Project) -> int | None:
+    """案件の最終営業日からの経過日数を返す（フォローアップ判定に使う公開関数）。
+
+    SalesActivity → EmailDraft の最新を最終営業日とし、無ければ project.updated_at。
+    """
+    now = datetime.now(timezone.utc)
+    last = _last_outreach_map(db, [project.id]).get(project.id) or project.updated_at
+    return _days_since(now, last)
+
+
+def followup_level(days: int | None) -> str | None:
+    """経過日数のフォロー優先度（normal/high/final）。公開ラッパー。"""
+    return _followup_level(days)
+
+
 def _task_reasons(
     p: Project,
     *,

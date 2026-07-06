@@ -12,8 +12,8 @@ from app.ai import get_email_generator
 from app.ai.email_generator import EmailGenerator
 from app.ai.outreach import build_outreach_message
 from app.ai.prompts import DEFAULT_TONE, EmailTone, SenderContext
-from app.models.email_draft import EmailDraft
-from app.models.project import Project
+from app.models.email_draft import EmailDraft, EmailType
+from app.models.project import Project, SalesStatus
 from app.services import (
     company_research_service,
     contact_hunter_service,
@@ -147,3 +147,130 @@ def list_drafts(db: Session, project_id: int) -> list[EmailDraft]:
         .order_by(EmailDraft.created_at.desc(), EmailDraft.id.desc())
     )
     return list(db.scalars(stmt))
+
+
+# --- フォローアップメール（2通目・3通目）------------------------------------- #
+# 「返信待ち/フォロー済み」として扱う営業状況。フォロー作成後にこの状態へ寄せる。
+_FOLLOWUP_SETTABLE_FROM = (
+    SalesStatus.contacted.value,
+    SalesStatus.awaiting_reply.value,
+    SalesStatus.ready.value,
+    SalesStatus.not_started.value,
+)
+
+
+def _record_followup_activity(
+    db: Session, project: Project, stage_label: str, days: int
+) -> None:
+    """フォローアップ作成を営業活動タイムライン（SalesActivity）に記録する。
+
+    メーカー未リンクなら案件情報から作成・リンクしてから記録する（失敗は握りつぶす）。
+    """
+    from app.models.crm import ActivityKind, SalesActivity
+    from app.services import crm_service
+
+    if not project.maker_id:
+        try:
+            crm_service.create_from_project(db, project)
+            db.refresh(project)
+        except Exception:  # noqa: BLE001  メーカー作成失敗でも本処理は続行
+            db.rollback()
+    if not project.maker_id:
+        return
+    try:
+        db.add(
+            SalesActivity(
+                maker_id=project.maker_id,
+                project_id=project.id,
+                kind=ActivityKind.email.value,
+                summary=f"フォローアップメール作成（{stage_label}・最終営業から{days}日）",
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001  タイムライン記録失敗は本処理を妨げない
+        db.rollback()
+
+
+def generate_followup(
+    db: Session,
+    project: Project,
+    *,
+    days: int | None = None,
+    set_awaiting_reply: bool = True,
+    to: str | None = None,
+) -> dict:
+    """最終営業からの経過日数に応じたフォローアップ下書きを作成する。
+
+    - 3日未満は ValueError（まだフォロー時期でない）。
+    - 段階（light/repropose/final）で文面を変え、EmailDraft として保存する。
+    - 既存の差出人情報・企業リサーチ・担当者情報を反映する。
+    - Gmail 下書きを開く URL（宛先/件名/本文入り）を生成する。
+    - 営業活動タイムラインに記録し、必要なら営業状況を「返信待ち」に更新する。
+
+    Returns: draft / stage / stage_label / days_since_last_outreach /
+             follow_up_level / gmail_compose_url / recipient / sales_status
+    """
+    from app.ai import followup as fu
+    from app.services import (
+        email_delivery_service,
+        project_service,
+        workflow_service,
+    )
+
+    if days is None:
+        days = workflow_service.last_outreach_days(db, project)
+    stage = fu.stage_for_days(days)
+    if stage is None:
+        raise ValueError(
+            "まだフォロー時期ではありません（最終営業から3日未満）。"
+        )
+
+    ctx = SenderContext.from_settings(email_settings_service.get_settings(db))
+    research = company_research_service.to_context(
+        company_research_service.get_latest_completed(db, project.id)
+    )
+    contact = _greeting_contact(db, project.id)
+    msg = fu.build_followup_message(
+        project, stage=stage, days=days, ctx=ctx, research=research, contact=contact
+    )
+
+    draft = EmailDraft(
+        project_id=project.id,
+        email_type=EmailType.followup.value,
+        subject=msg["subject"],
+        body=msg["body"],
+        language="en",
+        model="rule-followup-v1",
+        subject_options=msg["subject_options"],
+        selected_subject=msg["subject"],
+        tone=DEFAULT_TONE.value,
+        japanese_summary=msg["japanese_summary"],
+        personalization_context={
+            "followup_stage": stage,
+            "days_since_last_outreach": days,
+        },
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+
+    recipient = email_delivery_service.resolve_recipient(db, draft, to)
+    compose_url = fu.gmail_compose_url(recipient, draft.subject, draft.body)
+
+    # 活動タイムラインに記録
+    _record_followup_activity(db, project, msg["stage_label"], days)
+
+    # 営業状況：フォロー後は「返信待ち」に寄せる（返信あり/商談中/契約/見送りは変えない）
+    if set_awaiting_reply and project.sales_status in _FOLLOWUP_SETTABLE_FROM:
+        project_service.update_sales_status(db, project, SalesStatus.awaiting_reply)
+
+    return {
+        "draft": draft,
+        "stage": stage,
+        "stage_label": msg["stage_label"],
+        "days_since_last_outreach": days,
+        "follow_up_level": fu.STAGE_TO_LEVEL[stage],
+        "gmail_compose_url": compose_url,
+        "recipient": recipient,
+        "sales_status": project.sales_status,
+    }

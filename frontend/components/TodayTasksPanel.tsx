@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import {
+  createFollowupEmail,
   fetchSalesTasks,
   type FollowUpLevel,
+  type FollowupEmailResult,
   SALES_STATUS_LABELS,
   type SalesTask,
   type TodayTasks,
@@ -72,6 +74,71 @@ function Stars({ n }: { n: number }) {
   );
 }
 
+// フォローアップ専用アクション：その場でメール作成し Gmail 下書きを開けるようにする。
+function FollowupAction({ task }: { task: SalesTask }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<FollowupEmailResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await createFollowupEmail(task.project_id);
+      setResult(res);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <div className="mt-1.5 space-y-1">
+        <p className="text-[11px] font-medium text-emerald-700">
+          フォローアップ作成（{result.stage_label}）→ 返信待ちに更新
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <a
+            href={result.gmail_compose_url}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-emerald-700"
+          >
+            Gmailで下書きを開く
+          </a>
+          <Link
+            href={`/projects/${task.project_id}?sales=1`}
+            className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-white"
+          >
+            案件を開く
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <button
+        onClick={run}
+        disabled={busy}
+        className="rounded bg-amber-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+      >
+        {busy ? "作成中…" : "フォローアップメール作成"}
+      </button>
+      <Link
+        href={`/projects/${task.project_id}?sales=1`}
+        className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-white"
+      >
+        案件を開く
+      </Link>
+      {error && <span className="text-[11px] text-red-600">作成に失敗しました</span>}
+    </div>
+  );
+}
+
 // 案件詳細（営業フロー）への各種アクションボタン。実処理は案件ページに集約する。
 function ActionButtons({
   task,
@@ -101,15 +168,6 @@ function ActionButtons({
           Contact Intelligence
         </Link>
       )}
-      {/* 連絡先メールがあれば Gmail 下書きは案件ページのチャネルから開く */}
-      {task.has_email && (
-        <Link
-          href={salesUrl}
-          className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-white"
-        >
-          Gmailで下書き
-        </Link>
-      )}
       <Link
         href={salesUrl}
         className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-white"
@@ -126,7 +184,15 @@ function ActionButtons({
   );
 }
 
-function TaskCard({ task, cta }: { task: SalesTask; cta: string | null }) {
+function TaskCard({
+  task,
+  cta,
+  isFollowup,
+}: {
+  task: SalesTask;
+  cta: string | null;
+  isFollowup: boolean;
+}) {
   const level = task.follow_up_level
     ? FOLLOWUP_BADGE[task.follow_up_level]
     : null;
@@ -167,7 +233,11 @@ function TaskCard({ task, cta }: { task: SalesTask; cta: string | null }) {
         </ul>
       )}
 
-      <ActionButtons task={task} cta={cta} />
+      {isFollowup ? (
+        <FollowupAction task={task} />
+      ) : (
+        <ActionButtons task={task} cta={cta} />
+      )}
     </li>
   );
 }
@@ -218,7 +288,12 @@ export default function TodayTasksPanel({ reloadKey }: { reloadKey?: number }) {
                 ) : (
                   <ul className="mt-1.5 space-y-1.5">
                     {items.map((t) => (
-                      <TaskCard key={t.project_id} task={t} cta={g.cta} />
+                      <TaskCard
+                        key={t.project_id}
+                        task={t}
+                        cta={g.cta}
+                        isFollowup={g.key === "followup"}
+                      />
                     ))}
                   </ul>
                 )}

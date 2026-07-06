@@ -18,6 +18,8 @@ from app.email.providers.base import EmailProviderError
 from app.schemas.email_draft import (
     EmailDraftOut,
     EmailProviderInfo,
+    FollowupEmailRequest,
+    FollowupEmailResult,
     GenerateDraftsRequest,
     ProviderDraftRequest,
     ProviderDraftResult,
@@ -92,6 +94,52 @@ def generate_email_drafts(
         raise HTTPException(
             status_code=502, detail=f"営業メール生成に失敗しました: {exc}"
         )
+
+
+@router.post(
+    "/projects/{project_id}/followup-email",
+    response_model=FollowupEmailResult,
+)
+def create_followup_email(
+    project_id: int,
+    payload: FollowupEmailRequest | None = None,
+    db: Session = Depends(get_db),
+) -> FollowupEmailResult:
+    """フォローアップメール（2通目・3通目）を作成する。
+
+    最終営業日からの経過日数で段階（軽い確認 / 再提案 / 最終フォロー）を決め、
+    下書きを保存・営業活動タイムラインに記録し、Gmail 下書きを開く URL を返す。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    req = payload or FollowupEmailRequest()
+    try:
+        result = email_service.generate_followup(
+            db,
+            project,
+            days=req.days,
+            set_awaiting_reply=req.set_awaiting_reply,
+            to=req.to,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001  失敗を記録しアプリは落とさない
+        db.rollback()
+        logger.warning("followup generation failed (project=%s): %s", project_id, exc)
+        raise HTTPException(
+            status_code=502, detail=f"フォローアップ生成に失敗しました: {exc}"
+        )
+    return FollowupEmailResult(
+        draft=EmailDraftOut.model_validate(result["draft"]),
+        stage=result["stage"],
+        stage_label=result["stage_label"],
+        days_since_last_outreach=result["days_since_last_outreach"],
+        follow_up_level=result["follow_up_level"],
+        gmail_compose_url=result["gmail_compose_url"],
+        recipient=result["recipient"],
+        sales_status=result["sales_status"],
+    )
 
 
 @router.patch("/email-drafts/{draft_id}/subject", response_model=EmailDraftOut)
