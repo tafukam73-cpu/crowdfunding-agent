@@ -2847,6 +2847,18 @@ export const DISCOVERY_PLATFORM_ORDER: DiscoverySourcePlatform[] = [
   "other",
 ];
 
+// Discovery 実行で「実サイト取得」に対応済みのプラットフォーム。
+// backend の routers/discovery.py `_LIVE_FETCH_PLATFORMS` と必ず一致させること。
+// ここに無いものは未接続（準備中）＝実行ボタンを無効化する。
+export const DISCOVERY_LIVE_FETCH_PLATFORMS: DiscoverySourcePlatform[] = [
+  "kickstarter",
+];
+
+// 指定プラットフォームが実サイト取得に対応済みか。
+export function isDiscoveryLiveFetch(platform: string): boolean {
+  return (DISCOVERY_LIVE_FETCH_PLATFORMS as string[]).includes(platform);
+}
+
 // ステータスの日本語表示。
 export const DISCOVERY_STATUS_LABELS: Record<string, string> = {
   live: "実施中",

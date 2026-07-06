@@ -11,6 +11,7 @@ import {
   DISCOVERY_STATUS_COLORS,
   DISCOVERY_STATUS_LABELS,
   DISCOVERY_STATUS_ORDER,
+  isDiscoveryLiveFetch,
   type DiscoveredProduct,
   type DiscoveredProductCreate,
   type DiscoveryListParams,
@@ -84,7 +85,11 @@ function RunForm({ onRan }: { onRan: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DiscoveryRunResult | null>(null);
 
+  // 実サイト取得に対応しているプラットフォームか（未対応は実行不可）。
+  const liveFetch = isDiscoveryLiveFetch(platform);
+
   async function run() {
+    if (!liveFetch) return; // 未接続（準備中）は実行しない
     setBusy(true);
     setError(null);
     try {
@@ -112,8 +117,8 @@ function RunForm({ onRan }: { onRan: () => void }) {
       <p className="mb-3 text-xs text-slate-500">
         発掘元を指定して収集フレームワークを実行します。
         <span className="font-medium text-slate-700">Kickstarter は実サイト取得に対応</span>
-        （robots 尊重・レート制限・タイムアウト付き）。Indiegogo / Ulule 等は未接続のため
-        取得 0 件になります（未接続時は外部送信なし）。
+        （robots 尊重・レート制限・タイムアウト付き）。Indiegogo / BackerKit は未接続
+        （準備中）のため実行できません。
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="text-xs text-slate-600">
@@ -125,9 +130,12 @@ function RunForm({ onRan }: { onRan: () => void }) {
             }
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
           >
-            {DISCOVERY_PLATFORM_ORDER.map((p) => (
+            {DISCOVERY_PLATFORM_ORDER.filter(
+              (p) => p !== "manual" && p !== "other"
+            ).map((p) => (
               <option key={p} value={p}>
                 {platformLabel(p)}
+                {isDiscoveryLiveFetch(p) ? "" : "（準備中）"}
               </option>
             ))}
           </select>
@@ -162,12 +170,27 @@ function RunForm({ onRan }: { onRan: () => void }) {
         </label>
       </div>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {!liveFetch && (
+        <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          {platformLabel(platform)} は実サイト取得が未接続（準備中）です。
+          現在は <b>Kickstarter</b> のみ実取得に対応しています。
+        </p>
+      )}
       <button
         onClick={run}
-        disabled={busy}
-        className="mt-3 rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+        disabled={busy || !liveFetch}
+        title={
+          liveFetch
+            ? undefined
+            : `${platformLabel(platform)} は準備中のため実行できません`
+        }
+        className="mt-3 rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? "実行中…" : "Discovery を実行"}
+        {busy
+          ? "実行中…"
+          : liveFetch
+          ? "Discovery を実行"
+          : "準備中（実行できません）"}
       </button>
 
       {result && (
