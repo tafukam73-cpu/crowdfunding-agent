@@ -96,6 +96,87 @@ def _clamp(value: Any, default: int = 50) -> int:
     return max(0, min(100, v))
 
 
+# --- 営業価値スコア（Sales Value）------------------------------------------- #
+# 「営業すべき順」を作るための合成スコア。日本市場適性・CF 適性・独自性・各種
+# リスクの低さ（=安全度）を重み付けした基礎点に、クラファン実績（達成率・支援者数）
+# の traction ボーナスを足す。既存のスコア系カラムから決定的に算出する（再計算可能）。
+_SALES_VALUE_WEIGHTS: dict[str, float] = {
+    "japan_fit_score": 0.30,          # 日本市場適性
+    "crowdfunding_fit_score": 0.24,   # Makuake / GreenFunding 向き（BtoC/CF 適性）
+    "novelty_score": 0.16,            # 商品の独自性
+    "regulatory_risk_score": 0.10,    # 規制の安全度（高い=安全）
+    "japan_entry_risk_score": 0.08,   # 日本参入の安全度（未上陸可能性を含む）
+    "logistics_score": 0.07,          # 小型・軽量・物流適性
+    "competition_risk_score": 0.05,   # 競合の少なさ（高い=安全）
+}
+
+
+def _read_score(product: Any, key: str) -> Any:
+    if isinstance(product, dict):
+        return product.get(key)
+    return getattr(product, key, None)
+
+
+def achievement_rate(product: Any) -> float | None:
+    """達成率（%）= 調達額 / 目標額 × 100。目標額が無い/0 なら None。"""
+    info = _extract_info(product)
+    amount = _to_float(info.get("funding_amount"))
+    goal = _to_float(info.get("funding_goal"))
+    if amount is None or goal is None or goal <= 0:
+        return None
+    return round(amount / goal * 100.0, 1)
+
+
+def _traction_bonus(product: Any) -> float:
+    """クラファン実績（達成率・支援者数）による加点（最大 +18）。"""
+    bonus = 0.0
+    rate = achievement_rate(product)
+    if rate is not None:
+        if rate >= 1000:
+            bonus += 15
+        elif rate >= 300:
+            bonus += 12
+        elif rate >= 100:
+            bonus += 8
+        elif rate >= 50:
+            bonus += 4
+    backers_raw = _read_score(product, "backers_count")
+    try:
+        backers = int(backers_raw) if backers_raw is not None else None
+    except (TypeError, ValueError):
+        backers = None
+    if backers is not None:
+        if backers >= 10_000:
+            bonus += 10
+        elif backers >= 2_000:
+            bonus += 8
+        elif backers >= 500:
+            bonus += 5
+        elif backers >= 100:
+            bonus += 2
+    return min(bonus, 18.0)
+
+
+def sales_value_score(product: Any) -> int | None:
+    """営業価値スコア（0〜100）。未スコアリング（overall 未設定）なら None。
+
+    基礎点（日本適性・CF 適性・独自性・安全度の重み付き平均）に、クラファン実績の
+    traction ボーナスを加え、失敗/中止案件は減点する。「営業すべき順」の並び替えに使う。
+    """
+    if _read_score(product, "overall_discovery_score") is None:
+        return None  # 未スコアリングは営業価値も未確定
+    base = sum(
+        _clamp(_read_score(product, key)) * weight
+        for key, weight in _SALES_VALUE_WEIGHTS.items()
+    )
+    value = base + _traction_bonus(product)
+    status_raw = _read_score(product, "status")
+    status = str(getattr(status_raw, "value", status_raw) or "").lower()
+    if status in ("failed", "canceled"):
+        value -= 12  # 失敗・中止案件は営業価値を下げる
+    return _clamp(value)
+
+
 def _extract_info(product: Any) -> dict:
     """DiscoveredProduct / dict / None から評価に必要な項目を取り出す。"""
     if product is None:

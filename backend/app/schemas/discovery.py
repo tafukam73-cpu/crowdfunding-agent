@@ -4,12 +4,13 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.models.discovered_product import (
     DiscoveredProductStatus,
     DiscoverySourcePlatform,
 )
+from app.services import discovery_scoring_service
 
 
 class DiscoveredProductCreate(BaseModel):
@@ -167,6 +168,8 @@ class DiscoveryRunResult(BaseModel):
     finished_at: datetime | None = None
     # True: 実サイトから取得を試みた（Kickstarter 等）。False: fetch 未接続（0 件は仕様）。
     network_fetched: bool = False
+    # 自動スコアリング済みの件数（取得直後に何件評価できたか）。
+    scored_count: int = 0
 
 
 class DiscoveryContactIntelligenceResult(BaseModel):
@@ -219,5 +222,18 @@ class DiscoveredProductOut(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+    # --- 派生指標（DB カラムではなく保存済みスコア・調達額から都度算出）--------- #
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def achievement_rate(self) -> float | None:
+        """達成率（%）= 調達額 / 目標額 × 100。目標額が無ければ None。"""
+        return discovery_scoring_service.achievement_rate(self)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sales_value_score(self) -> int | None:
+        """営業価値スコア（0〜100）。未スコアリングなら None。"""
+        return discovery_scoring_service.sales_value_score(self)
 
     model_config = ConfigDict(from_attributes=True)

@@ -53,13 +53,17 @@ def run_discovery(
     if payload.source_platform in _LIVE_FETCH_PLATFORMS:
         fetch_fn = discovery_fetch.build_http_fetcher()
 
+    # 実取得プラットフォームは取得直後に自動スコアリングして「営業すべき順」に
+    # 並べられる状態にする（UI チェックボックスに関わらず既定で評価する）。
+    auto_score = payload.auto_score or payload.source_platform in _LIVE_FETCH_PLATFORMS
+
     try:
         result = discovery_crawler_service.run(
             db,
             source_platform=payload.source_platform,
             query=payload.query,
             limit=payload.limit,
-            auto_score=payload.auto_score,
+            auto_score=auto_score,
             fetch_fn=fetch_fn,
         )
     finally:

@@ -80,7 +80,7 @@ function RunForm({ onRan }: { onRan: () => void }) {
     useState<DiscoverySourcePlatform>("kickstarter");
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(20);
-  const [autoScore, setAutoScore] = useState(false);
+  const [autoScore, setAutoScore] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DiscoveryRunResult | null>(null);
@@ -166,7 +166,7 @@ function RunForm({ onRan }: { onRan: () => void }) {
             checked={autoScore}
             onChange={(e) => setAutoScore(e.target.checked)}
           />
-          保存時に自動スコアリング（auto_score）
+          保存時に自動スコアリング（Kickstarter は常に自動評価）
         </label>
       </div>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -204,6 +204,10 @@ function RunForm({ onRan }: { onRan: () => void }) {
             </span>
             <span>
               重複 <b className="text-amber-700">{result.duplicate_count}</b> 件
+            </span>
+            <span>
+              スコアリング済み{" "}
+              <b className="text-blue-700">{result.scored_count}</b> 件
             </span>
             <span>
               ステータス: <b>{result.status}</b>
@@ -488,12 +492,31 @@ function ProductCard({
         {product.country && <span>国: {product.country}</span>}
         <span>調達額: {money(product.funding_amount)}</span>
         <span>支援者: {product.backers_count ?? "-"}</span>
+        <span>
+          達成率:{" "}
+          {product.achievement_rate != null
+            ? `${Math.round(product.achievement_rate).toLocaleString()}%`
+            : "-"}
+        </span>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      {/* 営業価値・日本市場適性を目立たせる（「営業すべき順」の判断軸） */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-bold ${scoreColor(
+            product.sales_value_score
+          )}`}
+          title="営業価値スコア（営業すべき順）"
+        >
+          営業価値 {scoreText(product.sales_value_score)}
+        </span>
+        <ScoreChip label="日本市場適性" value={product.japan_fit_score} />
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
         <ScoreChip label="総合" value={product.overall_discovery_score} />
-        <ScoreChip label="日本適合" value={product.japan_fit_score} />
         <ScoreChip label="CF適性" value={product.crowdfunding_fit_score} />
+        <ScoreChip label="独自性" value={product.novelty_score} />
       </div>
 
       {product.discovery_reasoning && (
@@ -570,7 +593,7 @@ function ProductCard({
 // ---------------------------------------------------------------------------
 // ページ本体（E. フィルター + C. 一覧）
 // ---------------------------------------------------------------------------
-type SortUi = "score_desc" | "created_desc";
+type SortUi = "sales" | "japan" | "created";
 
 export default function DiscoveryPage() {
   const [products, setProducts] = useState<DiscoveredProduct[]>([]);
@@ -582,15 +605,13 @@ export default function DiscoveryPage() {
   const [status, setStatus] = useState("");
   const [category, setCategory] = useState("");
   const [minScore, setMinScore] = useState("");
-  const [sortUi, setSortUi] = useState<SortUi>("score_desc");
+  const [sortUi, setSortUi] = useState<SortUi>("sales");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params: DiscoveryListParams = {
-        sort: sortUi === "created_desc" ? "created" : "score",
-      };
+      const params: DiscoveryListParams = { sort: sortUi };
       if (platform) params.platform = platform;
       if (status) params.status = status;
       if (category) params.category = category;
@@ -692,8 +713,9 @@ export default function DiscoveryPage() {
                 onChange={(e) => setSortUi(e.target.value as SortUi)}
                 className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
               >
-                <option value="score_desc">スコアが高い順</option>
-                <option value="created_desc">登録が新しい順</option>
+                <option value="sales">営業価値が高い順</option>
+                <option value="japan">日本市場適性が高い順</option>
+                <option value="created">登録が新しい順</option>
               </select>
             </label>
           </div>

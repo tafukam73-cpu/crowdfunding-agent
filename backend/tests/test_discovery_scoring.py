@@ -258,6 +258,88 @@ def test_api_score_endpoint():
     check("存在しない id は 404", r4.status_code == 404)
 
 
+def test_achievement_rate():
+    print("test_achievement_rate")
+    check("達成率 = 調達額/目標額*100",
+          scoring.achievement_rate(
+              {"funding_amount": 30000, "funding_goal": 10000}) == 300.0)
+    check("目標額が無ければ None",
+          scoring.achievement_rate({"funding_amount": 30000}) is None)
+    check("目標額 0 は None（ゼロ除算しない）",
+          scoring.achievement_rate(
+              {"funding_amount": 30000, "funding_goal": 0}) is None)
+
+
+def test_sales_value_score():
+    print("test_sales_value_score")
+    # 未スコアリング（overall 未設定）は営業価値も None
+    check("未スコアリングは sales_value None",
+          scoring.sales_value_score(
+              {"overall_discovery_score": None, "japan_fit_score": 80}) is None)
+
+    base = {
+        "japan_fit_score": 70, "crowdfunding_fit_score": 65, "novelty_score": 60,
+        "logistics_score": 60, "regulatory_risk_score": 70,
+        "competition_risk_score": 55, "japan_entry_risk_score": 65,
+        "overall_discovery_score": 65, "status": "live",
+    }
+    low = scoring.sales_value_score({**base})
+    check("スコアリング済みは 0〜100 の int",
+          isinstance(low, int) and 0 <= low <= 100)
+
+    # traction（達成率・支援者数）が高いほど営業価値が上がる
+    high = scoring.sales_value_score(
+        {**base, "funding_amount": 500000, "funding_goal": 10000,
+         "backers_count": 12000})
+    check("実績（高達成率・多支援者）で営業価値が上がる", high > low)
+
+    # 日本適性が高いほど営業価値が上がる
+    more_jp = scoring.sales_value_score({**base, "japan_fit_score": 95})
+    check("日本適性が高いほど営業価値が上がる", more_jp > low)
+
+    # 失敗案件は減点される
+    failed = scoring.sales_value_score({**base, "status": "failed"})
+    check("失敗案件は営業価値が下がる", failed < low)
+
+
+def test_sales_and_japan_sort():
+    print("test_sales_and_japan_sort")
+    db = SessionLocal()
+    # 高営業価値（高達成率・多支援・日本適性高）
+    hi, _ = svc.create(db, {
+        "source_platform": "kickstarter",
+        "source_url": "https://kck.st/sv-hi",
+        "product_name": "compact kitchen organizer",
+        "category": "kitchen",
+        "description": "A small, lightweight kitchen organizer for tidy counters.",
+        "status": "successful", "backers_count": 8000,
+        "funding_amount": 800000, "funding_goal": 10000,
+    }, auto_score=True)
+    # 低営業価値（規制カテゴリ・実績少）
+    lo, _ = svc.create(db, {
+        "source_platform": "kickstarter",
+        "source_url": "https://kck.st/sv-lo",
+        "product_name": "nicotine vape device",
+        "category": "nicotine",
+        "description": "A wireless nicotine vaporizer with bluetooth app control.",
+        "status": "live", "backers_count": 5,
+        "funding_amount": 100, "funding_goal": 100000,
+    }, auto_score=True)
+
+    sv_hi = scoring.sales_value_score(hi)
+    sv_lo = scoring.sales_value_score(lo)
+    check("高実績・好カテゴリの方が営業価値が高い", sv_hi > sv_lo)
+
+    sales_sorted = svc.list_products(db, platform="kickstarter", sort="sales")
+    ids = [p.id for p in sales_sorted]
+    check("sort=sales は hi が lo より前", ids.index(hi.id) < ids.index(lo.id))
+
+    japan_sorted = svc.list_products(db, platform="kickstarter", sort="japan")
+    jp = [p.japan_fit_score for p in japan_sorted if p.japan_fit_score is not None]
+    check("sort=japan は日本適性の降順", all(jp[i] >= jp[i+1] for i in range(len(jp)-1)))
+    db.close()
+
+
 def main():
     test_small_kitchen_high()
     test_caution_categories_low_regulatory()
@@ -268,6 +350,9 @@ def main():
     test_score_product_updates_db()
     test_auto_score_flag()
     test_api_score_endpoint()
+    test_achievement_rate()
+    test_sales_value_score()
+    test_sales_and_japan_sort()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

@@ -25,7 +25,7 @@ logger = logging.getLogger("discovery")
 
 _VALID_PLATFORM = {p.value for p in DiscoverySourcePlatform}
 _VALID_STATUS = {s.value for s in DiscoveredProductStatus}
-_VALID_SORT = {"score", "created"}
+_VALID_SORT = {"score", "created", "sales", "japan"}
 
 # 未指定を表すセンチネル（None を「クリア」と区別するため）
 _UNSET = object()
@@ -276,6 +276,8 @@ def list_products(
     """商品候補一覧を取得する（フィルター・並び替え対応）。
 
     sort:
+      - "sales"        : 営業価値スコア降順（「営業すべき順」。未設定は末尾）
+      - "japan"        : 日本市場適性スコア降順（未設定は末尾）
       - "score"（既定）: 総合発掘スコア降順（未設定は末尾）
       - "created"      : 作成日時の新しい順
     """
@@ -293,6 +295,28 @@ def list_products(
         stmt = stmt.order_by(
             desc(DiscoveredProduct.created_at), desc(DiscoveredProduct.id)
         )
+    elif sort == "japan":
+        stmt = stmt.order_by(
+            DiscoveredProduct.japan_fit_score.is_(None),
+            desc(DiscoveredProduct.japan_fit_score),
+            desc(DiscoveredProduct.id),
+        )
+    elif sort == "sales":
+        # 営業価値は保存済みスコアから都度算出する派生値のため Python 側で並べる。
+        # まず総合スコア降順で取り出し、営業価値で安定ソートし直す（未設定は末尾）。
+        stmt = stmt.order_by(
+            DiscoveredProduct.overall_discovery_score.is_(None),
+            desc(DiscoveredProduct.overall_discovery_score),
+            desc(DiscoveredProduct.id),
+        )
+        rows = list(db.scalars(stmt).all())
+
+        def _sales_key(p: DiscoveredProduct):
+            sv = discovery_scoring_service.sales_value_score(p)
+            return (sv is None, -(sv or 0), -p.id)
+
+        rows.sort(key=_sales_key)
+        return rows
     else:  # "score"（既定）。未設定（NULL）は末尾へ（DB 非依存の並び）。
         stmt = stmt.order_by(
             DiscoveredProduct.overall_discovery_score.is_(None),

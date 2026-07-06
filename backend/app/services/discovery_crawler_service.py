@@ -82,6 +82,7 @@ def run(
     found_count = len(candidates)
     product_ids: list[int] = []
     duplicate_count = 0
+    scored_count = 0
     seen_urls: set[str] = set()
 
     for candidate in candidates:
@@ -106,6 +107,9 @@ def run(
 
         if created:
             product_ids.append(product.id)
+            # auto_score=True なら create 内でスコアリング済み。評価できた件数を数える。
+            if product.overall_discovery_score is not None:
+                scored_count += 1
         else:
             # DB に既存（source_url 重複）→ 二重保存しない
             duplicate_count += 1
@@ -156,6 +160,7 @@ def run(
         "found_count": found_count,
         "saved_count": saved_count,
         "duplicate_count": duplicate_count,
+        "scored_count": scored_count,
         "error_message": error_message,
         "product_ids": product_ids,
         "started_at": started_at,

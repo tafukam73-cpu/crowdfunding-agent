@@ -2922,6 +2922,9 @@ export type DiscoveredProduct = {
   contact_discovery_id: number | null;
   created_at: string;
   updated_at: string;
+  // 派生指標（backend の computed field）。未スコアリング/目標額なしは null。
+  achievement_rate: number | null; // 達成率（%）
+  sales_value_score: number | null; // 営業価値スコア（0〜100）
 };
 
 // 商品候補の手動登録ペイロード（backend DiscoveredProductCreate に対応・任意項目）。
@@ -2974,15 +2977,18 @@ export type DiscoveryRunResult = {
   finished_at: string | null;
   // true: 実サイトから取得を試みた（Kickstarter 等）。false: fetch 未接続（0件は仕様）。
   network_fetched: boolean;
+  // 取得直後に自動スコアリングできた件数。
+  scored_count: number;
 };
 
-// 一覧の絞り込み・並び替え。sort は backend の "score" / "created" に対応。
+// 一覧の絞り込み・並び替え。sort は backend の
+// "sales"（営業価値）/ "japan"（日本市場適性）/ "score"（総合）/ "created"（新着）に対応。
 export type DiscoveryListParams = {
   platform?: string;
   status?: string;
   category?: string;
   min_score?: number;
-  sort?: "score" | "created";
+  sort?: "sales" | "japan" | "score" | "created";
 };
 
 // GET /discovery/products
