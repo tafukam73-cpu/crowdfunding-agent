@@ -53,6 +53,8 @@ export default function Home() {
   const [reloadKey, setReloadKey] = useState(0);
   const [costKey, setCostKey] = useState(0);
   const [evaluating, setEvaluating] = useState(false);
+  // 未評価（AI未評価）件数。件数の内訳を明示して収集履歴との矛盾をなくす。
+  const [unevaluated, setUnevaluated] = useState<number | null>(null);
 
   useEffect(() => {
     const params: ListParams = {
@@ -75,6 +77,17 @@ export default function Home() {
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, [site, status, q, recommendation, candidatesOnly, sort, order, page, reloadKey]);
+
+  // 未評価件数を取得（件数内訳の表示・「未評価をAI評価」の目安に使う）。
+  useEffect(() => {
+    let active = true;
+    fetchEvaluateEstimate()
+      .then((est) => active && setUnevaluated(est.count))
+      .catch(() => active && setUnevaluated(null));
+    return () => {
+      active = false;
+    };
+  }, [reloadKey]);
 
   async function onEvaluateAll() {
     try {
@@ -161,13 +174,24 @@ export default function Home() {
               で確認できます。
             </p>
           </div>
-          <button
-            onClick={onEvaluateAll}
-            disabled={evaluating}
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {evaluating ? "評価中…" : "未評価をAI評価"}
-          </button>
+          <div className="flex items-center gap-2">
+            {unevaluated != null && unevaluated > 0 && (
+              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                未評価 {unevaluated} 件
+              </span>
+            )}
+            <button
+              onClick={onEvaluateAll}
+              disabled={evaluating || unevaluated === 0}
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {evaluating
+                ? "評価中…"
+                : unevaluated && unevaluated > 0
+                ? `未評価 ${unevaluated} 件をAI評価`
+                : "未評価をAI評価"}
+            </button>
+          </div>
         </div>
 
         {/* フィルタ */}
@@ -339,7 +363,12 @@ export default function Home() {
                           {p.latest_score}
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-300">—</span>
+                        <span
+                          className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                          title="AI未評価。「未評価をAI評価」で評価できます"
+                        >
+                          未評価
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -393,7 +422,16 @@ export default function Home() {
         {/* ページング */}
         <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
           <span>
-            {data ? `全 ${data.total} 件` : ""}
+            {data
+              ? `全 ${data.total} 件${
+                  unevaluated != null ? `（うち未評価 ${unevaluated} 件）` : ""
+                }`
+              : ""}
+            {candidatesOnly && (
+              <span className="ml-1 text-xs text-slate-400">
+                ・「営業対象候補のみ」で非物販のUlule案件を除外中（「営業対象外を含む」で全件表示）
+              </span>
+            )}
             {loading && "（読み込み中…）"}
           </span>
           <div className="flex items-center gap-2">
