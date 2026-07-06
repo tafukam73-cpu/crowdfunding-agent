@@ -1482,44 +1482,147 @@ def _robots_disallows(client, root: str) -> list[str]:
     return disallows
 
 
-def _default_fetcher():
-    """取得関数（url -> html or None）を返す。
+# --- httpx-first / Playwright フォールバックの取得基盤（速度と発見率の両立）--------- #
+# フォールバックする goto タイムアウト（秒）。チャレンジ通過に必要な最小限に抑える。
+PLAYWRIGHT_FALLBACK_TIMEOUT = 10.0
+# httpx 本文が「極端に短い」とみなす閾値（バイト）。JS 描画待ちの疑い。
+_MIN_HTML_LEN = 500
+# 重要 URL（TOP / contact / support / about）は取得失敗時に Playwright を試す。
+_IMPORTANT_URL_HINTS = ("contact", "support", "about")
+# Cloudflare / bot チャレンジ・JS 必須の典型マーカー（httpx 本文に出たら PW へ）。
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "cf-challenge",
+    "/cdn-cgi/challenge-platform",
+    "cf-browser-verification",
+    "attention required",
+    "verifying you are human",
+    "please enable javascript",
+    "enable javascript to",
+    "please turn on javascript",
+)
 
-    メール発見率改善：既定は Playwright（ヘッドレス Chromium）で取得し、Cloudflare の
-    JS チャレンジ（従来 httpx では 403=CRAWL_BLOCKED になっていた）を通す。JS 描画後の
-    DOM を返すため、JS で差し込まれる連絡先も抽出できる。Playwright 初期化に失敗した
-    環境では httpx にフォールバックする（従来動作）。
+
+def _is_important_url(url: str) -> bool:
+    path = (urlparse(url).path or "/").rstrip("/").lower()
+    if path in ("", "/"):
+        return True
+    return any(h in path for h in _IMPORTANT_URL_HINTS)
+
+
+def _needs_playwright(html: str | None, status: int | None, important: bool) -> bool:
+    """httpx の結果から Playwright フォールバックが必要かを判定する。"""
+    # 403 / 429：ボット対策・レート制限 → ブラウザで通す
+    if status in (403, 429):
+        return True
+    if not html:
+        # 空本文：重要 URL のみ PW（DNS 失敗等の無駄打ちを避ける）
+        return important
+    low = html.lower()
+    # Cloudflare / チャレンジ / JS 必須マーカー
+    if any(m in low for m in _CHALLENGE_MARKERS):
+        return True
+    # 極端に短い本文（JS 描画待ちの疑い）は重要 URL のみ PW
+    if len(html.strip()) < _MIN_HTML_LEN and important:
+        return True
+    return False
+
+
+class _HybridFetcher:
+    """httpx を優先し、必要時のみ Playwright にフォールバックする取得クライアント。
+
+    - 通常サイトは httpx（~0.1s/URL）で高速取得。
+    - 403/429・Cloudflare/JS チャレンジ・空/極端に短い本文（重要 URL）でのみ
+      Playwright（~2s/URL）にフォールバック。ブラウザは初回フォールバック時に遅延起動。
+    - robots.txt 取得（``get``）は httpx を使う。
     """
-    from app.config import settings
 
-    method = getattr(settings, "scrape_fetcher", "httpx") or "httpx"
-    try:
-        from app.scrapers.fetcher import get_fetcher
-
-        client = get_fetcher(
-            method,
-            rate_limit_seconds=RATE_LIMIT_SECONDS,
-            timeout=FETCH_TIMEOUT,
-            retries=FETCH_RETRIES,
-        )
-    except Exception as exc:  # noqa: BLE001  Playwright 未導入等は httpx へ退避
-        logger.warning("contact fetcher init failed (%s); httpx にフォールバック", exc)
+    def __init__(self) -> None:
         from app.scrapers.http import HttpClient
 
-        client = HttpClient(
+        self._http = HttpClient(
             rate_limit_seconds=RATE_LIMIT_SECONDS,
             timeout=FETCH_TIMEOUT,
             retries=FETCH_RETRIES,
         )
+        self._pw = None  # 遅延起動（必要になるまで Chromium を立ち上げない）
+        self._pw_failed = False
+        self.playwright_fallback_count = 0
+        self.playwright_fallback_urls: list[str] = []
 
-    def fetch(url: str) -> str | None:
+    # robots など単純取得は httpx を使う（discover が client.get を呼ぶ）
+    def get(self, url: str, **kw):
+        return self._http.get(url, **kw)
+
+    def get_text(self, url: str) -> str:
+        return self._http.get_text(url)
+
+    def _ensure_pw(self):
+        if self._pw is None and not self._pw_failed:
+            try:
+                from app.scrapers.fetcher import get_fetcher
+
+                self._pw = get_fetcher(
+                    "playwright",
+                    rate_limit_seconds=0.0,
+                    timeout=PLAYWRIGHT_FALLBACK_TIMEOUT,
+                    retries=0,
+                )
+            except Exception as exc:  # noqa: BLE001  Playwright 未導入等
+                logger.warning("playwright fallback init failed: %s", exc)
+                self._pw_failed = True
+        return self._pw
+
+    def _playwright_fetch(self, url: str) -> str | None:
+        pw = self._ensure_pw()
+        if pw is None:
+            return None
         try:
-            return client.get_text(url)
-        except Exception as exc:  # noqa: BLE001  1 URL 失敗は無視
-            logger.info("fetch failed (%s): %s", url, exc)
+            html = pw.get_text(url)
+            self.playwright_fallback_count += 1
+            self.playwright_fallback_urls.append(url)
+            logger.info("playwright fallback used: %s", url)
+            return html
+        except Exception as exc:  # noqa: BLE001  フォールバック失敗は httpx 結果へ
+            logger.info("playwright fallback failed (%s): %s", url, exc)
             return None
 
-    fetch._client = client  # type: ignore[attr-defined]
+    def fetch(self, url: str) -> str | None:
+        html: str | None = None
+        status: int | None = None
+        try:
+            html = self._http.get_text(url)
+            status = getattr(self._http, "last_status", None)
+        except Exception as exc:  # noqa: BLE001  1 URL 失敗（403 含む）は継続
+            status = getattr(self._http, "last_status", None)
+            logger.debug("httpx fetch issue (%s): %s", url, exc)
+        if _needs_playwright(html, status, _is_important_url(url)):
+            pw_html = self._playwright_fetch(url)
+            if pw_html:
+                return pw_html
+        return html
+
+    def close(self) -> None:
+        for c in (self._http, self._pw):
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+def _default_fetcher():
+    """取得関数（url -> html or None）を返す（httpx 優先・必要時のみ Playwright）。
+
+    速度と発見率の両立：通常サイトは httpx で高速取得し、403/429・Cloudflare/JS
+    チャレンジ・空/極端に短い本文（重要 URL）でのみ Playwright にフォールバックする。
+    """
+    hybrid = _HybridFetcher()
+
+    def fetch(url: str) -> str | None:
+        return hybrid.fetch(url)
+
+    fetch._client = hybrid  # type: ignore[attr-defined]
     return fetch
 
 
@@ -1578,6 +1681,10 @@ def discover(
                 break
             if _blocked(url):
                 logger.info("skip by robots: %s", url)
+                continue
+            # example/dummy/test 等のプレースホルダー URL は取得しない（無駄打ち回避）
+            if is_dummy_domain(urlparse(url).netloc):
+                logger.info("skip dummy url: %s", url)
                 continue
             html = fetch(url)
             searched.append(url)
@@ -1713,15 +1820,28 @@ def discover(
         "discovered_pdfs": pdfs,
     })
 
+    # Playwright フォールバックした URL 数を記録（httpx-first の効果を可視化）。
+    pw_fallbacks = 0
+    if own_fetcher:
+        _hf = getattr(fetch, "_client", None)
+        pw_fallbacks = getattr(_hf, "playwright_fallback_count", 0)
+
     notes_bits = [
         f"searched {len(searched)} url(s)",
         f"{len(emails)} email(s)",
         f"score {score}",
         f"channel {channel}",
     ]
+    if pw_fallbacks:
+        notes_bits.append(f"{pw_fallbacks} playwright fallback(s)")
     if disallows:
         notes_bits.append(f"{len(disallows)} robots disallow rule(s) respected")
     result["notes"] = ", ".join(notes_bits)
+    result["playwright_fallback_count"] = pw_fallbacks
+    logger.info(
+        "contact discover done: searched=%s emails=%s pw_fallbacks=%s",
+        len(searched), len(emails), pw_fallbacks,
+    )
     return result
 
 
