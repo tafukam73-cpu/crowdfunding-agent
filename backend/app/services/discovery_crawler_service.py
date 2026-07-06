@@ -137,9 +137,15 @@ def run(
             error_message=error_message,
         )
 
+    # 実ネットワーク取得を試みたか（fetch_fn 注入の有無）。取得0件のとき
+    # 「実取得したが0件」と「fetch未接続で0件」を画面で区別するために返す。
+    network_fetched = fetch_fn is not None
+
     logger.info(
-        "discovery run done: platform=%s found=%s saved=%s dup=%s status=%s",
+        "discovery run done: platform=%s found=%s saved=%s dup=%s status=%s "
+        "network_fetched=%s",
         platform_value, found_count, saved_count, duplicate_count, status,
+        network_fetched,
     )
 
     return {
@@ -154,6 +160,7 @@ def run(
         "product_ids": product_ids,
         "started_at": started_at,
         "finished_at": finished_at,
+        "network_fetched": network_fetched,
     }
 
 

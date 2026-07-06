@@ -165,6 +165,8 @@ class DiscoveryRunResult(BaseModel):
     product_ids: list[int] = []
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    # True: 実サイトから取得を試みた（Kickstarter 等）。False: fetch 未接続（0 件は仕様）。
+    network_fetched: bool = False
 
 
 class DiscoveryContactIntelligenceResult(BaseModel):

@@ -263,12 +263,15 @@ def test_run_api_endpoint():
     check("manual はネットワーク未注入で found=0（外部アクセスなし）",
           body["found_count"] == 0 and body["saved_count"] == 0)
 
-    # ネットワーク系も API からは外部アクセスせず 200・found=0 で安全に返る
+    # 未接続プラットフォーム（indiegogo）は API からは外部アクセスせず
+    # 200・found=0・network_fetched=False で安全に返る（Kickstarter のみ実取得）。
     r2 = client.post("/discovery/run", json={
-        "source_platform": "kickstarter", "query": "gadgets", "limit": 5,
+        "source_platform": "indiegogo", "query": "gadgets", "limit": 5,
     })
-    check("kickstarter も 200 で安全に返る（found=0）",
-          r2.status_code == 200 and r2.json()["found_count"] == 0)
+    b2 = r2.json()
+    check("未接続 indiegogo は 200・found=0・network_fetched=False",
+          r2.status_code == 200 and b2["found_count"] == 0
+          and b2.get("network_fetched") is False)
 
     # 既存 /discovery/products 系が壊れていないこと
     r3 = client.get("/discovery/products")

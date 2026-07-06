@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 from app.models.discovered_product import DiscoverySourcePlatform
 from app.services.discovery_adapters.base import (
@@ -49,8 +50,15 @@ class KickstarterAdapter(BaseAdapter):
     platform = DiscoverySourcePlatform.kickstarter.value
 
     def build_query_url(self, query: str | None) -> str | None:
-        # v1-3 では実検索は行わず、取得先の宣言のみ（fetch_fn がこの URL を解釈）。
-        return DISCOVER_URL
+        """discover/advanced の JSON 検索 URL を組み立てる（Discovery Engine v1-6）。
+
+        ``format=json`` で ``{"projects": [...]}`` を返させる。query 未指定でも
+        既定の並び（magic）で live 案件が返るため取得は成立する。
+        """
+        params: list[tuple[str, str]] = [("format", "json"), ("sort", "magic")]
+        if query and query.strip():
+            params.append(("term", query.strip()))
+        return f"{DISCOVER_URL}?{urlencode(params)}"
 
     def parse_content(self, text: str, url: str | None = None) -> list[DiscoveryCandidate]:
         data = _try_json(text)

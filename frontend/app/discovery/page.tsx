@@ -110,9 +110,10 @@ function RunForm({ onRan }: { onRan: () => void }) {
         Discovery 実行
       </h2>
       <p className="mb-3 text-xs text-slate-500">
-        発掘元を指定して収集フレームワークを実行します。※ 実サイトからの取得連携は
-        次フェーズ（v1-6）予定のため、現状は取得 0 件になる場合があります（外部送信・
-        課金は発生しません）。
+        発掘元を指定して収集フレームワークを実行します。
+        <span className="font-medium text-slate-700">Kickstarter は実サイト取得に対応</span>
+        （robots 尊重・レート制限・タイムアウト付き）。Indiegogo / Ulule 等は未接続のため
+        取得 0 件になります（未接続時は外部送信なし）。
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="text-xs text-slate-600">
@@ -185,6 +186,24 @@ function RunForm({ onRan }: { onRan: () => void }) {
               ステータス: <b>{result.status}</b>
             </span>
           </div>
+          {/* 実取得 / 未接続 / 0件 / エラー を分かりやすく表示 */}
+          <p className="mt-1 text-xs">
+            {result.network_fetched ? (
+              <span className="text-slate-600">実サイトから取得しました</span>
+            ) : (
+              <span className="text-slate-500">
+                実サイト取得は未接続のプラットフォームです（0 件は仕様・外部送信なし）
+              </span>
+            )}
+          </p>
+          {result.network_fetched &&
+            result.found_count === 0 &&
+            !result.error_message && (
+              <p className="mt-1 text-xs text-amber-700">
+                実サイトへアクセスしましたが、該当する案件は 0 件でした。
+                クエリを変えて再実行してください。
+              </p>
+            )}
           {result.product_ids.length > 0 && (
             <p className="mt-1 text-xs text-slate-600">
               作成された product ids: {result.product_ids.join(", ")}

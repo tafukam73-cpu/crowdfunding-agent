@@ -21,9 +21,17 @@ from app.schemas.discovery import (
     DiscoveryRunRequest,
     DiscoveryRunResult,
 )
-from app.services import discovery_crawler_service, discovery_service
+from app.services import (
+    discovery_crawler_service,
+    discovery_fetch,
+    discovery_service,
+)
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
+
+# 実サイト取得を有効化するプラットフォーム（v1-6 は Kickstarter のみ）。
+# ここに無いプラットフォームは fetch 未接続のまま（従来どおり 0 件・外部送信なし）。
+_LIVE_FETCH_PLATFORMS = {"kickstarter"}
 
 
 @router.post("/run", response_model=DiscoveryRunResult)
@@ -35,17 +43,29 @@ def run_discovery(
     source_platform に対応する adapter で候補を収集し、URL 正規化・重複排除の上で
     discovered_products に保存する。auto_score=True なら保存時に自動スコアリングする。
 
-    v1-3 の安全設計：本 API は実ネットワーク取得を行わない（fetch_fn を注入しない）。
-    ネットワーク系プラットフォームでは候補 0 件となり、外部送信・課金は発生しない。
-    manual では別途投入されたレコードのみを扱う（本エンドポイントからは 0 件）。
+    v1-6：Kickstarter は実サイト（discover/advanced JSON）から取得する。取得は
+    robots 尊重・レート制限・タイムアウト・専用 User-Agent 付き（``discovery_fetch``）。
+    取得失敗は例外で落とさず discovery_runs.error_message に記録する。
+    その他プラットフォームは fetch 未接続のまま（候補 0 件・外部送信なし）。
     """
-    result = discovery_crawler_service.run(
-        db,
-        source_platform=payload.source_platform,
-        query=payload.query,
-        limit=payload.limit,
-        auto_score=payload.auto_score,
-    )
+    # Kickstarter のみ実取得の fetch_fn を注入。他は None（未接続）のまま。
+    fetch_fn = None
+    if payload.source_platform in _LIVE_FETCH_PLATFORMS:
+        fetch_fn = discovery_fetch.build_http_fetcher()
+
+    try:
+        result = discovery_crawler_service.run(
+            db,
+            source_platform=payload.source_platform,
+            query=payload.query,
+            limit=payload.limit,
+            auto_score=payload.auto_score,
+            fetch_fn=fetch_fn,
+        )
+    finally:
+        # 実取得 fetcher（Playwright ブラウザ等）を必ず解放する。
+        if fetch_fn is not None:
+            fetch_fn.close()
     return result
 
 

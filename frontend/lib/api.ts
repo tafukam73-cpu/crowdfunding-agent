@@ -2960,6 +2960,8 @@ export type DiscoveryRunResult = {
   product_ids: number[];
   started_at: string | null;
   finished_at: string | null;
+  // true: 実サイトから取得を試みた（Kickstarter 等）。false: fetch 未接続（0件は仕様）。
+  network_fetched: boolean;
 };
 
 // 一覧の絞り込み・並び替え。sort は backend の "score" / "created" に対応。
