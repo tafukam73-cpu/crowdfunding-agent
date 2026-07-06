@@ -18,14 +18,17 @@ DB 非依存でテストできるようにしている。
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import and_, exists, not_, or_, select
+from sqlalchemy import and_, exists, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery
+from app.models.crm import SalesActivity
 from app.models.email_draft import EmailDraft
+from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import (
     SALES_TARGET_SITES,
     Project,
@@ -331,48 +334,258 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
     return out[: max(1, limit)]
 
 
-# --- トップページ「今日やること」（営業状況で分類した案件リスト） ---
-# 営業フロー上の「次の一手」ごとに案件をまとめる。既存データの並べ替えのみ。
-_TASK_GROUPS: list[tuple[str, tuple[str, ...]]] = [
-    ("to_contact", (SalesStatus.not_started.value, SalesStatus.ready.value)),
-    ("followup", (SalesStatus.contacted.value, SalesStatus.awaiting_reply.value)),
-    ("replied", (SalesStatus.replied.value,)),
-    ("negotiating", (SalesStatus.negotiating.value,)),
-]
+# --- トップページ「今日やること」（営業アシスタント） ---
+# フォローアップの経過日数しきい値（最終営業日からの日数）。
+_FOLLOWUP_MIN_DAYS = 3     # 3日以上返信なし → フォロー対象
+_FOLLOWUP_HIGH_DAYS = 7    # 7日以上 → 優先度高
+_FOLLOWUP_FINAL_DAYS = 14  # 14日以上 → 最終フォロー候補
+
+# フォロー対象になり得る営業状況（メール送信済み・返信待ち）。
+_FOLLOWUP_STATUSES = (SalesStatus.contacted.value, SalesStatus.awaiting_reply.value)
+# 日本未販売の可能性が高いと見なす availability（未上陸 / 可能性あり）。
+_JAPAN_UNSOLD_AVAILABILITY = ("not_landed", "possible")
+# 「今日やること」から完全に除外する終了ステータス（成約 / 見送り）。
+_TASK_DONE_STATUSES = (SalesStatus.won.value, SalesStatus.rejected.value)
+
+
+def _followup_level(days: int | None) -> str | None:
+    """最終営業からの経過日数をフォロー優先度に変換する。3日未満は None。"""
+    if days is None or days < _FOLLOWUP_MIN_DAYS:
+        return None
+    if days >= _FOLLOWUP_FINAL_DAYS:
+        return "final"
+    if days >= _FOLLOWUP_HIGH_DAYS:
+        return "high"
+    return "normal"
+
+
+_LEVEL_RANK = {"final": 3, "high": 2, "normal": 1, None: 0}
+
+
+def _ids_with_contact(db: Session, ids: list[int]) -> set[int]:
+    """連絡先（メール/フォーム/SNS）が見つかっている project_id 集合（バッチ）。"""
+    if not ids:
+        return set()
+    rows = db.scalars(
+        select(ContactDiscovery.project_id)
+        .where(
+            ContactDiscovery.project_id.in_(ids),
+            or_(
+                ContactDiscovery.primary_email.isnot(None),
+                ContactDiscovery.primary_contact_form_url.isnot(None),
+                ContactDiscovery.instagram_url.isnot(None),
+                ContactDiscovery.linkedin_url.isnot(None),
+                ContactDiscovery.facebook_url.isnot(None),
+            ),
+        )
+        .distinct()
+    )
+    return {pid for pid in rows if pid is not None}
+
+
+def _ids_with_email(db: Session, ids: list[int]) -> set[int]:
+    """営業メール下書きがある project_id 集合（バッチ）。"""
+    if not ids:
+        return set()
+    rows = db.scalars(
+        select(EmailDraft.project_id).where(EmailDraft.project_id.in_(ids)).distinct()
+    )
+    return {pid for pid in rows if pid is not None}
+
+
+def _last_outreach_map(db: Session, ids: list[int]) -> dict[int, datetime]:
+    """project_id -> 最終営業日時。SalesActivity を優先し、無ければ EmailDraft。"""
+    out: dict[int, datetime] = {}
+    if not ids:
+        return out
+    for model, ts_col in (
+        (SalesActivity, SalesActivity.occurred_at),
+        (EmailDraft, EmailDraft.created_at),
+    ):
+        rows = db.execute(
+            select(model.project_id, func.max(ts_col))
+            .where(model.project_id.in_(ids))
+            .group_by(model.project_id)
+        ).all()
+        for pid, ts in rows:
+            if pid is None or ts is None:
+                continue
+            # SalesActivity を優先（先に入れた値は上書きしない）
+            out.setdefault(pid, ts)
+    return out
+
+
+def _success_categories(db: Session) -> set[str]:
+    """日本成功事例が存在するカテゴリ集合（類似成功事例の有無判定・1クエリ）。"""
+    rows = db.scalars(
+        select(JapaneseSuccessProject.category)
+        .where(JapaneseSuccessProject.category.isnot(None))
+        .distinct()
+    )
+    return {c.strip().lower() for c in rows if c and c.strip()}
+
+
+def _days_since(now: datetime, ts: datetime | None) -> int | None:
+    if ts is None:
+        return None
+    # タイムゾーン差異に強くする（naive は UTC とみなす）
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    delta = now - ts
+    return max(0, delta.days)
+
+
+def _task_reasons(
+    p: Project,
+    *,
+    priority_score: int,
+    has_contact: bool,
+    has_email: bool,
+    success_cats: set[str],
+    days: int | None,
+    group: str,
+) -> list[str]:
+    """案件が今日やることに入る理由を人間可読で列挙する。"""
+    out: list[str] = [f"営業価値スコア{priority_score}"]
+    if has_contact:
+        out.append("連絡先あり")
+    if has_email:
+        out.append("営業メール生成済み")
+    if p.latest_availability in _JAPAN_UNSOLD_AVAILABILITY:
+        out.append("日本未販売の可能性あり")
+    rate = _funding_rate(p.raised_amount, p.goal_amount)
+    if rate is not None and rate >= 3.0:
+        site = SITE_LABELS_JA.get(p.source_site, p.source_site)
+        out.append(f"{site}達成率300%以上")
+    elif rate is not None and rate >= 1.0:
+        out.append("クラファン成功実績")
+    if (p.category or "").strip().lower() in success_cats:
+        out.append("類似の日本成功事例あり")
+    if group == "followup" and days is not None:
+        if days >= _FOLLOWUP_FINAL_DAYS:
+            out.append(f"{days}日返信なし・最終フォロー候補")
+        else:
+            out.append(f"{days}日返信なしのためフォロー推奨")
+    return out
+
+
+# ソース名の簡易日本語表記（理由文言用）。未知はそのまま。
+SITE_LABELS_JA = {
+    "kickstarter": "Kickstarter",
+    "indiegogo": "Indiegogo",
+    "wadiz": "Wadiz",
+    "ulule": "Ulule",
+}
 
 
 def today_tasks(db: Session, *, per_group: int = 5) -> dict:
-    """営業状況で分類した「今日やること」を返す（各グループ最大 per_group 件）。
+    """営業アシスタント「今日やること」を返す（各グループ最大 per_group 件）。
 
-    - to_contact : 未営業 / 準備完了（これから営業）
-    - followup   : 営業済み / 返信待ち（フォローアップ）
-    - replied    : 返信あり
-    - negotiating: 商談中
-    既存の projects を読むだけで、新たな算出や外部アクセスは行わない。
+    グループ:
+      - to_contact : 今日営業する案件（未営業/準備完了。営業価値スコア順）
+      - followup   : 今日フォローする案件（メール送信済みで最終営業から3日以上）
+      - replied    : 返信あり
+      - negotiating: 商談中
+      - idle       : 放置でよい案件（営業済みだが3日未満＝まだ返信待ち期間）
+    成約(won)/見送り(rejected)はどのグループにも含めない。
+
+    各案件は理由・優先度スコア・連絡先/メール有無・最終営業からの経過日数・
+    フォロー優先度（normal/high/final）を含む dict で返す。
     """
+    now = datetime.now(timezone.utc)
+    target = Project.source_site.in_(_SALES_TARGET_VALUES)
+    scan_cap = max(per_group * 6, 40)
 
-    def _list(statuses: tuple[str, ...]) -> list[dict]:
+    def _fetch(statuses: tuple[str, ...]) -> list[Project]:
         stmt = (
             select(Project)
-            .where(
-                Project.source_site.in_(_SALES_TARGET_VALUES),
-                Project.sales_status.in_(statuses),
-            )
+            .where(target, Project.sales_status.in_(statuses))
             .order_by(Project.latest_score.desc().nullslast(), Project.updated_at.desc())
-            .limit(per_group)
+            .limit(scan_cap)
         )
-        return [
-            {
-                "project_id": p.id,
-                "title": p.title,
-                "source_site": p.source_site,
-                "sales_status": p.sales_status,
-                "latest_score": p.latest_score,
-            }
-            for p in db.scalars(stmt)
-        ]
+        return list(db.scalars(stmt))
 
-    return {key: _list(statuses) for key, statuses in _TASK_GROUPS}
+    tc_rows = _fetch(_READY_STATUSES)
+    fu_rows = _fetch(_FOLLOWUP_STATUSES)
+    rep_rows = _fetch((SalesStatus.replied.value,))
+    neg_rows = _fetch((SalesStatus.negotiating.value,))
+
+    all_rows = tc_rows + fu_rows + rep_rows + neg_rows
+    all_ids = [p.id for p in all_rows]
+    contact_ids = _ids_with_contact(db, all_ids)
+    email_ids = _ids_with_email(db, all_ids)
+    outreach = _last_outreach_map(db, [p.id for p in fu_rows])
+    success_cats = _success_categories(db)
+
+    def _enrich(p: Project, *, group: str, days: int | None = None) -> dict:
+        has_contact = p.id in contact_ids
+        has_email = p.id in email_ids
+        score = compute_priority_score(
+            latest_score=p.latest_score,
+            research_done=False,
+            contact_available=has_contact,
+            email_done=has_email,
+            raised_amount=p.raised_amount,
+            goal_amount=p.goal_amount,
+            backers_count=p.backers_count,
+            is_sales_target_candidate=p.is_sales_target_candidate,
+            sales_status=p.sales_status,
+        )
+        level = _followup_level(days) if group == "followup" else None
+        return {
+            "project_id": p.id,
+            "title": p.title,
+            "source_site": p.source_site,
+            "sales_status": p.sales_status,
+            "latest_score": p.latest_score,
+            "priority_score": score,
+            "stars": stars_for(score),
+            "has_contact": has_contact,
+            "has_email": has_email,
+            "days_since_last_outreach": days,
+            "follow_up_level": level,
+            "reasons": _task_reasons(
+                p, priority_score=score, has_contact=has_contact,
+                has_email=has_email, success_cats=success_cats,
+                days=days, group=group,
+            ),
+        }
+
+    # 今日営業する案件：営業価値スコア順
+    to_contact = [_enrich(p, group="to_contact") for p in tc_rows]
+    to_contact.sort(key=lambda t: t["priority_score"], reverse=True)
+
+    # フォロー（3日以上）と放置でよい（3日未満）に分ける
+    followup: list[dict] = []
+    idle: list[dict] = []
+    for p in fu_rows:
+        last = outreach.get(p.id) or p.updated_at
+        days = _days_since(now, last)
+        if days is not None and days >= _FOLLOWUP_MIN_DAYS:
+            followup.append(_enrich(p, group="followup", days=days))
+        else:
+            idle.append(_enrich(p, group="idle", days=days))
+    # フォロー優先度：final > high > normal、同レベルは経過日数が長い順
+    followup.sort(
+        key=lambda t: (
+            _LEVEL_RANK.get(t["follow_up_level"], 0),
+            t["days_since_last_outreach"] or 0,
+        ),
+        reverse=True,
+    )
+
+    replied = [_enrich(p, group="replied") for p in rep_rows]
+    replied.sort(key=lambda t: t["priority_score"], reverse=True)
+    negotiating = [_enrich(p, group="negotiating") for p in neg_rows]
+    negotiating.sort(key=lambda t: t["priority_score"], reverse=True)
+
+    return {
+        "to_contact": to_contact[:per_group],
+        "followup": followup[:per_group],
+        "replied": replied[:per_group],
+        "negotiating": negotiating[:per_group],
+        "idle": idle[:per_group],
+    }
 
 
 # --- AI 営業優先ランキング（Executive Summary を統合） ---

@@ -64,11 +64,16 @@ def main() -> int:
     t = workflow_service.today_tasks(db)
     tc = [x["title"] for x in t["to_contact"]]
     fu = [x["title"] for x in t["followup"]]
+    idle = [x["title"] for x in t["idle"]]
     rp = [x["title"] for x in t["replied"]]
     ng = [x["title"] for x in t["negotiating"]]
 
     check("営業（未営業/準備完了）", set(tc) == {"Eco Kitchen", "Ready One"})
-    check("フォローアップ（営業済み/返信待ち）", set(fu) == {"Smart Bottle", "Wait Reply"})
+    # 営業直後（最終営業からの経過なし）は「放置でよい（返信待ち期間）」= idle。
+    # 3日以上経過して初めて followup に入る（別テストで検証）。
+    check("営業直後の営業済み/返信待ちは idle に入る",
+          set(idle) == {"Smart Bottle", "Wait Reply"})
+    check("経過日数がないため followup には入らない", fu == [])
     check("返信あり", rp == ["Nordic Lamp"])
     check("商談中", ng == ["Eco Backpack"])
     check("営業対象外サイトは含めない", "Makuake Hit" not in tc)

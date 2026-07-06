@@ -1913,20 +1913,31 @@ export type RankingParams = {
   sort?: RankingSort;
 };
 
-// ===== 今日やること（営業状況で分類） =====
+// ===== 今日やること（営業アシスタント） =====
+// フォロー優先度：normal（3日+）/ high（7日+）/ final（14日+・最終フォロー）
+export type FollowUpLevel = "normal" | "high" | "final";
+
 export type SalesTask = {
   project_id: number;
   title: string;
   source_site: string;
   sales_status: SalesStatus;
   latest_score: number | null;
+  priority_score: number;
+  stars: number;
+  has_contact: boolean;
+  has_email: boolean;
+  days_since_last_outreach: number | null;
+  follow_up_level: FollowUpLevel | null;
+  reasons: string[];
 };
 
 export type TodayTasks = {
-  to_contact: SalesTask[];
-  followup: SalesTask[];
-  replied: SalesTask[];
-  negotiating: SalesTask[];
+  to_contact: SalesTask[];   // 今日営業する案件
+  followup: SalesTask[];     // 今日フォローする案件
+  replied: SalesTask[];      // 返信あり
+  negotiating: SalesTask[];  // 商談中
+  idle: SalesTask[];         // 放置でよい案件
 };
 
 // トップページ「今日やること」を取得（営業状況で分類した案件リスト）。

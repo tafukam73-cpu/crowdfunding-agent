@@ -73,20 +73,32 @@ class RankingListOut(BaseModel):
 
 
 class TaskItem(BaseModel):
-    """「今日やること」の 1 件（営業状況で分類した案件）。"""
+    """「今日やること」の 1 件（営業アシスタントの案件）。"""
 
     project_id: int
     title: str
     source_site: str
     sales_status: SalesStatus
     latest_score: int | None = None
+    # 営業優先度（0〜100）と星評価。
+    priority_score: int = 0
+    stars: int = 0
+    # 連絡先/営業メールの有無（アクションボタンの出し分けに使う）。
+    has_contact: bool = False
+    has_email: bool = False
+    # 最終営業からの経過日数とフォロー優先度（normal/high/final）。フォロー以外は None。
+    days_since_last_outreach: int | None = None
+    follow_up_level: str | None = None
+    # この案件を今やるべき理由（人間可読）。
+    reasons: list[str] = []
 
 
 class TodayTasksOut(BaseModel):
-    to_contact: list[TaskItem]    # これから営業（未営業 / 準備完了）
-    followup: list[TaskItem]      # フォローアップ（営業済み / 返信待ち）
+    to_contact: list[TaskItem]    # 今日営業する案件（未営業 / 準備完了）
+    followup: list[TaskItem]      # 今日フォローする案件（3日以上返信なし）
     replied: list[TaskItem]       # 返信あり
     negotiating: list[TaskItem]   # 商談中
+    idle: list[TaskItem] = []     # 放置でよい案件（営業済みだが3日未満）
 
 
 class SalesDashboardOut(BaseModel):
