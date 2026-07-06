@@ -23,6 +23,8 @@ from __future__ import annotations
 import heapq
 import logging
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
@@ -41,6 +43,13 @@ logger = logging.getLogger("recursive_crawl")
 DEFAULT_MAX_URLS = 100
 DEFAULT_MAX_DEPTH = 2
 FETCH_TIMEOUT = 12.0        # 1 URL のタイムアウト（秒）
+# 1 URL のハード上限（秒）。httpx/Playwright の粒度別 timeout を貫通するハング
+# （遅延トリクル応答・keep-alive 保持）に対し、別スレッドのウォールクロック期限で
+# 確実に打ち切る。URL 単体のハングでクロール全体が止まるのを防ぐ。
+DEFAULT_URL_TIMEOUT = 10.0
+# 1 クロール全体のウォールクロック上限（秒）。低速サイトで予算到達時に、それまでの
+# 発見結果（メール/フォーム/SNS）を保持したまま巡回を打ち切って返す（救済）。
+DEFAULT_MAX_SECONDS = 45.0
 RATE_LIMIT_SECONDS = 1.0    # ページ間隔（過度なアクセスを避ける）
 MAX_PDF_PARSE = 8           # 本文解析する PDF の上限（Phase 1：6→8）
 MAX_SITEMAP_URLS = 60       # sitemap から取り込む優先 URL の上限（Phase 1：40→60）
@@ -489,12 +498,19 @@ def recursive_crawl(
     progress_cb=None,
     max_urls: int = DEFAULT_MAX_URLS,
     max_depth: int = DEFAULT_MAX_DEPTH,
+    per_url_timeout: float = DEFAULT_URL_TIMEOUT,
+    max_seconds: float | None = DEFAULT_MAX_SECONDS,
 ) -> dict:
     """公式サイトを再帰クロールして連絡先を抽出する（DB 非依存）。集計 dict を返す。
 
     official_url が公式サイト（非プラットフォーム）でなければクロールせず、
     OFFICIAL_SITE_NOT_FOUND を返す。fetch_fn(url)->html|None, resolve_fn(name,rtype)->
     [str], pdf_fn(url,site_domain)->{emails,socials,text_len,text} を注入できる（テスト用）。
+
+    per_url_timeout: 1 URL のハード上限（秒）。別スレッドで fetch を実行し、期限を超えた
+      応答は破棄して None 扱い（接続ハング対策）。0/None で無効。
+    max_seconds: クロール全体のウォールクロック上限（秒）。超過時は発見済み結果を保持
+      したまま巡回を打ち切る（低速サイト救済）。0/None で無効。
     """
     result: dict = {
         "recursive_crawl_enabled": False,
@@ -538,6 +554,49 @@ def recursive_crawl(
     own_fetcher = fetch_fn is None
     fetch = fetch_fn or _make_fetcher()
 
+    started = time.monotonic()
+    hard_timeout_hit = {"v": False}
+    budget_hit = {"v": False}
+    use_deadline = bool(per_url_timeout and per_url_timeout > 0)
+
+    def gfetch(u: str):
+        """1 URL ハード上限付き fetch。期限超過/例外は None（クロールは継続）。
+
+        fetch を専用 daemon スレッドで走らせ、join(timeout) で期限を掛ける。期限超過時は
+        スレッドを放置（daemon なのでプロセス終了を妨げず、内部の httpx timeout でいずれ
+        死ぬ）してクロールを先へ進める。URL ごとに専用スレッドのためワーカー枯渇が無い。
+        """
+        if not use_deadline:
+            try:
+                return fetch(u)
+            except Exception:  # noqa: BLE001
+                return None
+        box: dict = {}
+
+        def _run():
+            try:
+                box["v"] = fetch(u)
+            except Exception:  # noqa: BLE001  1 URL の失敗は無視
+                box["v"] = None
+
+        th = threading.Thread(target=_run, name="rc-fetch", daemon=True)
+        th.start()
+        th.join(per_url_timeout)
+        if th.is_alive():
+            hard_timeout_hit["v"] = True
+            logger.info("recursive_crawl per-URL hard timeout (%ss): %s",
+                        per_url_timeout, u)
+            return None
+        return box.get("v")
+
+    def over_budget() -> bool:
+        if not max_seconds or max_seconds <= 0:
+            return False
+        if time.monotonic() - started > max_seconds:
+            budget_hit["v"] = True
+            return True
+        return False
+
     try:
         # 1. DNS / MX / SPF / DMARC（要件 7）
         emit(f"MX確認中: {domain}", pct=0.02)
@@ -549,7 +608,7 @@ def recursive_crawl(
 
         # 2. robots.txt（要件 5：Sitemap 抽出・Disallow を尊重）
         emit("robots確認中", pct=0.05)
-        robots_txt = fetch(urljoin(root, "/robots.txt"))
+        robots_txt = gfetch(urljoin(root, "/robots.txt"))
         robots = parse_robots(robots_txt or "")
         result["recursive_robots_sitemaps"] = robots["sitemaps"]
         disallows = robots["disallows"]
@@ -560,7 +619,7 @@ def recursive_crawl(
 
         # 3. sitemap.xml（要件 4：contact/about/press/privacy/terms/pdf を優先）
         emit("sitemap確認中", pct=0.08)
-        sitemap_urls = read_sitemaps(fetch, root, robots["sitemaps"], domain)
+        sitemap_urls = read_sitemaps(gfetch, root, robots["sitemaps"], domain)
         result["recursive_sitemap_urls"] = sitemap_urls
 
         # 4. クロール待ち行列（BFS・(url, depth)）。同一ドメイン優先。
@@ -649,6 +708,13 @@ def recursive_crawl(
         ok_count = 0
         fail_count = 0
         while queue and len(crawled) < max_urls:
+            # 全体時間予算（低速サイト救済）：超過したら発見済み結果を保持して打ち切る。
+            if over_budget():
+                emit(f"探索時間の上限（{int(max_seconds)}秒）に到達 → 発見済み結果で終了",
+                     pct=0.8)
+                logger.info("recursive_crawl budget hit (%ss): crawled=%d",
+                            max_seconds, len(crawled))
+                break
             tier, _seq, url, depth = heapq.heappop(queue)
             # 早期打ち切り（要件 6・7）：メール/フォーム/LinkedIn のいずれかを確保済みなら
             # tier 3（商品・記事等の汎用ページ）の深掘りは不要 → 次案件へ。tier 優先度により
@@ -662,7 +728,7 @@ def recursive_crawl(
                 break
             emit(f"巡回中 ({len(crawled) + 1}/{max_urls}): {url}",
                  pct=0.1 + 0.7 * (len(crawled) / max_urls))
-            html = fetch(url)
+            html = gfetch(url)
             crawled.append(url)
             if not html:
                 fail_count += 1
@@ -736,6 +802,9 @@ def recursive_crawl(
         parse_pdf = pdf_fn or cds.extract_from_pdf
         pdf_parsed = 0
         for pdf in parse_targets:
+            # 予算超過後は PDF 解析（ネットワーク重）を打ち切る（低速サイト救済）。
+            if over_budget():
+                break
             emit(f"PDF解析中: {pdf['url']}", pct=0.85)
             got = parse_pdf(pdf["url"], site_domain)
             pdf["text_len"] = got.get("text_len", 0)
@@ -808,7 +877,8 @@ def recursive_crawl(
         flags = getattr(fetch, "flags", {}) or {}
         if 429 in statuses:
             reasons.append("RATE_LIMITED")
-        if flags.get("timed_out"):
+        # 1URL ハード上限・全体予算・fetcher 由来のいずれかで打ち切った場合
+        if flags.get("timed_out") or hard_timeout_hit["v"] or budget_hit["v"]:
             reasons.append("TIMEOUT")
         # login/account へしか辿れず本体が取れていない場合
         if ok_count == 0 and any(_is_skip_url(u) for u in skipped):
@@ -839,6 +909,7 @@ def recursive_crawl(
         logger.info("recursive_crawl[%s] %s", getattr(project, "id", "?"),
                     result["recursive_summary"])
     finally:
+        # 期限超過した daemon スレッドは放置（プロセス終了を妨げない）。
         if own_fetcher:
             client = getattr(fetch, "_client", None)
             if client is not None and hasattr(client, "close"):
@@ -902,6 +973,10 @@ def run_recursive_crawl(
             progress_cb=progress_cb,
             max_urls=int(getattr(settings, "recursive_crawl_max_urls", DEFAULT_MAX_URLS)),
             max_depth=int(getattr(settings, "recursive_crawl_max_depth", DEFAULT_MAX_DEPTH)),
+            per_url_timeout=float(
+                getattr(settings, "recursive_crawl_url_timeout", DEFAULT_URL_TIMEOUT)),
+            max_seconds=float(
+                getattr(settings, "recursive_crawl_max_seconds", DEFAULT_MAX_SECONDS)),
         )
         # Web 調査レイヤー由来の失敗コードも統合（検索プロバイダー系・KS 未登録）
         merged = list(result["recursive_failure_reasons"]) + _web_layer_failure_codes(row)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # SessionLocal 束縛前に file sqlite を指定（別セッション共有のため）
@@ -422,9 +423,78 @@ def test_infinite_pagination_skipped():
           not rcs._is_infinite_pagination("https://x.com/pages/contact"))
 
 
+def test_per_url_hard_timeout():
+    """接続ハング救済：1URL が期限超過してもクロールは継続し結果を得る。"""
+    print("test_per_url_hard_timeout")
+    pages = {
+        "https://ht.com": (
+            "<html><body>"
+            "<a href='/contact'>Contact</a>"
+            "<a href='/support'>Support</a>"  # tier1：ハングさせる
+            "</body></html>"
+        ),
+        "https://ht.com/contact":
+            "<html><body><a href='mailto:sales@ht.com'>sales</a></body></html>",
+        "https://ht.com/robots.txt": "",
+        "https://ht.com/sitemap.xml": "",
+    }
+
+    def hang_fetch(url: str):
+        if url.rstrip("/").endswith("/support"):
+            time.sleep(3.0)  # httpx の粒度別 timeout を貫通するハングを模擬
+            return "<html><body>slow</body></html>"
+        return pages.get(url.rstrip("/")) or pages.get(url)
+
+    class P(FakeProject):
+        maker_url = "https://ht.com"
+
+    t0 = time.time()
+    res = rcs.recursive_crawl(
+        "https://ht.com", P(), fetch_fn=hang_fetch, resolve_fn=fake_resolve,
+        pdf_fn=_empty_pdf, per_url_timeout=0.5, max_seconds=None,
+    )
+    elapsed = time.time() - t0
+    emails = {e["email"].lower() for e in res["recursive_emails"]}
+    check("ハング URL でも 3 秒待たず打ち切る(<2.0s)", elapsed < 2.0)
+    check("ハング中でも sales@ を取得", "sales@ht.com" in emails)
+    check("TIMEOUT 理由を記録", "TIMEOUT" in res["recursive_failure_reasons"])
+
+
+def test_overall_time_budget():
+    """低速サイト救済：全体予算超過時に発見済み結果を保持して打ち切る。"""
+    print("test_overall_time_budget")
+    pages = {
+        "https://sl.com": "<html><body><a href='/contact'>Contact</a></body></html>",
+        "https://sl.com/contact":
+            "<html><body><a href='mailto:sales@sl.com'>sales</a></body></html>",
+    }
+
+    def slow_fetch(url: str):
+        u = url.rstrip("/")
+        if u.endswith(("robots.txt", "sitemap.xml")):
+            return ""  # robots/sitemap は即時（予算は巡回に使う）
+        time.sleep(0.2)  # 各ページ 0.2 秒の低速サイトを模擬
+        return pages.get(u) or pages.get(url)
+
+    class P(FakeProject):
+        maker_url = "https://sl.com"
+
+    res = rcs.recursive_crawl(
+        "https://sl.com", P(), fetch_fn=slow_fetch, resolve_fn=fake_resolve,
+        pdf_fn=_empty_pdf, per_url_timeout=0, max_seconds=0.5,
+    )
+    emails = {e["email"].lower() for e in res["recursive_emails"]}
+    crawled = res["recursive_crawled_urls"]
+    check("予算内で発見した sales@ を保持", "sales@sl.com" in emails)
+    check("全優先パスを巡回せず早期打ち切り(<10URL)", len(crawled) < 10)
+    check("TIMEOUT 理由を記録", "TIMEOUT" in res["recursive_failure_reasons"])
+
+
 def main() -> int:
     test_recursive_picks_contact_privacy_terms()
     test_infinite_pagination_skipped()
+    test_per_url_hard_timeout()
+    test_overall_time_budget()
     test_login_cart_checkout_skipped()
     test_sitemap_and_robots()
     test_dns_mx_spf_dmarc()

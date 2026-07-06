@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # 1URL タイムアウト・レート制限で安全性は担保）。
     recursive_crawl_max_urls: int = 100
     recursive_crawl_max_depth: int = 2
+    # 1 URL のハード上限（秒）：接続ハング対策（httpx の粒度別 timeout を貫通する
+    # 遅延応答を別スレッドの期限で確実に打ち切る）。0 で無効。
+    recursive_crawl_url_timeout: float = 10.0
+    # 1 クロール全体のウォールクロック上限（秒）：低速サイトで超過時に発見済み結果を
+    # 保持して打ち切る。0 で無効。
+    recursive_crawl_max_seconds: float = 45.0
 
     # --- AI Search Agent の探索上限（発見率と安全性のバランス） ---
     search_agent_max_steps: int = 15
