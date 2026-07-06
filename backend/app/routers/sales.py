@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.project import ProjectOut
 from app.schemas.sales import (
+    CopilotCard,
+    CopilotDashboardOut,
     RankingListOut,
     SalesDashboardOut,
     SalesStatusUpdate,
@@ -20,7 +22,7 @@ from app.schemas.sales import (
     TodayTasksOut,
     WorkflowOut,
 )
-from app.services import project_service, workflow_service
+from app.services import project_service, sales_copilot_service, workflow_service
 
 router = APIRouter(tags=["sales"])
 
@@ -54,6 +56,31 @@ def sales_today(
 @router.get("/sales/dashboard", response_model=SalesDashboardOut)
 def sales_dashboard(db: Session = Depends(get_db)) -> SalesDashboardOut:
     return SalesDashboardOut(**workflow_service.dashboard_summary(db))
+
+
+@router.get("/sales/copilot", response_model=CopilotDashboardOut)
+def sales_copilot(
+    per_bucket: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> CopilotDashboardOut:
+    """営業 AI コパイロット・ダッシュボード。
+
+    案件一覧・企業リサーチ・Contact Intelligence・CRM・営業状況を横断し、案件ごとに
+    「今どう動くべきか（judgement）」を判断・理由付きで分類してバケットにまとめる。
+    ルールベース（既存の保存済みデータのみ・Claude 非依存）。
+    """
+    return CopilotDashboardOut(
+        **sales_copilot_service.copilot_dashboard(db, per_bucket=per_bucket)
+    )
+
+
+@router.get("/projects/{project_id}/copilot", response_model=CopilotCard)
+def project_copilot(project_id: int, db: Session = Depends(get_db)) -> CopilotCard:
+    """単一案件の営業コパイロット・カード（サマリー＋判断＋理由＋次の一手）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return CopilotCard(**sales_copilot_service.project_copilot(db, project))
 
 
 @router.get("/sales/tasks", response_model=TodayTasksOut)

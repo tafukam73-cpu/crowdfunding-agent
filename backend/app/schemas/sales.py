@@ -109,3 +109,71 @@ class SalesDashboardOut(BaseModel):
     negotiating_count: int    # 商談中
     won_count: int            # 契約数
     contacted_count: int      # 営業済み
+
+
+# ===== 営業 AI コパイロット =====
+class CopilotFunding(BaseModel):
+    currency: str
+    raised_amount: float | None = None
+    goal_amount: float | None = None
+    backers_count: int | None = None
+    rate_pct: int | None = None
+
+
+class CopilotRecommendation(BaseModel):
+    score: int
+    stars: int
+    sales_target: str | None = None  # yes / no / 要確認
+
+
+class CopilotSummary(BaseModel):
+    """案件の営業サマリー（要件 1 の各項目を 1 つにまとめたもの）。"""
+
+    product: str | None = None            # 商品概要
+    company: str | None = None            # 会社概要
+    japan_market_fit: str | None = None   # 日本市場との相性
+    japan_sales_status: str | None = None # 日本販売状況
+    funding: CopilotFunding               # 調達実績
+    contact_status: str | None = None     # 連絡先の有無
+    contact_person_found: bool = False    # 担当者の有無
+    contact_person_name: str | None = None
+    contact_person_title: str | None = None
+    contact_person_department: str | None = None
+    sales_status: str                     # 営業状況
+    last_action: str                      # 最終アクション
+    days_since_last_outreach: int | None = None
+    next_action: str                      # 次にやるべきこと
+    risks: list[str] = []                 # リスク
+    recommendation: CopilotRecommendation # 推奨度
+
+
+class CopilotCard(BaseModel):
+    """1 案件の営業判断カード（サマリー＋判断＋理由＋アクション）。"""
+
+    project_id: int
+    title: str
+    source_site: str
+    decision: str          # sell_now / needs_contact / needs_followup / ...
+    decision_label: str    # 日本語ラベル
+    next_action: str       # 次の一手（短い命令形）
+    actions: list[str]     # アクションボタンのキー
+    reasons: list[str]     # なぜそう判断したか（必ず 1 件以上）
+    priority_score: int
+    stars: int
+    urgency: int
+    recommended_channel: str | None = None
+    recommended_email: str | None = None
+    summary: CopilotSummary
+
+
+class CopilotDashboardOut(BaseModel):
+    top_action: CopilotCard | None = None      # 今日の最重要アクション
+    priority_sales: list[CopilotCard] = []     # 優先営業案件 TOP5
+    needs_contact: list[CopilotCard] = []      # 連絡先探索すべき案件
+    needs_email: list[CopilotCard] = []        # メール生成すべき案件
+    followup: list[CopilotCard] = []           # フォローすべき案件
+    drop_candidates: list[CopilotCard] = []    # 見送り候補
+    data_insufficient: list[CopilotCard] = []  # データ不足案件
+    counts: dict[str, int] = {}                # 判断カテゴリ別件数
+    ai_comment: str                            # AI からのコメント
+    scanned: int                               # 走査した案件数

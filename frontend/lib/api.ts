@@ -1951,6 +1951,115 @@ export async function fetchSalesTasks(perGroup = 5): Promise<TodayTasks> {
   return res.json();
 }
 
+// ===== 営業 AI コパイロット =====
+// 判断カテゴリ（backend の decision と対応）。
+export type CopilotDecision =
+  | "sell_now"
+  | "needs_negotiation"
+  | "needs_followup"
+  | "needs_email"
+  | "needs_contact"
+  | "needs_research"
+  | "waiting"
+  | "data_insufficient"
+  | "drop"
+  | "closed";
+
+// アクションボタンのキー（backend actions と対応）。
+export type CopilotAction =
+  | "email"
+  | "company_research"
+  | "contact_intelligence"
+  | "followup"
+  | "change_status"
+  | "add_crm"
+  | "open";
+
+export type CopilotFunding = {
+  currency: string;
+  raised_amount: number | null;
+  goal_amount: number | null;
+  backers_count: number | null;
+  rate_pct: number | null;
+};
+
+export type CopilotSummary = {
+  product: string | null;
+  company: string | null;
+  japan_market_fit: string | null;
+  japan_sales_status: string | null;
+  funding: CopilotFunding;
+  contact_status: string | null;
+  contact_person_found: boolean;
+  contact_person_name: string | null;
+  contact_person_title: string | null;
+  contact_person_department: string | null;
+  sales_status: SalesStatus;
+  last_action: string;
+  days_since_last_outreach: number | null;
+  next_action: string;
+  risks: string[];
+  recommendation: { score: number; stars: number; sales_target: string | null };
+};
+
+export type CopilotCard = {
+  project_id: number;
+  title: string;
+  source_site: string;
+  decision: CopilotDecision;
+  decision_label: string;
+  next_action: string;
+  actions: CopilotAction[];
+  reasons: string[];
+  priority_score: number;
+  stars: number;
+  urgency: number;
+  recommended_channel: string | null;
+  recommended_email: string | null;
+  summary: CopilotSummary;
+};
+
+export type CopilotDashboard = {
+  top_action: CopilotCard | null;
+  priority_sales: CopilotCard[];
+  needs_contact: CopilotCard[];
+  needs_email: CopilotCard[];
+  followup: CopilotCard[];
+  drop_candidates: CopilotCard[];
+  data_insufficient: CopilotCard[];
+  counts: Record<string, number>;
+  ai_comment: string;
+  scanned: number;
+};
+
+// 判断カテゴリのバッジ色（UI 共通）。
+export const COPILOT_DECISION_COLORS: Record<CopilotDecision, string> = {
+  sell_now: "bg-emerald-100 text-emerald-800",
+  needs_negotiation: "bg-purple-100 text-purple-800",
+  needs_followup: "bg-amber-100 text-amber-800",
+  needs_email: "bg-sky-100 text-sky-800",
+  needs_contact: "bg-cyan-100 text-cyan-800",
+  needs_research: "bg-fuchsia-100 text-fuchsia-800",
+  waiting: "bg-slate-100 text-slate-600",
+  data_insufficient: "bg-orange-100 text-orange-800",
+  drop: "bg-rose-100 text-rose-700",
+  closed: "bg-slate-100 text-slate-500",
+};
+
+// 営業 AI コパイロット・ダッシュボードを取得（横断判断・バケット分類）。
+export async function fetchSalesCopilot(perBucket = 5): Promise<CopilotDashboard> {
+  const res = await apiFetch(`/sales/copilot?per_bucket=${perBucket}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 単一案件の営業コパイロット・カードを取得。
+export async function fetchProjectCopilot(id: number): Promise<CopilotCard> {
+  const res = await apiFetch(`/projects/${id}/copilot`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // フォローアップメール作成の結果（backend FollowupEmailResult に対応）。
 export type FollowupEmailResult = {
   draft: EmailDraft;

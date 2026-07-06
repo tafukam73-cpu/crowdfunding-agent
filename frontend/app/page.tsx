@@ -8,6 +8,7 @@ import CrmRegisterButton from "@/components/CrmRegisterButton";
 import Header from "@/components/Header";
 import RankingPanel from "@/components/RankingPanel";
 import RecBadge from "@/components/RecBadge";
+import SalesCopilotPanel from "@/components/SalesCopilotPanel";
 import TodayTasksPanel from "@/components/TodayTasksPanel";
 import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
@@ -131,6 +132,11 @@ export default function Home() {
     <>
       <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
+        {/* AI営業コパイロット（横断判断・最重要アクション・バケット提案） */}
+        <div className="mb-6">
+          <SalesCopilotPanel reloadKey={reloadKey} />
+        </div>
+
         {/* 今日やること（営業フロー順に分類） */}
         <div className="mb-6">
           <TodayTasksPanel reloadKey={reloadKey} />
