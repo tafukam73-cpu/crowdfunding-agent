@@ -379,6 +379,24 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
 # 連絡先ありとみなす推奨チャネル（manual_search 以外）
 _RANKING_SORTS = ("score", "created_at", "latest_score", "contact", "unsold")
 
+# 「今日営業すべき案件ランキング」の営業状況フィルター。
+# 既定は "not_started"＝未営業（未接触/準備完了）のみを表示し、営業アクション済み
+# （営業済み・返信待ち・返信あり・商談中・契約・見送り）はランキングから除外する。
+# None は「営業状況で絞り込まない（すべて表示）」を意味する。
+_RANKING_STATUS_FILTERS: dict[str, tuple[str, ...] | None] = {
+    # 既定：未営業のみ（これから営業すべき案件だけ）
+    "not_started": (SalesStatus.not_started.value, SalesStatus.ready.value),
+    # すべて表示（営業状況で絞り込まない）
+    "all": None,
+    # 返事待ち
+    "awaiting_reply": (SalesStatus.awaiting_reply.value,),
+    # フォローアップ対象（営業済み＋返信待ち）
+    "followup": (SalesStatus.contacted.value, SalesStatus.awaiting_reply.value),
+    # 商談中
+    "negotiating": (SalesStatus.negotiating.value,),
+}
+_DEFAULT_RANKING_STATUS_FILTER = "not_started"
+
 
 def _contact_exists_clause():
     """連絡先（メール / フォーム / SNS）が見つかっている案件の EXISTS 条件。"""
@@ -425,10 +443,16 @@ def ranking(
     unsold_only: bool = False,
     contact_only: bool = False,
     not_started_only: bool = False,
+    status_filter: str = _DEFAULT_RANKING_STATUS_FILTER,
     ulule_only: bool = False,
     sort: str = "score",
 ) -> list[dict]:
     """AI 営業優先ランキングを返す（Executive Summary を統合してスコア順）。
+
+    既定では **未営業（未接触・準備完了）の案件だけ**を返す（``status_filter``）。
+    営業アクション済み（営業済み・返信待ち・返信あり・商談中・契約・見送り）は
+    ランキングから除外され、ステータス変更後に再取得すると即座に消える。
+    ``status_filter="all"`` で営業状況の絞り込みを解除できる。
 
     パフォーマンスのため、SQL で対象を絞り込み・上位 scan_cap 件に限定してから
     Executive Summary を算出する（全件は再計算しない）。unsold_only など JSON 由来の
@@ -441,6 +465,12 @@ def ranking(
     if sort not in _RANKING_SORTS:
         sort = "score"
 
+    # 営業状況フィルターの解決（後方互換：not_started_only=True は "not_started" 扱い）。
+    effective_filter = "not_started" if not_started_only else status_filter
+    if effective_filter not in _RANKING_STATUS_FILTERS:
+        effective_filter = _DEFAULT_RANKING_STATUS_FILTER
+    status_values = _RANKING_STATUS_FILTERS[effective_filter]
+
     conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
     if site:
         conditions.append(Project.source_site == site)
@@ -448,8 +478,9 @@ def ranking(
         conditions.append(Project.source_site == SourceSite.ulule.value)
     if candidates_only:
         conditions.append(not_(_non_candidate_condition()))
-    if not_started_only:
-        conditions.append(Project.sales_status.in_(_READY_STATUSES))
+    # 既定で営業アクション済みステータスを除外（"all" のときは絞り込まない）。
+    if status_values is not None:
+        conditions.append(Project.sales_status.in_(status_values))
     if contact_only:
         conditions.append(_contact_exists_clause())
 

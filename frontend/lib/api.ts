@@ -1865,6 +1865,22 @@ export const RANKING_SORT_LABELS: Record<RankingSort, string> = {
   unsold: "日本未販売優先",
 };
 
+// 営業状況フィルター。既定は "not_started"（未営業のみ）。営業アクション済みは除外。
+export type RankingStatusFilter =
+  | "not_started"
+  | "all"
+  | "awaiting_reply"
+  | "followup"
+  | "negotiating";
+
+export const RANKING_STATUS_FILTER_LABELS: Record<RankingStatusFilter, string> = {
+  not_started: "未営業のみ",
+  all: "すべて表示",
+  awaiting_reply: "返事待ち",
+  followup: "フォローアップ対象",
+  negotiating: "商談中",
+};
+
 export type RankingItem = {
   project_id: number;
   rank: number;
@@ -1891,6 +1907,8 @@ export type RankingParams = {
   unsold_only?: boolean;
   contact_only?: boolean;
   not_started_only?: boolean;
+  // 営業状況フィルター（既定 "not_started"＝未営業のみ）。
+  status_filter?: RankingStatusFilter;
   ulule_only?: boolean;
   sort?: RankingSort;
 };
@@ -1929,6 +1947,8 @@ export async function fetchSalesRanking(
   qs.set("unsold_only", String(params.unsold_only ?? false));
   qs.set("contact_only", String(params.contact_only ?? false));
   qs.set("not_started_only", String(params.not_started_only ?? false));
+  // 既定は「未営業のみ」。営業アクション済みはランキングから除外される。
+  qs.set("status_filter", params.status_filter ?? "not_started");
   qs.set("ulule_only", String(params.ulule_only ?? false));
   qs.set("sort", params.sort ?? "score");
 

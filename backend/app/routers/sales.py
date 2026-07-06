@@ -73,11 +73,20 @@ def sales_ranking(
     unsold_only: bool = Query(False),
     contact_only: bool = Query(False),
     not_started_only: bool = Query(False),
+    status_filter: str = Query(
+        "not_started",
+        description="営業状況フィルター: not_started(未営業のみ・既定) / all(すべて表示) "
+        "/ awaiting_reply(返事待ち) / followup(フォローアップ対象) / negotiating(商談中)",
+    ),
     ulule_only: bool = Query(False),
     sort: str = Query("score"),
     db: Session = Depends(get_db),
 ) -> RankingListOut:
-    """AI 営業優先ランキング（Executive Summary を統合・スコア順）。"""
+    """AI 営業優先ランキング（Executive Summary を統合・スコア順）。
+
+    既定（status_filter=not_started）では未営業の案件だけを返し、営業アクション済み
+    （営業済み・返信待ち・商談中 等）は除外する。
+    """
     items = workflow_service.ranking(
         db,
         limit=limit,
@@ -86,6 +95,7 @@ def sales_ranking(
         unsold_only=unsold_only,
         contact_only=contact_only,
         not_started_only=not_started_only,
+        status_filter=status_filter,
         ulule_only=ulule_only,
         sort=sort,
     )

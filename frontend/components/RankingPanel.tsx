@@ -9,8 +9,10 @@ import {
   EXECUTIVE_CHANNEL_LABELS,
   fetchSalesRanking,
   RANKING_SORT_LABELS,
+  RANKING_STATUS_FILTER_LABELS,
   type RankingItem,
   type RankingSort,
+  type RankingStatusFilter,
   SALES_TARGET_SITES,
   type SalesTarget,
   SITE_LABELS,
@@ -153,12 +155,16 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
 
   // フィルタ・並び順
   const [candidatesOnly, setCandidatesOnly] = useState(true);
-  const [notStartedOnly, setNotStartedOnly] = useState(false);
+  // 営業状況フィルター。既定は「未営業のみ」（営業アクション済みは除外）。
+  const [statusFilter, setStatusFilter] =
+    useState<RankingStatusFilter>("not_started");
   const [contactOnly, setContactOnly] = useState(false);
   const [unsoldOnly, setUnsoldOnly] = useState(false);
   const [ululeOnly, setUluleOnly] = useState(false);
   const [site, setSite] = useState<SourceSite | "">("");
   const [sort, setSort] = useState<RankingSort>("score");
+  // 画面リロードなしで再取得するためのローカルトリガー（「再取得」ボタン）。
+  const [localReload, setLocalReload] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -167,7 +173,7 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
       limit: 20,
       site,
       candidates_only: candidatesOnly,
-      not_started_only: notStartedOnly,
+      status_filter: statusFilter,
       contact_only: contactOnly,
       unsold_only: unsoldOnly,
       ulule_only: ululeOnly,
@@ -185,13 +191,14 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
     };
   }, [
     candidatesOnly,
-    notStartedOnly,
+    statusFilter,
     contactOnly,
     unsoldOnly,
     ululeOnly,
     site,
     sort,
     reloadKey,
+    localReload,
   ]);
 
   return (
@@ -200,26 +207,54 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
         <h2 className="text-base font-bold text-orange-900">
           🔥 今日営業すべき案件ランキング
         </h2>
-        <label className="flex items-center gap-1 text-xs text-slate-600">
-          並び順
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as RankingSort)}
-            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-900"
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLocalReload((k) => k + 1)}
+            disabled={loading}
+            className="rounded border border-orange-300 bg-white px-2.5 py-1 text-xs font-medium text-orange-800 hover:bg-orange-50 disabled:opacity-50"
+            title="最新の営業状況で再取得（アクション済みを除外）"
           >
-            {(Object.keys(RANKING_SORT_LABELS) as RankingSort[]).map((s) => (
-              <option key={s} value={s}>
-                {RANKING_SORT_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        </label>
+            {loading ? "更新中…" : "↻ 再取得"}
+          </button>
+          <label className="flex items-center gap-1 text-xs text-slate-600">
+            並び順
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as RankingSort)}
+              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-900"
+            >
+              {(Object.keys(RANKING_SORT_LABELS) as RankingSort[]).map((s) => (
+                <option key={s} value={s}>
+                  {RANKING_SORT_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* フィルタ */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <label className="flex items-center gap-1 text-xs font-medium text-slate-700">
+          営業状況
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as RankingStatusFilter)
+            }
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-900"
+          >
+            {(
+              Object.keys(RANKING_STATUS_FILTER_LABELS) as RankingStatusFilter[]
+            ).map((s) => (
+              <option key={s} value={s}>
+                {RANKING_STATUS_FILTER_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </label>
         <Toggle label="営業対象候補のみ" checked={candidatesOnly} onChange={setCandidatesOnly} />
-        <Toggle label="未営業のみ" checked={notStartedOnly} onChange={setNotStartedOnly} />
         <Toggle label="連絡先ありのみ" checked={contactOnly} onChange={setContactOnly} />
         <Toggle label="日本未販売のみ" checked={unsoldOnly} onChange={setUnsoldOnly} />
         <Toggle label="Ululeのみ" checked={ululeOnly} onChange={setUluleOnly} />
@@ -249,8 +284,10 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
           </p>
         )}
         {!loading && items.length === 0 && !error && (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-400">
-            条件に合う案件がありません。フィルタを調整してください。
+          <p className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
+            {statusFilter === "not_started"
+              ? "未営業の案件はありません（営業アクション済みは除外中）。営業状況を「すべて表示」に切り替えると、返事待ち・商談中なども確認できます。"
+              : "条件に合う案件がありません。フィルタを調整してください。"}
           </p>
         )}
         {!loading && items.map((item) => <RankCard key={item.project_id} item={item} />)}
