@@ -38,6 +38,8 @@ STALE_LOCK_SECONDS = 2 * 60 * 60
 OVERSEAS_SITES = [
     SourceSite.kickstarter,
     SourceSite.indiegogo,
+    SourceSite.wadiz,
+    SourceSite.zeczec,
     SourceSite.ulule,
 ]
 

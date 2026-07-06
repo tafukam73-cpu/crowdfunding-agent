@@ -12,6 +12,8 @@ from app.scrapers.dummy import DummyScraper
 from app.scrapers.indiegogo import IndiegogoScraper
 from app.scrapers.kickstarter import KickstarterScraper
 from app.scrapers.ulule import UluleScraper
+from app.scrapers.wadiz import WadizScraper
+from app.scrapers.zeczec import ZeczecScraper
 
 # 収集対象サイト（優先順位順）。
 # 海外営業対象（Kickstarter / Indiegogo / Wadiz）のみ。projects テーブルに保存する。
@@ -46,6 +48,22 @@ def get_scraper(site: SourceSite, limit: int = 20) -> BaseScraper:
         return UluleScraper(
             limit=min(limit, 20),
             fetch_method=settings.scrape_fetcher,
+            rate_limit_seconds=settings.scrape_rate_limit_seconds,
+            timeout=settings.scrape_timeout_seconds,
+            retries=settings.scrape_retries,
+        )
+    if site is SourceSite.wadiz:
+        # 韓国 Wadiz：公開 funding JSON API（httpx・Playwright 不要）
+        return WadizScraper(
+            limit=min(limit, 20),
+            rate_limit_seconds=settings.scrape_rate_limit_seconds,
+            timeout=settings.scrape_timeout_seconds,
+            retries=settings.scrape_retries,
+        )
+    if site is SourceSite.zeczec:
+        # 台湾 Zeczec：/categories の HTML 一覧を httpx で取得
+        return ZeczecScraper(
+            limit=min(limit, 20),
             rate_limit_seconds=settings.scrape_rate_limit_seconds,
             timeout=settings.scrape_timeout_seconds,
             retries=settings.scrape_retries,

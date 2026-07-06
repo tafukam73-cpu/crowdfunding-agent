@@ -37,6 +37,7 @@ export type SourceSite =
   | "kickstarter"
   | "indiegogo"
   | "wadiz"
+  | "zeczec"
   | "ulule"
   | "makuake"
   | "greenfunding"
@@ -308,18 +309,20 @@ export const SITE_LABELS: Record<SourceSite, string> = {
   kickstarter: "Kickstarter",
   indiegogo: "Indiegogo",
   wadiz: "Wadiz",
+  zeczec: "Zeczec",
   ulule: "Ulule",
   makuake: "Makuake",
   greenfunding: "GreenFunding",
   other: "その他",
 };
 
-// 海外営業対象サイト。案件一覧（projects）のフィルタはこの3サイトのみを扱う。
+// 海外営業対象サイト。案件一覧（projects）のフィルタはこれらのサイトを扱う。
 // Makuake / GreenFunding は日本の成功事例（比較用）であり営業対象に含めない。
 export const SALES_TARGET_SITES: SourceSite[] = [
   "kickstarter",
   "indiegogo",
   "wadiz",
+  "zeczec",
   "ulule",
 ];
 
@@ -327,6 +330,7 @@ export const SITE_COLORS: Record<SourceSite, string> = {
   kickstarter: "bg-green-100 text-green-700",
   indiegogo: "bg-pink-100 text-pink-700",
   wadiz: "bg-sky-100 text-sky-700",
+  zeczec: "bg-amber-100 text-amber-700",
   ulule: "bg-purple-100 text-purple-700",
   makuake: "bg-orange-100 text-orange-700",
   greenfunding: "bg-emerald-100 text-emerald-700",
