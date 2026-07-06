@@ -47,12 +47,19 @@ RATE_LIMIT_SECONDS = 1.0    # ページ間隔（過度なアクセスを避け�
 KNOWN_PATHS = [
     "/contact",
     "/contact-us",
+    "/contactus",
     "/about",
     "/about-us",
     "/support",
     "/pages/contact",
+    "/pages/contact-us",
     "/pages/about",
+    "/pages/about-us",
+    "/pages/support",
     "/wholesale",
+    "/stockists",
+    "/retailers",
+    "/imprint",
     "/distributors",
     "/distributor",
     "/partnership",
@@ -142,11 +149,33 @@ def _cf_decode(hexstr: str) -> str:
         return ""
 
 
+# JavaScript の文字列連結でメールを組み立てる難読化（"info" + "@" + "brand.com" /
+# 'info' + '@' + 'brand' + '.' + 'com' 等）。連結された引用符列を検出して結合する。
+_JS_CONCAT_SEQ_RE = re.compile(
+    r"""(['"][^'"]{0,64}['"](?:\s*\+\s*['"][^'"]{0,64}['"])+)"""
+)
+# 引用符閉じ + 連結演算子 + 引用符開き（"..." + "..." の“のり”部分）
+_JS_CONCAT_GLUE_RE = re.compile(r"""['"]\s*\+\s*['"]""")
+
+
+def _js_concat_emails(html: str) -> list[str]:
+    """JS 文字列連結で組み立てたメールを復元する（連結列を結合して @ を含むものだけ）。"""
+    out: list[str] = []
+    for seq in _JS_CONCAT_SEQ_RE.findall(html or ""):
+        joined = _JS_CONCAT_GLUE_RE.sub("", seq)  # "a" + "b" -> "ab"
+        joined = joined.strip("'\"")
+        joined = re.sub(r"\s+", "", joined)
+        if "@" in joined:
+            out.append(joined)
+    return out
+
+
 def deobfuscate_emails(html: str) -> list[str]:
     """HTML から難読化されたメールを復号して素アドレスの一覧で返す（重複排除なし）。
 
     - Cloudflare Email Protection（data-cfemail / email-protection#hex）
     - テキスト難読化（support [at] company [dot] com / ＠ / &#64; 等）
+    - JavaScript 文字列連結（"info" + "@" + "brand.com" 等）
     妥当性は呼び出し側（extract_emails）で EMAIL_RE + 除外フィルタにより最終検証する。
     """
     out: list[str] = []
@@ -159,6 +188,7 @@ def deobfuscate_emails(html: str) -> list[str]:
         cand = local + "@" + _OBF_DOT_SUB.sub(".", domain)
         cand = re.sub(r"\s+", "", cand)
         out.append(cand)
+    out.extend(_js_concat_emails(text))
     return out
 
 # 画像やアセットに紛れる「メールっぽい文字列」を除外する拡張子
@@ -879,7 +909,8 @@ def build_search_queries(maker_name: str | None, official_domain: str | None) ->
         # 連絡先・営業窓口・担当者を広く探す（要件 8：最低 20 種類以上）
         for kw in (
             "email", "contact", "founder", "CEO", "partnership", "distributor",
-            "wholesale", "export", "press kit", "media kit", "LinkedIn",
+            "wholesale", "export", "press", "support", "press kit", "media kit",
+            "LinkedIn",
         ):
             add(f'"{name}" {kw}')
         # SNS プロフィール（DM 経由の営業チャネル）
@@ -1452,14 +1483,34 @@ def _robots_disallows(client, root: str) -> list[str]:
 
 
 def _default_fetcher():
-    """既存 HTTP 基盤を使った取得関数を返す（url -> html or None）。"""
-    from app.scrapers.http import HttpClient
+    """取得関数（url -> html or None）を返す。
 
-    client = HttpClient(
-        rate_limit_seconds=RATE_LIMIT_SECONDS,
-        timeout=FETCH_TIMEOUT,
-        retries=FETCH_RETRIES,
-    )
+    メール発見率改善：既定は Playwright（ヘッドレス Chromium）で取得し、Cloudflare の
+    JS チャレンジ（従来 httpx では 403=CRAWL_BLOCKED になっていた）を通す。JS 描画後の
+    DOM を返すため、JS で差し込まれる連絡先も抽出できる。Playwright 初期化に失敗した
+    環境では httpx にフォールバックする（従来動作）。
+    """
+    from app.config import settings
+
+    method = getattr(settings, "scrape_fetcher", "httpx") or "httpx"
+    try:
+        from app.scrapers.fetcher import get_fetcher
+
+        client = get_fetcher(
+            method,
+            rate_limit_seconds=RATE_LIMIT_SECONDS,
+            timeout=FETCH_TIMEOUT,
+            retries=FETCH_RETRIES,
+        )
+    except Exception as exc:  # noqa: BLE001  Playwright 未導入等は httpx へ退避
+        logger.warning("contact fetcher init failed (%s); httpx にフォールバック", exc)
+        from app.scrapers.http import HttpClient
+
+        client = HttpClient(
+            rate_limit_seconds=RATE_LIMIT_SECONDS,
+            timeout=FETCH_TIMEOUT,
+            retries=FETCH_RETRIES,
+        )
 
     def fetch(url: str) -> str | None:
         try:
