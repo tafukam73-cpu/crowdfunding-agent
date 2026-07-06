@@ -29,6 +29,11 @@ class CIJobType(str, enum.Enum):
     search_agent = "search_agent"
     # Contact Intelligence v3：公式サイト内の再帰クロール（発見率強化）
     recursive_crawl = "recursive_crawl"
+    # 個別の重い探索もジョブ化して同期POSTでの画面待ち（12秒タイムアウト）を無くす。
+    # 自動抽出（recursive crawl を含む）/ v2（人手順フロー）/ AI連絡先リサーチ。
+    contact_discovery = "contact_discovery"
+    contact_discovery_v2 = "contact_discovery_v2"
+    ai_research = "ai_research"
     full_contact_intelligence = "full_contact_intelligence"
 
 

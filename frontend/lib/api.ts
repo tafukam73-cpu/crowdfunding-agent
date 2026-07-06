@@ -1589,6 +1589,10 @@ export type CIJobType =
   | "web_research"
   | "document_reader"
   | "search_agent"
+  | "recursive_crawl"
+  | "contact_discovery"
+  | "contact_discovery_v2"
+  | "ai_research"
   | "full_contact_intelligence";
 
 export type CIJobStatus =

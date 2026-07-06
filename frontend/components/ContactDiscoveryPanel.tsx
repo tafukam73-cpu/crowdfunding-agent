@@ -18,11 +18,7 @@ import {
   fetchOutreachMessage,
   formatDateTime,
   type OutreachMessage,
-  runAiContactResearch,
-  runContactDiscovery,
-  runContactDiscoveryV2,
   runContactHunter,
-  runDocumentReader,
   type V2Email,
   type V2Step,
   type SalesContact,
@@ -3400,9 +3396,14 @@ export default function ContactDiscoveryPanel({
   const [agentError, setAgentError] = useState<string | null>(null);
   const [v2Busy, setV2Busy] = useState(false);
   const [v2Error, setV2Error] = useState<string | null>(null);
-  // Web調査 / Search Agent の非同期ジョブ ポーリング用インターバル
+  // 重い探索は全て非同期ジョブ＋ポーリングで実行する（同期POSTで画面を待たせない）。
+  // 各ツールごとにポーリング用インターバルを保持する。
   const webJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const agentJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aiJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const docJobRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const v2JobRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchContactDiscovery(projectId)
@@ -3413,26 +3414,43 @@ export default function ContactDiscoveryPanel({
   // アンマウント時にポーリングを止める（リーク防止）。
   useEffect(() => {
     return () => {
-      if (webJobRef.current) clearInterval(webJobRef.current);
-      if (agentJobRef.current) clearInterval(agentJobRef.current);
+      for (const ref of [
+        webJobRef,
+        agentJobRef,
+        autoJobRef,
+        aiJobRef,
+        docJobRef,
+        v2JobRef,
+      ]) {
+        if (ref.current) clearInterval(ref.current);
+      }
     };
   }, []);
 
-  // 再読み込み時、進行中の Web調査 / Search Agent ジョブがあれば購読を再開する。
+  // 再読み込み時、進行中の個別ジョブがあれば購読を再開する（画面を再読み込みしても
+  // 最新の進捗・結果を取得できるようにする）。各ツールの job_type → busy/ref/error を対応づける。
   useEffect(() => {
     let active = true;
-    (["web_research", "search_agent"] as CIJobType[]).forEach((jt) => {
+    const resumable: {
+      jt: CIJobType;
+      ref: { current: ReturnType<typeof setInterval> | null };
+      setBusy: (b: boolean) => void;
+      setErr: (m: string | null) => void;
+    }[] = [
+      { jt: "contact_discovery", ref: autoJobRef, setBusy, setErr: setError },
+      { jt: "ai_research", ref: aiJobRef, setBusy: setAiBusy, setErr: setAiError },
+      { jt: "web_research", ref: webJobRef, setBusy: setWebBusy, setErr: setWebError },
+      { jt: "document_reader", ref: docJobRef, setBusy: setDocBusy, setErr: setDocError },
+      { jt: "search_agent", ref: agentJobRef, setBusy: setAgentBusy, setErr: setAgentError },
+      { jt: "contact_discovery_v2", ref: v2JobRef, setBusy: setV2Busy, setErr: setV2Error },
+    ];
+    resumable.forEach(({ jt, ref, setBusy: sb, setErr }) => {
       getLatestContactIntelligenceJob(projectId, jt)
         .then((j) => {
           if (!active || !j) return;
           if (j.status === "queued" || j.status === "running") {
-            if (jt === "web_research") {
-              setWebBusy(true);
-              pollJob(j.id, webJobRef, setWebBusy, setWebError);
-            } else {
-              setAgentBusy(true);
-              pollJob(j.id, agentJobRef, setAgentBusy, setAgentError);
-            }
+            sb(true);
+            pollJob(j.id, ref, sb, setErr);
           }
         })
         .catch(() => {});
@@ -3453,47 +3471,7 @@ export default function ContactDiscoveryPanel({
       .catch(() => {});
   }
 
-  // 長時間の同期探索を実行する共通ランナー。
-  // これらの探索（自動抽出 / AI / Web / Document / Search Agent）はサーバ側で公式サイトを
-  // 横断クロールするため時間がかかり、ブラウザ↔サーバの接続が先に切れて fetch が
-  // TypeError: Failed to fetch を投げることがある。その場合でもバックエンドは処理を
-  // 継続・保存しているため、生のエラーを出さずに最新の保存結果を再取得し、状況を
-  // 日本語で案内する（本当の API エラー時のみエラー表示にする）。
-  async function runResearch(
-    run: () => Promise<ContactDiscovery>,
-    setBusyFn: (b: boolean) => void,
-    setErrFn: (m: string | null) => void
-  ) {
-    setBusyFn(true);
-    setErrFn(null);
-    setApplyMsg(null);
-    try {
-      setData(await run());
-      onChanged?.();
-    } catch (e) {
-      if (isNetworkDropError(e)) {
-        // 接続断：バックエンドは処理継続の可能性が高い。最新結果を取り込む。
-        try {
-          const latest = await fetchContactDiscovery(projectId);
-          setData(latest);
-          onChanged?.();
-        } catch {
-          /* 再取得も失敗した場合は下の案内文のみ表示 */
-        }
-        setErrFn(
-          "処理に時間がかかり、ブラウザとの接続が切れました。" +
-            "バックエンドでは探索が継続・保存されている場合があります。" +
-            "最新の結果を再取得しました。数十秒おいて再読み込みすると最新状態を確認できます。"
-        );
-      } else {
-        setErrFn(`実行に失敗しました：${String(e)}`);
-      }
-    } finally {
-      setBusyFn(false);
-    }
-  }
-
-  // Web調査 / Search Agent は特に重いため、非同期ジョブ＋ポーリングで実行する。
+  // 重い探索は全て非同期ジョブ＋ポーリングで実行する。
   // POST でジョブを開始してすぐ返し（ブラウザは長時間 fetch を張らない）、status を
   // ポーリングして completed で最新結果を再取得する。これにより
   // TypeError: Failed to fetch を招かない。既存のジョブ基盤（web_research /
@@ -3590,20 +3568,22 @@ export default function ContactDiscoveryPanel({
     }
   }
 
+  // 重い探索は全て非同期ジョブ＋ポーリングで実行する。POST は即 job_id を返し、
+  // バックグラウンドスレッドで探索を継続、完了時に GET で結果を取り込む。これにより
+  // 単一ワーカーが長時間ブロックされず、同一画面の GET（apiFetch 12秒）が
+  // タイムアウトしない。
   const onRun = () =>
-    runResearch(() => runContactDiscovery(projectId), setBusy, setError);
+    runAsJob("contact_discovery", autoJobRef, setBusy, setError);
   const onRunAi = () =>
-    runResearch(() => runAiContactResearch(projectId), setAiBusy, setAiError);
-  // Web調査 / Search Agent は非同期ジョブ＋ポーリング（同期 fetch で待たない）
+    runAsJob("ai_research", aiJobRef, setAiBusy, setAiError);
   const onRunWeb = () =>
     runAsJob("web_research", webJobRef, setWebBusy, setWebError);
   const onRunDoc = () =>
-    runResearch(() => runDocumentReader(projectId), setDocBusy, setDocError);
+    runAsJob("document_reader", docJobRef, setDocBusy, setDocError);
   const onRunAgent = () =>
     runAsJob("search_agent", agentJobRef, setAgentBusy, setAgentError);
-  // Contact Discovery v2（人間の検索手順に近い一本道フロー・同期実行）
   const onRunV2 = () =>
-    runResearch(() => runContactDiscoveryV2(projectId), setV2Busy, setV2Error);
+    runAsJob("contact_discovery_v2", v2JobRef, setV2Busy, setV2Error);
 
   async function onApply(email?: string) {
     setApplyMsg(null);
@@ -3769,10 +3749,10 @@ export default function ContactDiscoveryPanel({
             </span>
           </div>
 
-          {/* 自動抽出（同期）：メール・フォーム・SNS・PDF・検索クエリを総合評価 */}
+          {/* 自動抽出（バックグラウンド実行）：メール・フォーム・SNS・PDF・検索クエリを総合評価 */}
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-slate-500">
-              自動抽出（同期）：メール・フォーム・SNS・PDF・検索クエリを総合評価します。
+              自動抽出：メール・フォーム・SNS・PDF・検索クエリを総合評価します（バックグラウンド実行・進捗は「実行中…」表示）。
             </p>
             <button
               onClick={onRun}

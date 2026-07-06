@@ -27,6 +27,7 @@ from app.models.contact_intelligence_job import (
 from app.models.project import Project
 from app.services import (
     contact_discovery_service,
+    contact_discovery_v2_service,
     document_reader_service,
     recursive_crawl_service,
     search_agent_service,
@@ -191,11 +192,29 @@ def _run_recursive(db, project, cb=None) -> None:
     recursive_crawl_service.run_recursive_crawl(db, project, progress_cb=cb)
 
 
+def _run_auto(db, project, cb=None) -> None:
+    # 自動抽出（公式サイト再帰クロールを含む重い探索）。run_discovery は progress_cb を
+    # 取らないため cb は使わない（ジョブ境界の進捗のみ）。
+    contact_discovery_service.run_discovery(db, project)
+
+
+def _run_v2(db, project, cb=None) -> None:
+    contact_discovery_v2_service.run_contact_discovery_v2(db, project, progress_cb=cb)
+
+
+def _run_ai(db, project, cb=None) -> None:
+    # AI連絡先リサーチ。run_ai_research は progress_cb を取らない。
+    contact_discovery_service.run_ai_research(db, project)
+
+
 _SINGLE_PHASES = {
     CIJobType.web_research.value: ("Web Research", _run_web),
     CIJobType.document_reader.value: ("AI Document Reader", _run_doc),
     CIJobType.search_agent.value: ("AI Search Agent", _run_agent),
     CIJobType.recursive_crawl.value: ("公式サイト再帰クロール", _run_recursive),
+    CIJobType.contact_discovery.value: ("自動抽出（公式サイト巡回）", _run_auto),
+    CIJobType.contact_discovery_v2.value: ("Contact Discovery v2", _run_v2),
+    CIJobType.ai_research.value: ("AI連絡先リサーチ", _run_ai),
 }
 
 
