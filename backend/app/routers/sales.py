@@ -22,7 +22,13 @@ from app.schemas.sales import (
     TodayTasksOut,
     WorkflowOut,
 )
-from app.services import project_service, sales_copilot_service, workflow_service
+from app.services import (
+    project_service,
+    sales_assessment_service,
+    sales_copilot_service,
+    sales_copilot_v2_service,
+    workflow_service,
+)
 
 router = APIRouter(tags=["sales"])
 
@@ -81,6 +87,47 @@ def project_copilot(project_id: int, db: Session = Depends(get_db)) -> CopilotCa
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
     return CopilotCard(**sales_copilot_service.project_copilot(db, project))
+
+
+@router.get("/sales/copilot-v2")
+def sales_copilot_v2(
+    per_bucket: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Sales Copilot v2（営業 AI 秘書）ダッシュボード。
+
+    3 つの適性スコア（日本市場適性 / 独占販売可能性 / Makuake 適性）と既存の連絡先・
+    メール・営業状況を統合し、v2 優先度スコアでランキングして分類する。ルールベース。
+    """
+    return sales_copilot_v2_service.copilot_v2_dashboard(db, per_bucket=per_bucket)
+
+
+@router.get("/projects/{project_id}/copilot-v2")
+def project_copilot_v2(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """単一案件の Sales Copilot v2 統合カード（3 スコア＋判断＋次アクション）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return sales_copilot_v2_service.build_v2_card(db, project)
+
+
+@router.post("/projects/{project_id}/sales-assessment")
+def run_sales_assessment(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """営業適性アセスメント（3 スコア）を算出して保存する（ルールベース・非破壊）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    row = sales_assessment_service.run_assessment(db, project)
+    return {
+        "project_id": project.id,
+        "japan_market_fit_score": row.japan_market_fit_score,
+        "exclusivity_score": row.exclusivity_score,
+        "makuake_fit_score": row.makuake_fit_score,
+        "overall_priority_score": row.overall_priority_score,
+        "confidence": row.confidence,
+        "engine": row.engine,
+        "details": row.details_json,
+    }
 
 
 @router.get("/sales/tasks", response_model=TodayTasksOut)
