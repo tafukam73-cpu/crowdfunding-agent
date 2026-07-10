@@ -3356,3 +3356,165 @@ export async function analyzeJapanOpportunityAi(
   }
   return res.json();
 }
+
+// ============================================================================
+//  Sales Copilot v2（営業 AI 秘書）
+// ============================================================================
+export type ScoreGrade = "A" | "B" | "C" | "D" | "E";
+
+export type V2Decision =
+  | "sell_now_exclusive"
+  | "sell_now"
+  | "needs_contact"
+  | "needs_email"
+  | "needs_research"
+  | "needs_followup"
+  | "needs_negotiation"
+  | "waiting"
+  | "deprioritize"
+  | "drop"
+  | "closed"
+  | "data_insufficient";
+
+export type AssessmentState =
+  | "evaluated"
+  | "provisional"
+  | "checking_japan"
+  | "recompute_pending"
+  | "data_insufficient"
+  | "failed";
+
+export type JapanCheckStatus =
+  | "not_checked"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type JapanCheckResult =
+  | "sold_in_japan"
+  | "not_found_in_japan"
+  | "inconclusive"
+  | null;
+
+export interface V2ScoreBlock {
+  score: number | null;
+  grade: ScoreGrade | null;
+  level: string | null;
+  reasons: string[];
+}
+
+export interface V2Assessment {
+  japan_market_fit: V2ScoreBlock;
+  exclusivity: V2ScoreBlock;
+  makuake_fit: V2ScoreBlock;
+  overall_priority_score: number | null;
+  overall_grade: ScoreGrade | null;
+  confidence: number | null;
+  engine: string | null;
+  saved: boolean;
+  evaluated_at: string | null;
+  missing_data: string[] | null;
+  state: AssessmentState;
+}
+
+export interface V2JapanCheck {
+  status: JapanCheckStatus;
+  result: JapanCheckResult;
+  confidence: number;
+  evidence: string[];
+  source_urls: string[];
+  checked_at: string | null;
+  error_reason: string | null;
+  version: string | null;
+  job_id: number | null;
+  job_status: string | null;
+}
+
+export interface SalesCopilotV2Card {
+  project_id: number;
+  title: string;
+  source_site: string;
+  maker_name: string | null;
+  updated_at: string | null;
+  funding: {
+    currency: string;
+    raised_amount: number | null;
+    goal_amount: number | null;
+    backers_count: number | null;
+    rate_pct: number | null;
+  } | null;
+  decision: V2Decision;
+  base_decision: string;
+  priority_score: number;
+  priority_grade: ScoreGrade | null;
+  priority_label: string;
+  next_action: string | null;
+  reason: string | null;
+  tags: string[];
+  v1_decision: string;
+  v2_decision: string;
+  decision_changed: boolean;
+  decision_change_reason: string | null;
+  v1_decision_label: string | null;
+  assessment: V2Assessment;
+  japan_sales_check: V2JapanCheck;
+  contact: {
+    has_email: boolean;
+    has_form: boolean;
+    recommended_channel: string | null;
+    recommended_email: string | null;
+  };
+  pipeline: {
+    sales_status: string | null;
+    last_action: string | null;
+    contact_person_found: boolean | null;
+  };
+  actions: string[] | null;
+  assessment_state: AssessmentState;
+}
+
+export interface SalesCopilotV2Dashboard {
+  top_action: SalesCopilotV2Card | null;
+  priority_ranking: SalesCopilotV2Card[];
+  items: SalesCopilotV2Card[];
+  counts: Record<string, number>;
+  summary_counts: {
+    japan_not_checked: number;
+    checking_japan: number;
+    data_insufficient: number;
+    low_confidence: number;
+  };
+  scanned: number;
+}
+
+// GET /sales/copilot-v2 — v2 ダッシュボード（全カードを items で返す）
+export async function fetchSalesCopilotV2(
+  perBucket = 5
+): Promise<SalesCopilotV2Dashboard> {
+  const res = await apiFetch(`/sales/copilot-v2?per_bucket=${perBucket}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// GET /projects/{id}/copilot-v2 — 単一案件の v2 カード
+export async function fetchProjectCopilotV2(
+  id: number
+): Promise<SalesCopilotV2Card> {
+  const res = await apiFetch(`/projects/${id}/copilot-v2`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// POST /projects/{id}/sales-assessment — 適性を再評価（未実施なら日本チェックを起動）
+export async function runSalesAssessment(id: number): Promise<{
+  provisional: boolean;
+  japan_job_status: string | null;
+  japan_state: string | null;
+}> {
+  const res = await apiFetch(`/projects/${id}/sales-assessment`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

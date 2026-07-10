@@ -40,6 +40,12 @@ export default function Header() {
               営業案件
             </Link>
             <Link
+              href="/sales-copilot-v2"
+              className="font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              営業AI秘書
+            </Link>
+            <Link
               href="/email-settings"
               className="text-slate-600 hover:text-slate-900"
             >
