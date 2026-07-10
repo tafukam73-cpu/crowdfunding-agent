@@ -21,6 +21,7 @@ apply_enrichment() / orchestrator enrich_project() / batch を分離する（テ
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -122,16 +123,52 @@ def _search_official_candidates(project: Project, search_fn) -> list[dict]:
     return out
 
 
+def _brand_hint(title: str | None) -> str:
+    """タイトル先頭のブランド/商品名を粗く取り出す（｜|【】／・区切り）。検証の補助。"""
+    t = (title or "").strip()
+    if not t:
+        return ""
+    # 装飾記号を除去し、最初の区切りまでを商品/ブランドとみなす
+    t = re.sub(r"^[\s✨🙌🦷★☆・\-–—|｜【】\[\]（）()]+", "", t)
+    for sep in ("｜", "|", "【", "】", "，", ",", " / ", "／", "・", "  "):
+        if sep in t:
+            t = t.split(sep)[0]
+            break
+    return t.strip()[:80]
+
+
 def _pick_official_site(candidates: list[dict]) -> tuple[str | None, str | None]:
     """公式サイトを自動採用できるか判定して (url, reason) を返す。
 
-    high 確度の候補が 1 ドメインに定まるときのみ採用する（複数 high は誤採用を避けて
-    保留）。medium/low は自動採用しない（候補扱い）。
+    優先順位:
+      1) 検証済み official（verdict=official）… high を medium より優先、
+         同確度なら Zeczec ページ直リンクを優先。単一ドメインに定まるときのみ採用。
+      2) 検証未実施のときの従来ロジック（ページ直リンク high・単一ドメイン）。
+    低確度/候補のみは自動確定しない（推測で確定しない）。
     """
+    officials = [c for c in candidates if c.get("verdict") == "official"]
+    if officials:
+        rank = {"high": 3, "medium": 2, "low": 1}
+        src_rank = {"zeczec_page_direct_link": 2}
+        officials.sort(
+            key=lambda c: (
+                rank.get(c.get("confidence"), 0),
+                src_rank.get(c.get("source"), 1),
+                -len(urlparse(c["url"]).path),
+            ),
+            reverse=True,
+        )
+        domains = {cds._domain_of(c["url"]) for c in officials}
+        top = officials[0]
+        if len(domains) == 1 or top.get("confidence") == "high":
+            ev = "; ".join(top.get("evidence") or []) or "検証で公式と判定"
+            return top["url"], f"検証済み official（{top.get('confidence')}）: {ev}"
+        return None, f"検証済み official が複数ドメイン（{len(domains)}）のため保留"
+
+    # 検証が無い場合の従来ロジック（ページ直リンク high・単一ドメイン）
     highs = [c for c in candidates if c.get("confidence") == "high"]
     domains = {cds._domain_of(c["url"]) for c in highs if cds._domain_of(c["url"])}
     if len(domains) == 1:
-        # 同一ドメインの中で最も浅い URL（ルート）を選ぶ
         same = [c for c in highs if cds._domain_of(c["url"]) in domains]
         same.sort(key=lambda c: len(urlparse(c["url"]).path))
         return same[0]["url"], "zeczec_page_direct_link（high・単一ドメイン）"
@@ -142,8 +179,82 @@ def _pick_official_site(candidates: list[dict]) -> tuple[str | None, str | None]
     return None, "公式サイト候補なし"
 
 
+def verify_candidates(
+    project: Project, candidates: list[dict], *, fetch_fn, max_fetch: int = 6
+) -> list[dict]:
+    """候補を httpx-first で取得し、公式サイトか検証する（証拠つきで確度を更新）。
+
+    source-aware ポリシー:
+      - EC モール/ディレクトリ/SNS は取得せず rejected。
+      - Zeczec ページ直リンクは（マーケット/ディレクトリでない限り）メーカー自身が
+        載せた導線として official/high を維持しつつ、取得できれば素性を証拠に追加。
+      - 検索/メディア/短縮リンクは verify_candidate が official と判定したときのみ昇格、
+        それ以外は candidate/low のまま（推測で確定しない）。
+    """
+    from app.services import official_site_verifier as osv
+
+    now = datetime.now(timezone.utc).isoformat()
+    product = _brand_hint(project.title)
+    site_dom = cds.source_site_email_domain(getattr(project, "source_site", None))
+    out: list[dict] = []
+    fetched = 0
+    for c in candidates:
+        url = c.get("url") or ""
+        source = c.get("source", "")
+        base = {
+            **c,
+            "source_url": url,
+            "source_type": source,
+            "discovered_at": c.get("discovered_at") or now,
+        }
+        # 取得前に確実に弾けるもの（EC モール/ディレクトリ/SNS）
+        if osv.is_marketplace(url) or osv.is_directory(url):
+            v = osv.verify_candidate(url, None, maker_name=project.maker_name,
+                                     product_name=product, source_site_domain=site_dom)
+            out.append({**base, "verdict": "rejected", "confidence": "low",
+                        "evidence": [], "verify_reasons": v["reasons"],
+                        "verified": False, "verified_at": now})
+            continue
+
+        html = None
+        if fetched < max_fetch:
+            try:
+                html = fetch_fn(url)
+            except Exception as exc:  # noqa: BLE001  1 URL 失敗は無視
+                logger.info("verify fetch failed %s: %s", url, exc)
+            fetched += 1
+
+        v = osv.verify_candidate(url, html, maker_name=project.maker_name,
+                                 product_name=product, source_site_domain=site_dom)
+
+        if source == "zeczec_page_direct_link" and v["verdict"] != "rejected":
+            # メーカー自身がページに載せた導線は official として維持（証拠は付与）。
+            verdict, conf = "official", ("high" if v["confidence"] == "high" else "high")
+            ev = (v["evidence"] or []) + ["Zeczec ページの直リンク（メーカー掲載）"]
+        else:
+            verdict, conf, ev = v["verdict"], v["confidence"], v["evidence"]
+
+        out.append({
+            **base,
+            "verdict": verdict,
+            "confidence": conf,
+            "evidence": ev,
+            "org_name": v["org_name"],
+            "legal_name": v["legal_name"],
+            "site_name": v["site_name"],
+            "verify_reasons": v["reasons"],
+            "verified": html is not None,
+            "verified_at": now,
+        })
+    return out
+
+
 def build_enrichment_updates(
-    project: Project, detail: dict, *, extra_candidates: list[dict] | None = None
+    project: Project,
+    detail: dict,
+    *,
+    extra_candidates: list[dict] | None = None,
+    verified_candidates: list[dict] | None = None,
 ) -> dict:
     """detail（parse_detail の結果）から (column_updates, enrichment, reasons) を作る純粋関数。
 
@@ -202,12 +313,21 @@ def build_enrichment_updates(
     reasons.setdefault("start_date", "開始日が明示ラベルで確認できない（推測しない）")
 
     # --- 公式サイト候補（確度つき） ---
-    candidates = list(detail.get("official_candidates") or [])
-    if extra_candidates:
-        candidates += extra_candidates
-    candidates = _dedup_candidates(candidates)
+    if verified_candidates is not None:
+        # 検証済みリスト（verdict/evidence 付き）をそのまま使う。
+        candidates = verified_candidates
+    else:
+        candidates = list(detail.get("official_candidates") or [])
+        if extra_candidates:
+            candidates += extra_candidates
+        candidates = _dedup_candidates(candidates)
     official_url, official_reason = _pick_official_site(candidates)
-    _set("maker_url", official_url, "zeczec_detail:公式サイト直リンク(high)")
+    # 採用した候補の確度に応じて provenance ラベルを分ける（証拠の説明性を上げる）。
+    sel = next((c for c in candidates if c.get("url") == official_url), None)
+    prov_label = "zeczec_detail:公式サイト直リンク(high)"
+    if sel is not None and sel.get("verdict") == "official":
+        prov_label = f"official_site_verified({sel.get('confidence')})"
+    _set("maker_url", official_url, prov_label)
     reasons["official_site"] = official_reason
 
     # --- 根拠 JSON（再スクレイプで消えない保管場所） ---
@@ -237,9 +357,13 @@ def build_enrichment_updates(
 
 
 def apply_enrichment(
-    db: Session, project: Project, detail: dict, *, search_fn=None
+    db: Session, project: Project, detail: dict, *, search_fn=None, verify_fetch_fn=None
 ) -> dict:
-    """detail を非破壊で project に適用して commit する。summary を返す。"""
+    """detail を非破壊で project に適用して commit する。summary を返す。
+
+    verify_fetch_fn（url->html|None, httpx-first）を渡すと公式サイト候補を取得して
+    検証し、証拠つきで確度を更新して maker_url を安全に確定する。
+    """
     detail = dict(detail)
     detail.setdefault(
         "source_detail_url",
@@ -255,7 +379,16 @@ def apply_enrichment(
     if not page_has_high and not detail.get("challenged"):
         extra = _search_official_candidates(project, search_fn)
 
-    built = build_enrichment_updates(project, detail, extra_candidates=extra)
+    verified = None
+    if verify_fetch_fn is not None and not detail.get("challenged"):
+        base_cands = _dedup_candidates(
+            list(detail.get("official_candidates") or []) + list(extra)
+        )
+        verified = verify_candidates(project, base_cands, fetch_fn=verify_fetch_fn)
+
+    built = build_enrichment_updates(
+        project, detail, extra_candidates=extra, verified_candidates=verified
+    )
 
     for key, value in built["column_updates"].items():
         setattr(project, key, value)
@@ -289,11 +422,13 @@ def enrich_project(
     *,
     detail_fetcher=None,
     search_fn=None,
+    verify_fetch_fn=None,
     progress_cb=None,
 ) -> dict:
     """1 案件をエンリッチする。detail_fetcher.fetch(url)->(status, html, inner) を使う。
 
     Zeczec 以外はスキップ。詳細取得に失敗/チャレンジなら理由を残して 0 件成功にしない。
+    verify_fetch_fn 未指定なら httpx-first の検証用 fetcher を自前で用意する。
     """
     from app.scrapers.zeczec_detail import parse_detail
 
@@ -331,7 +466,23 @@ def enrich_project(
         return apply_enrichment(db, project, {"challenged": True, "source_detail_url": url})
 
     _log(f"詳細を解析（提案人={detail.get('maker_name')} / カテゴリ={detail.get('category')}）", 0.6)
-    return apply_enrichment(db, project, detail, search_fn=search_fn)
+    # 公式サイト候補を httpx-first で検証（自前 fetcher は最後に閉じる）。
+    own_verify = verify_fetch_fn is None
+    if own_verify:
+        verify_fetch_fn = cds._default_fetcher()
+    _log("公式サイト候補を検証中（httpx-first）", 0.75)
+    try:
+        return apply_enrichment(
+            db, project, detail, search_fn=search_fn, verify_fetch_fn=verify_fetch_fn
+        )
+    finally:
+        if own_verify:
+            client = getattr(verify_fetch_fn, "_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def list_zeczec_projects(

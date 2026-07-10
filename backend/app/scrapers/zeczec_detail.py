@@ -233,17 +233,44 @@ def classify_external_link(url: str) -> tuple[str, str] | None:
     return "high", "zeczec_page_direct_link"
 
 
+# サイト共通の枠（フッター/ヘッダー/ナビ）を示すタグ・クラス断片。ここに含まれる
+# リンクは Zeczec 自身の SNS・規約・案内であり、案件（メーカー）の情報ではない。
+_CHROME_TAGS = {"footer", "header", "nav"}
+_CHROME_CLASS_HINTS = ("footer", "header", "navbar", "site-nav", "global-nav",
+                       "menu", "topbar", "cookie", "subscribe")
+
+
+def _in_site_chrome(node) -> bool:
+    """アンカーがサイト共通枠（footer/header/nav）内にあるか（祖先を辿って判定）。"""
+    cur = node.parent
+    depth = 0
+    while cur is not None and depth < 30:
+        tag = (cur.tag or "").lower()
+        if tag in _CHROME_TAGS:
+            return True
+        cls = (cur.attributes.get("class") or "").lower() if cur.attributes else ""
+        rid = (cur.attributes.get("id") or "").lower() if cur.attributes else ""
+        if any(h in cls or h in rid for h in _CHROME_CLASS_HINTS):
+            return True
+        cur = cur.parent
+        depth += 1
+    return False
+
+
 def parse_official_candidates(tree: HTMLParser) -> list[dict]:
     """プロジェクト本文の外部リンクから公式サイト候補を抽出する。
 
     確度: high=メーカーがページに載せた公式導線 / low=短縮 URL・メディア・記事
     （自動確定しない）。返り値は URL 重複排除済み。確定は呼び出し側が確度で判断する。
+    サイト共通枠（footer/header/nav）内のリンクは Zeczec 自身のものなので除外する。
     """
     out: list[dict] = []
     seen: set[str] = set()
     for a in tree.css('a[href^="http"]'):
         href = (a.attributes.get("href") or "").split("#")[0]
         if not href.startswith(("http://", "https://")):
+            continue
+        if _in_site_chrome(a):
             continue
         cls = classify_external_link(href)
         if cls is None:
@@ -272,11 +299,21 @@ def parse_socials(tree: HTMLParser) -> dict[str, str]:
         "youtube": re.compile(r"https?://(?:www\.)?youtube\.com/[^\s\"'<>?]+", re.I),
         "twitter": re.compile(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/[^/\s\"'<>?]+", re.I),
     }
+    # Zeczec 自身の公式 SNS チャンネル（フッター/ヘッダーに全ページ共通で並ぶ）。
+    # ハンドルに現れないチャンネル ID（youtube channel 等）も個別に除外する。
+    _ZECZEC_SOCIAL_HINTS = (
+        "zeczec", "uc_k_re8ln6q75tcc5uvqu8g",  # Zeczec 公式 YouTube チャンネル ID
+    )
     found: dict[str, str] = {}
     for a in tree.css('a[href^="http"]'):
         href = a.attributes.get("href") or ""
         low = href.lower()
-        if "zeczec" in low or "sharer" in low or "/intent/" in low or "/tr?" in low:
+        # サイト共通枠内（footer/header/nav）は Zeczec 自身の SNS → 除外
+        if _in_site_chrome(a):
+            continue
+        if any(h in low for h in _ZECZEC_SOCIAL_HINTS):
+            continue
+        if "sharer" in low or "/intent/" in low or "/tr?" in low:
             continue
         if "/reel/" in low or "/p/" in low or "/share" in low:
             continue
