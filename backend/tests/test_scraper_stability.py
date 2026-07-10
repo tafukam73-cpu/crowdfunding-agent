@@ -264,11 +264,54 @@ def _raises(fn, exc_type) -> bool:
     return False
 
 
+def test_wadiz_zeczec_monitored() -> None:
+    # 監視対象・表示名に Wadiz / Zeczec が含まれる（既存サイトも維持）
+    check("MONITORED_SITES に wadiz", SourceSite.wadiz in scrape_monitor.MONITORED_SITES)
+    check("MONITORED_SITES に zeczec", SourceSite.zeczec in scrape_monitor.MONITORED_SITES)
+    for s in (SourceSite.kickstarter, SourceSite.indiegogo, SourceSite.ulule,
+              SourceSite.makuake, SourceSite.greenfunding):
+        check(f"MONITORED_SITES に既存 {s.value} 維持", s in scrape_monitor.MONITORED_SITES)
+    check("SITE_LABELS に wadiz", scrape_monitor.SITE_LABELS.get("wadiz") == "Wadiz")
+    check("SITE_LABELS に zeczec", scrape_monitor.SITE_LABELS.get("zeczec") == "Zeczec")
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+
+    # Wadiz は実行履歴あり（success x2 / network x1）、Zeczec は履歴なし
+    for st in (ScrapeStatus.success, ScrapeStatus.success):
+        db.add(ScrapeRun(site=SourceSite.wadiz.value, status=st.value))
+    db.add(ScrapeRun(site=SourceSite.wadiz.value, status=ScrapeStatus.error.value,
+                     error_kind=ErrorKind.network.value))
+    db.commit()
+
+    rep = scrape_monitor.report(db, window=20)
+    site_map = {s.site: s for s in rep.sites}
+    check("report に wadiz が含まれる", SourceSite.wadiz in site_map)
+    check("report に zeczec が含まれる", SourceSite.zeczec in site_map)
+    # 既存サイトも壊れずレポートに残る
+    for s in (SourceSite.kickstarter, SourceSite.indiegogo, SourceSite.ulule,
+              SourceSite.makuake, SourceSite.greenfunding):
+        check(f"report に既存 {s.value} 維持", s in site_map)
+
+    wz = site_map[SourceSite.wadiz]
+    check("wadiz 履歴あり total=3", wz.total == 3)
+    check("wadiz success=2 を集計", wz.success == 2)
+    check("wadiz success_rate 算出済み", wz.success_rate is not None and 0.6 <= wz.success_rate <= 0.7)
+
+    # Zeczec は履歴なし → 0件成功扱いにせず total=0 / rate=None（履歴なしと区別）
+    zc = site_map[SourceSite.zeczec]
+    check("zeczec 履歴なしは total=0", zc.total == 0)
+    check("zeczec 履歴なしは success_rate=None（成功扱いしない）", zc.success_rate is None)
+    check("zeczec 履歴なしは degraded=False（エラーにしない）", zc.degraded is False)
+
+
 def main() -> int:
     test_kickstarter_structure_detection()
     test_indiegogo_structure_detection()
     test_classify_error()
     test_success_rate_monitor()
+    test_wadiz_zeczec_monitored()
     test_alert_build_and_slack_payload()
     test_notify_if_needed_no_notifier()
     print(f"\n{_passed} passed, {_failed} failed")

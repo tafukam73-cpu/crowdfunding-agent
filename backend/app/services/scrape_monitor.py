@@ -21,6 +21,8 @@ from app.models.scrape_run import ErrorKind, ScrapeRun, ScrapeStatus
 MONITORED_SITES: list[SourceSite] = [
     SourceSite.kickstarter,
     SourceSite.indiegogo,
+    SourceSite.wadiz,
+    SourceSite.zeczec,
     SourceSite.ulule,
     SourceSite.makuake,
     SourceSite.greenfunding,
@@ -31,6 +33,7 @@ SITE_LABELS: dict[str, str] = {
     SourceSite.kickstarter.value: "Kickstarter",
     SourceSite.indiegogo.value: "Indiegogo",
     SourceSite.wadiz.value: "Wadiz",
+    SourceSite.zeczec.value: "Zeczec",
     SourceSite.ulule.value: "Ulule",
     SourceSite.makuake.value: "Makuake",
     SourceSite.greenfunding.value: "GreenFunding",
