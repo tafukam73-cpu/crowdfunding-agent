@@ -240,6 +240,17 @@ def delete_project(db: Session, project: Project) -> None:
 # スクレイピング取り込み時に更新しないフィールド（ユーザー管理 / メタ）
 _UPSERT_SKIP = {"status"}
 
+# 詳細補完（enrichment）で埋めた項目。一覧の再スクレイプは一覧カードにこれらが
+# 無いため None を送ってくる。既存の非 None 値を None で消さない（補完を保護する）。
+# 「空値で既存値を消さない」ため、None のときだけ既存値を維持する（実値なら更新する）。
+_UPSERT_PRESERVE_IF_NULL = {
+    "maker_name",
+    "maker_url",
+    "category",
+    "start_date",
+    "end_date",
+}
+
 
 def upsert_by_source_url(db: Session, data: ProjectCreate) -> tuple[Project, bool]:
     """source_url をキーに upsert する。
@@ -276,6 +287,9 @@ def upsert_by_source_url(db: Session, data: ProjectCreate) -> tuple[Project, boo
 
     for key, value in payload.items():
         if key in _UPSERT_SKIP:
+            continue
+        # 詳細補完で埋めた項目は、一覧再スクレイプの None で既存値を消さない。
+        if key in _UPSERT_PRESERVE_IF_NULL and value is None:
             continue
         setattr(existing, key, value)
     # description（収集項目）を更新したので表示用の概要も作り直す

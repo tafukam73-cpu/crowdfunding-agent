@@ -10,6 +10,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Date,
     DateTime,
@@ -115,6 +116,12 @@ class Project(Base):
     maker_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     maker_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- 詳細補完の根拠（再スクレイプで消えない補完情報の保管場所） ---
+    # 詳細ページから確認できた creator URL / ブランド名 / 商品説明 / 公式サイト候補
+    # （確度つき）/ SNS / 取得元 URL / 取得できなかった理由 などを JSON で保持する。
+    # 一覧スクレイパーは ProjectCreate の項目のみ upsert するためこの列には触れない。
+    enrichment: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # CRM のメーカー（営業先企業）への紐づけ。未リンクなら null。
     maker_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)

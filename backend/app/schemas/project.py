@@ -70,6 +70,9 @@ class ProjectOut(ProjectBase):
     latest_availability_at: datetime | None = None
     # HTML 除去済みの読みやすい概要（UI 表示用。元の description も併せて返す）
     description_clean: str | None = None
+    # 詳細補完の根拠（creator URL / ブランド名 / 商品説明 / 公式サイト候補（確度）/
+    # SNS / 取得元 URL / 取得不能理由 など）。未補完なら None。
+    enrichment: dict | None = None
     # 商品性 / 営業対象判定（Ulule 案件のみ算出。それ以外は None / True）
     physical_product_score: int | None = None
     sales_target_score: int | None = None

@@ -35,6 +35,9 @@ class CIJobType(str, enum.Enum):
     contact_discovery_v2 = "contact_discovery_v2"
     ai_research = "ai_research"
     full_contact_intelligence = "full_contact_intelligence"
+    # Zeczec 詳細補完（メーカー名/カテゴリ/説明/公式サイト候補）。Playwright で詳細
+    # ページを取得するため重い。同期 POST の画面待ちを避けてジョブ化する。
+    zeczec_enrichment = "zeczec_enrichment"
 
 
 class ContactIntelligenceJob(Base):

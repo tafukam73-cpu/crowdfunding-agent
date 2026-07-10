@@ -207,6 +207,24 @@ def _run_ai(db, project, cb=None) -> None:
     contact_discovery_service.run_ai_research(db, project)
 
 
+def _run_zeczec_enrichment(db, project, cb=None) -> None:
+    # Zeczec 詳細補完（Playwright で詳細ページを取得しメーカー名/カテゴリ/説明/公式
+    # サイト候補を非破壊で書き戻す）。公式サイト候補の検索補完も行う。
+    from app.services import zeczec_enrichment_service
+    from app.services.search_providers import get_search_fn
+
+    search = get_search_fn()
+    try:
+        zeczec_enrichment_service.enrich_project(
+            db, project, search_fn=search, progress_cb=cb
+        )
+    finally:
+        try:
+            search.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 _SINGLE_PHASES = {
     CIJobType.web_research.value: ("Web Research", _run_web),
     CIJobType.document_reader.value: ("AI Document Reader", _run_doc),
@@ -215,6 +233,7 @@ _SINGLE_PHASES = {
     CIJobType.contact_discovery.value: ("自動抽出（公式サイト巡回）", _run_auto),
     CIJobType.contact_discovery_v2.value: ("Contact Discovery v2", _run_v2),
     CIJobType.ai_research.value: ("AI連絡先リサーチ", _run_ai),
+    CIJobType.zeczec_enrichment.value: ("Zeczec 詳細補完", _run_zeczec_enrichment),
 }
 
 
