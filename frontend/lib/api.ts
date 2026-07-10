@@ -3374,7 +3374,8 @@ export type V2Decision =
   | "deprioritize"
   | "drop"
   | "closed"
-  | "data_insufficient";
+  | "data_insufficient"
+  | "not_evaluated";
 
 export type AssessmentState =
   | "evaluated"
@@ -3382,6 +3383,7 @@ export type AssessmentState =
   | "checking_japan"
   | "recompute_pending"
   | "data_insufficient"
+  | "not_evaluated"
   | "failed";
 
 export type JapanCheckStatus =

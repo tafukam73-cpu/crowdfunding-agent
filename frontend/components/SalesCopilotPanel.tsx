@@ -187,10 +187,12 @@ export default function SalesCopilotPanel({ reloadKey }: { reloadKey?: number })
   const [data, setData] = useState<CopilotDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError(null);
     fetchSalesCopilot(5)
       .then((d) => active && setData(d))
       .catch((e) => active && setError(String(e)))
@@ -198,7 +200,7 @@ export default function SalesCopilotPanel({ reloadKey }: { reloadKey?: number })
     return () => {
       active = false;
     };
-  }, [reloadKey]);
+  }, [reloadKey, retryKey]);
 
   return (
     <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-5 shadow-sm">
@@ -207,7 +209,20 @@ export default function SalesCopilotPanel({ reloadKey }: { reloadKey?: number })
         案件・企業リサーチ・Contact Intelligence・CRM・営業状況を横断し、「今どう動くべきか」を判断・理由付きで提案します。
       </p>
 
-      {error && <p className="mt-2 text-sm text-red-600">読み込み失敗：{error}</p>}
+      {error && (
+        <div className="mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+          <div>読み込み失敗：{error}</div>
+          <div className="mt-1 text-xs text-red-500">
+            バックエンド（http://localhost:8000）の稼働をご確認ください。
+          </div>
+          <button
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="mt-1 rounded border border-red-300 bg-white px-2 py-0.5 text-xs text-red-700 hover:bg-red-100"
+          >
+            再取得
+          </button>
+        </div>
+      )}
       {loading && !data && (
         <p className="mt-2 text-sm text-slate-400">分析中…</p>
       )}

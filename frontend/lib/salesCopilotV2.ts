@@ -39,6 +39,7 @@ export const DECISION_LABELS: Record<V2Decision, string> = {
   drop: "見送り",
   closed: "対応済み",
   data_insufficient: "データ不足",
+  not_evaluated: "未評価",
 };
 
 export const DECISION_COLORS: Record<string, string> = {
@@ -54,6 +55,7 @@ export const DECISION_COLORS: Record<string, string> = {
   drop: "bg-slate-100 text-slate-400",
   closed: "bg-slate-100 text-slate-400",
   data_insufficient: "bg-slate-100 text-slate-500",
+  not_evaluated: "bg-slate-100 text-slate-400",
 };
 
 export const STATE_LABELS: Record<AssessmentState, string> = {
@@ -62,6 +64,7 @@ export const STATE_LABELS: Record<AssessmentState, string> = {
   checking_japan: "日本販売チェック中",
   recompute_pending: "再評価待ち",
   data_insufficient: "データ不足",
+  not_evaluated: "未評価",
   failed: "評価失敗",
 };
 
@@ -71,6 +74,7 @@ export const STATE_COLORS: Record<AssessmentState, string> = {
   checking_japan: "bg-sky-100 text-sky-700",
   recompute_pending: "bg-indigo-100 text-indigo-700",
   data_insufficient: "bg-slate-100 text-slate-500",
+  not_evaluated: "bg-slate-100 text-slate-400",
   failed: "bg-rose-100 text-rose-700",
 };
 
