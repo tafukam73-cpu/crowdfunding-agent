@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.session import SessionLocal
 from app.models.contact_intelligence_job import (
     CIJobStatus,
@@ -39,6 +40,12 @@ logger = logging.getLogger("contact_intelligence")
 CACHE_TTL_HOURS = 24
 # 進行中ジョブへの中断要求（同一プロセス内シグナル。単一 uvicorn ワーカー想定）
 _cancel_requested: set[int] = set()
+
+# 重い外部クロール/検索ジョブの同時実行を制限するセマフォ。無制限に並列起動すると
+# CPU/DB コネクションを食い潰して画面表示（GET）が固まるため。スロット待ちの間は
+# DB セッションを開かない（ジョブ行は queued のまま）。
+_MAX_CONCURRENT_JOBS = max(1, int(getattr(settings, "ci_max_concurrent_jobs", 2)))
+_job_semaphore = threading.BoundedSemaphore(_MAX_CONCURRENT_JOBS)
 
 
 class _JobCancelled(BaseException):
@@ -80,6 +87,30 @@ def _find_cached(
 
 def get_job(db: Session, job_id: int) -> ContactIntelligenceJob | None:
     return db.get(ContactIntelligenceJob, job_id)
+
+
+def recover_orphaned_jobs(db: Session) -> int:
+    """起動時に残っている queued/running ジョブを failed に回収する。
+
+    バックエンド再起動でデーモンスレッドが失われると、ジョブ行が queued/running の
+    まま孤児化し、find_active が永久に重複作成を抑止してしまう。起動時に一度掃除する。
+    Returns: 回収した件数。
+    """
+    stmt = select(ContactIntelligenceJob).where(
+        ContactIntelligenceJob.status.in_(
+            [CIJobStatus.queued.value, CIJobStatus.running.value]
+        )
+    )
+    rows = list(db.scalars(stmt))
+    for job in rows:
+        job.status = CIJobStatus.failed.value
+        job.error = "バックエンド再起動により中断されました（再実行してください）"
+        job.current_step = "中断"
+        job.completed_at = _now()
+    if rows:
+        db.commit()
+        logger.info("recovered %d orphaned CI jobs on startup", len(rows))
+    return len(rows)
 
 
 def find_active(
@@ -271,6 +302,16 @@ _SINGLE_PHASES = {
 
 
 def _run_job(job_id: int) -> None:
+    """ジョブ本体。重い並列ジョブを制限してから実行する。
+
+    セマフォ待ちの間は DB セッションを開かない（コネクションを掴んだまま待たない）。
+    スロットを取得できるまでジョブ行は queued のまま。
+    """
+    with _job_semaphore:
+        _run_job_inner(job_id)
+
+
+def _run_job_inner(job_id: int) -> None:
     """ジョブ本体。独自セッションで実行し、行を随時更新する。"""
     db = SessionLocal()
     try:

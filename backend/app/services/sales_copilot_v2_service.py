@@ -288,13 +288,198 @@ def build_v2_card(db: Session, project: Project) -> dict:
     }
 
 
+# ---------------- ダッシュボード（読み取り専用・バッチ取得） ----------------
+# 一覧では保存済みデータだけを読む。未評価案件はその場で評価せず not_evaluated で返す
+# （外部HTTP/Playwright/Claude/Assessment保存/Japanチェック起動は一切しない）。
+
+# 営業状況 → v1 相当の「営業ワークフロー状態」。engaged はスコアで上書きしない。
+_SALES_STATUS_BASE = {
+    "won": "closed",
+    "rejected": "closed",
+    "negotiating": "needs_negotiation",
+    "replied": "needs_negotiation",
+    "contacted": "waiting",
+    "awaiting_reply": "waiting",
+}
+
+
+def _batch_latest_map(db: Session, model, project_ids: list[int]):
+    """各 project_id の最新（最大 id）行を 1 クエリで取得して map で返す。"""
+    from sqlalchemy import func, select
+
+    if not project_ids:
+        return {}
+    sub = (
+        select(model.project_id, func.max(model.id).label("mid"))
+        .where(model.project_id.in_(project_ids))
+        .group_by(model.project_id)
+        .subquery()
+    )
+    rows = db.scalars(select(model).join(sub, model.id == sub.c.mid))
+    return {r.project_id: r for r in rows}
+
+
+def _batch_latest_japan_jobs(db: Session, project_ids: list[int]):
+    from sqlalchemy import func, select
+
+    from app.models.contact_intelligence_job import (
+        CIJobType,
+        ContactIntelligenceJob,
+    )
+
+    if not project_ids:
+        return {}
+    sub = (
+        select(
+            ContactIntelligenceJob.project_id,
+            func.max(ContactIntelligenceJob.id).label("mid"),
+        )
+        .where(
+            ContactIntelligenceJob.project_id.in_(project_ids),
+            ContactIntelligenceJob.job_type == CIJobType.japan_sales_check.value,
+        )
+        .group_by(ContactIntelligenceJob.project_id)
+        .subquery()
+    )
+    rows = db.scalars(
+        select(ContactIntelligenceJob).join(
+            sub, ContactIntelligenceJob.id == sub.c.mid
+        )
+    )
+    return {r.project_id: r for r in rows}
+
+
+def _dashboard_card(project: Project, sa_row, japan_job, jsc, contact: dict) -> dict:
+    """保存済みデータだけから v2 カードを作る（DB アクセスなし・純粋）。"""
+    japan_active = (
+        japan_job.status
+        if japan_job is not None and japan_job.status in ("queued", "running")
+        else None
+    )
+    japan = sas.interpret_japan_check(jsc, job_status=japan_active)
+    japan["job_id"] = japan_job.id if japan_job is not None else None
+    japan["job_status"] = japan_job.status if japan_job is not None else None
+
+    japan_block = {
+        "status": japan["status"], "result": japan["result"],
+        "confidence": japan["confidence"], "evidence": japan["evidence"],
+        "source_urls": japan["source_urls"], "checked_at": japan["checked_at"],
+        "error_reason": japan["error_reason"], "version": japan["version"],
+        "job_id": japan["job_id"], "job_status": japan["job_status"],
+    }
+
+    base = {
+        "project_id": project.id,
+        "title": project.title,
+        "source_site": project.source_site,
+        "maker_name": project.maker_name,
+        "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        "japan_sales_check": japan_block,
+        "contact": {
+            "has_email": contact.get("has_email", False),
+            "has_form": contact.get("has_form", False),
+            "recommended_channel": contact.get("recommended_channel"),
+            "recommended_email": contact.get("recommended_email"),
+        },
+    }
+
+    if sa_row is None:
+        # 未評価：その場で評価しない。ランキング用に latest_score を暫定優先度に使う。
+        base.update({
+            "decision": "not_evaluated",
+            "base_decision": "not_evaluated",
+            "priority_score": int(project.latest_score or 0),
+            "priority_grade": sas.grade(project.latest_score or 0),
+            "priority_label": "low",
+            "next_action": "適性を評価してください（POST /projects/{id}/sales-assessment）",
+            "reason": "営業適性アセスメント未実施",
+            "tags": [],
+            "v1_decision": "not_evaluated",
+            "v2_decision": "not_evaluated",
+            "decision_changed": False,
+            "decision_change_reason": None,
+            "assessment": {
+                "japan_market_fit": {"score": None, "grade": None, "level": None, "reasons": []},
+                "exclusivity": {"score": None, "grade": None, "level": None, "reasons": []},
+                "makuake_fit": {"score": None, "grade": None, "level": None, "reasons": []},
+                "overall_priority_score": None, "overall_grade": None,
+                "confidence": None, "engine": None, "saved": False,
+                "evaluated_at": None, "missing_data": None, "state": "not_evaluated",
+            },
+            "assessment_state": "not_evaluated",
+        })
+        return base
+
+    d = sa_row.details_json or {}
+    assessment = {
+        "japan_market_fit": d.get("japan_market_fit", {}),
+        "exclusivity": d.get("exclusivity", {}),
+        "makuake_fit": d.get("makuake_fit", {}),
+        "overall_priority_score": sa_row.overall_priority_score or 0,
+        "confidence": sa_row.confidence or 0,
+        "engine": sa_row.engine,
+    }
+    # v1 相当の base_decision は営業状況から軽量に導く（engaged はスコアで上書きしない）。
+    base_decision = _SALES_STATUS_BASE.get(project.sales_status) or (
+        "needs_email" if (contact.get("has_email") or contact.get("has_form"))
+        else "needs_contact"
+    )
+    base_card = {"decision": base_decision, "next_action": None, "reasons": [None]}
+    rec = combine_v2(base_card, assessment, contact)
+    state = _assessment_state(sa_row, japan)
+
+    def _sb(key: str) -> dict:
+        blk = d.get(key, {}) or {}
+        return {"score": blk.get("score"), "grade": sas.grade(blk.get("score")),
+                "level": blk.get("level"), "reasons": (blk.get("reasons") or [])[:3]}
+
+    overall = assessment["overall_priority_score"]
+    base.update({
+        "decision": rec["decision"],
+        "base_decision": rec["base_decision"],
+        "priority_score": rec["priority_score"],
+        "priority_grade": sas.grade(rec["priority_score"]),
+        "priority_label": rec["priority_label"],
+        "next_action": rec["next_action"],
+        "reason": rec["reason"],
+        "tags": rec["tags"],
+        "v1_decision": rec["base_decision"],
+        "v2_decision": rec["decision"],
+        "decision_changed": rec["base_decision"] != rec["decision"],
+        "decision_change_reason": rec["reason"] if rec["base_decision"] != rec["decision"] else None,
+        "assessment": {
+            "japan_market_fit": _sb("japan_market_fit"),
+            "exclusivity": _sb("exclusivity"),
+            "makuake_fit": _sb("makuake_fit"),
+            "overall_priority_score": overall,
+            "overall_grade": sas.grade(overall),
+            "confidence": sa_row.confidence,
+            "engine": sa_row.engine,
+            "saved": True,
+            "evaluated_at": sa_row.created_at.isoformat() if sa_row.created_at else None,
+            "missing_data": d.get("missing_data"),
+            "state": state,
+        },
+        "assessment_state": state,
+    })
+    return base
+
+
 def copilot_v2_dashboard(
     db: Session, *, per_bucket: int = 5, scan_limit: int = 200
 ) -> dict:
-    """v2 ダッシュボード：v2 優先度スコアでランキングし、バケットに振り分ける。"""
+    """v2 ダッシュボード（読み取り専用・バッチ取得・N+1 なし）。
+
+    保存済みの Assessment / Japan チェック状態 / 連絡先だけを読む。未評価案件は
+    その場で評価せず not_evaluated で返す。外部HTTP・Playwright・Claude・
+    Assessment 保存・Japan チェック起動は一切行わない。
+    """
     from sqlalchemy import select
 
+    from app.models.contact_discovery import ContactDiscovery
+    from app.models.japan_sales_check import JapanSalesCheck
     from app.models.project import SALES_TARGET_SITES
+    from app.models.sales_assessment import SalesAssessment
 
     values = [s.value for s in SALES_TARGET_SITES]
     stmt = (
@@ -304,7 +489,33 @@ def copilot_v2_dashboard(
         .limit(scan_limit)
     )
     projects = list(db.scalars(stmt))
-    cards = [build_v2_card(db, p) for p in projects]
+    ids = [p.id for p in projects]
+
+    # バッチ取得（各 1 クエリ）：最新 Assessment / Japan ジョブ / Japan チェック / 連絡先
+    sa_map = _batch_latest_map(db, SalesAssessment, ids)
+    jjob_map = _batch_latest_japan_jobs(db, ids)
+    jsc_map = _batch_latest_map(db, JapanSalesCheck, ids)
+    cd_map = _batch_latest_map(db, ContactDiscovery, ids)
+
+    from app.services import contact_discovery_service as cds
+
+    contact_flags: dict[int, dict] = {}
+    for pid, cd in cd_map.items():
+        contact_flags[pid] = {
+            "has_email": bool(cd.primary_email or cd.discovered_emails),
+            "has_form": bool(cd.primary_contact_form_url or cd.discovered_forms),
+            "recommended_channel": cd.recommended_channel,
+            "recommended_email": cd.primary_email,
+            "official": bool(cds.official_site_or_none(cd.official_site_url)),
+        }
+
+    cards = [
+        _dashboard_card(
+            p, sa_map.get(p.id), jjob_map.get(p.id), jsc_map.get(p.id),
+            contact_flags.get(p.id, {}),
+        )
+        for p in projects
+    ]
     cards.sort(key=lambda c: c["priority_score"], reverse=True)
 
     counts: dict[str, int] = {}
@@ -324,6 +535,7 @@ def copilot_v2_dashboard(
         "needs_email": _bucket("needs_email"),
         "deprioritize": _bucket("deprioritize", "drop"),
         "data_insufficient": _bucket("data_insufficient"),
+        "not_evaluated": _bucket("not_evaluated"),
         "counts": counts,
         "scanned": len(cards),
         # フロントの一覧（フィルター/並び替えはクライアント側で行う）用の全カード。
@@ -334,15 +546,19 @@ def copilot_v2_dashboard(
                 1 for c in cards
                 if c["japan_sales_check"]["status"] in ("not_checked", "failed")
             ),
+            "not_evaluated": sum(
+                1 for c in cards if c["assessment_state"] == "not_evaluated"
+            ),
             "checking_japan": sum(
                 1 for c in cards if c["assessment_state"] == "checking_japan"
             ),
             "data_insufficient": sum(
                 1 for c in cards if c["assessment_state"] == "data_insufficient"
             ),
+            # 保存済みで confidence が低い案件のみ（未評価は含めない）
             "low_confidence": sum(
                 1 for c in cards
-                if (c["assessment"]["confidence"] or 0) < 40
+                if c["assessment"]["saved"] and (c["assessment"]["confidence"] or 0) < 40
             ),
         },
     }

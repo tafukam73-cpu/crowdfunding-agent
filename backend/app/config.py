@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     # リトライ回数（403/タイムアウト/5xx 時。UA をローテーションして再試行）
     scrape_retries: int = 2
 
+    # --- DB コネクションプール ---
+    # 重いバックグラウンドジョブがセッションを保持しても、画面表示用の GET が
+    # コネクション待ちで固まらないよう、プールを十分に確保する。
+    db_pool_size: int = 10
+    db_max_overflow: int = 40
+    db_pool_timeout: int = 20  # コネクション取得の最大待ち（秒）
+
+    # --- バックグラウンドジョブ（Contact Intelligence 等）の同時実行上限 ---
+    # 重い外部クロール/検索ジョブを無制限に並列起動すると CPU/コネクションを
+    # 食い潰して画面表示が固まる。同時実行数をこの値に制限する（超過分は待機）。
+    ci_max_concurrent_jobs: int = 2
+
     # AI 評価：未設定ならモック評価器が使われる
     anthropic_api_key: str = ""
     # 既定は最も高性能な Opus 4.8。コスト重視なら claude-sonnet-4-6 等に変更可
