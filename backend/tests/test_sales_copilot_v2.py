@@ -101,6 +101,17 @@ def test_closed_respected():
     check("v1 の closed を尊重", rec["decision"] == "closed")
 
 
+def test_engaged_states_preserved():
+    print("test_engaged_states_preserved")
+    # 既に接触/商談中の案件はスコアが高くても「今すぐ営業」で上書きしない
+    for st in ("waiting", "needs_followup", "needs_negotiation"):
+        rec = v2.combine_v2(
+            _card(decision=st, next_action="返信を待つ", email="a@b.com"),
+            _assessment(80, 80, 80, 80), {"has_email": True, "has_form": False},
+        )
+        check(f"v1 {st} を尊重（sell_now で上書きしない）", rec["decision"] == st)
+
+
 def test_low_confidence_tag():
     print("test_low_confidence_tag")
     rec = v2.combine_v2(
@@ -134,6 +145,7 @@ if __name__ == "__main__":
     test_low_potential_deprioritized()
     test_drop_respected()
     test_closed_respected()
+    test_engaged_states_preserved()
     test_low_confidence_tag()
     test_priority_monotonic()
     test_makuake_mentioned_when_high()

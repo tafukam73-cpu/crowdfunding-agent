@@ -82,6 +82,25 @@ def get_job(db: Session, job_id: int) -> ContactIntelligenceJob | None:
     return db.get(ContactIntelligenceJob, job_id)
 
 
+def find_active(
+    db: Session, project_id: int, job_type: str
+) -> ContactIntelligenceJob | None:
+    """進行中（queued/running）の同種ジョブを返す（重複ジョブ作成の抑止に使う）。"""
+    stmt = (
+        select(ContactIntelligenceJob)
+        .where(
+            ContactIntelligenceJob.project_id == project_id,
+            ContactIntelligenceJob.job_type == job_type,
+            ContactIntelligenceJob.status.in_(
+                [CIJobStatus.queued.value, CIJobStatus.running.value]
+            ),
+        )
+        .order_by(desc(ContactIntelligenceJob.id))
+        .limit(1)
+    )
+    return db.scalar(stmt)
+
+
 def get_latest(
     db: Session, project_id: int, job_type: str | None = None
 ) -> ContactIntelligenceJob | None:
@@ -207,6 +226,19 @@ def _run_ai(db, project, cb=None) -> None:
     contact_discovery_service.run_ai_research(db, project)
 
 
+def _run_japan_sales_check(db, project, cb=None) -> None:
+    # 日本販売状況チェックを実行し、完了後に営業適性アセスメントを再計算する。
+    from app.services import japan_sales_service, sales_assessment_service
+
+    if cb:
+        cb("日本販売状況をチェック中", 0.1)
+    japan_sales_service.run_check(db, project)
+    if cb:
+        cb("営業適性を再計算中（独占販売可能性の確度を更新）", 0.8)
+    # 日本販売チェックの結果を反映して再評価（新しい行として保存＝履歴保持）。
+    sales_assessment_service.run_assessment(db, project)
+
+
 def _run_zeczec_enrichment(db, project, cb=None) -> None:
     # Zeczec 詳細補完（Playwright で詳細ページを取得しメーカー名/カテゴリ/説明/公式
     # サイト候補を非破壊で書き戻す）。公式サイト候補の検索補完も行う。
@@ -234,6 +266,7 @@ _SINGLE_PHASES = {
     CIJobType.contact_discovery_v2.value: ("Contact Discovery v2", _run_v2),
     CIJobType.ai_research.value: ("AI連絡先リサーチ", _run_ai),
     CIJobType.zeczec_enrichment.value: ("Zeczec 詳細補完", _run_zeczec_enrichment),
+    CIJobType.japan_sales_check.value: ("日本販売状況チェック", _run_japan_sales_check),
 }
 
 

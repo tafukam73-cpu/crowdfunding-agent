@@ -112,12 +112,25 @@ def project_copilot_v2(project_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/projects/{project_id}/sales-assessment")
-def run_sales_assessment(project_id: int, db: Session = Depends(get_db)) -> dict:
-    """営業適性アセスメント（3 スコア）を算出して保存する（ルールベース・非破壊）。"""
+def run_sales_assessment(
+    project_id: int,
+    auto_japan_check: bool = Query(
+        True, description="日本販売状況が未実施なら背景ジョブを起動して再評価する"
+    ),
+    db: Session = Depends(get_db),
+) -> dict:
+    """営業適性アセスメント（3 スコア）を算出して保存する（ルールベース・非破壊）。
+
+    日本販売状況が未実施なら背景ジョブを起動し、現在のデータで暫定評価を返す。
+    ジョブ完了後に自動で再評価（新しい行として保存）される。重い検索は同期実行しない。
+    """
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
-    row = sales_assessment_service.run_assessment(db, project)
+    out = sales_assessment_service.assess_with_japan(
+        db, project, auto_check=auto_japan_check
+    )
+    row = out["assessment"]
     return {
         "project_id": project.id,
         "japan_market_fit_score": row.japan_market_fit_score,
@@ -126,6 +139,10 @@ def run_sales_assessment(project_id: int, db: Session = Depends(get_db)) -> dict
         "overall_priority_score": row.overall_priority_score,
         "confidence": row.confidence,
         "engine": row.engine,
+        "provisional": out["provisional"],
+        "japan_job_id": out["japan_job_id"],
+        "japan_job_status": out["japan_job_status"],
+        "japan_state": out["japan_state"],
         "details": row.details_json,
     }
 

@@ -38,6 +38,9 @@ class CIJobType(str, enum.Enum):
     # Zeczec 詳細補完（メーカー名/カテゴリ/説明/公式サイト候補）。Playwright で詳細
     # ページを取得するため重い。同期 POST の画面待ちを避けてジョブ化する。
     zeczec_enrichment = "zeczec_enrichment"
+    # 日本販売状況チェック（検索・AI 調査）。重いのでジョブ化し、完了後に営業適性
+    # アセスメントを再計算する（独占販売可能性スコアの confidence を上げる）。
+    japan_sales_check = "japan_sales_check"
 
 
 class ContactIntelligenceJob(Base):

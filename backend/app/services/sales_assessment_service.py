@@ -166,9 +166,24 @@ def score_exclusivity(sig: dict) -> dict:
     """独占販売可能性: 日本未上陸度 × メーカー規模 × 到達性。"""
     reasons: list[str] = []
 
-    # 日本未上陸度（★5=未販売→独占の余地大 / 既に代理店あり→小）
+    # 日本未上陸度。根拠のある結果だけを強く反映する（検索ゼロ＝未販売と断定しない）。
+    jr = sig.get("japan_result")          # sold_in_japan / not_found_in_japan / inconclusive
+    jconf = int(sig.get("japan_confidence") or 0)
     stars = sig.get("japan_stars")
-    if sig.get("already_in_japan"):
+    if jr is not None:
+        if jr == "sold_in_japan":
+            japan_openness = 18
+            reasons.append("日本で販売/代理店を確認 → 独占余地が小さい（根拠あり）")
+        elif jr == "not_found_in_japan":
+            # 「検索で見つからない」は不在の確証ではないため、確度で頭打ちにする。
+            japan_openness = _clamp(52 + jconf * 0.35)  # conf 55→71, 80→80
+            reasons.append(
+                f"日本での販売が確認されず → 独占の余地あり（確度 {jconf}・断定はしない）"
+            )
+        else:  # inconclusive
+            japan_openness = 50
+            reasons.append("日本販売状況は不確定（inconclusive）→ 中立扱い")
+    elif sig.get("already_in_japan"):
         japan_openness = 20
         reasons.append("日本で既に販売/代理店あり → 独占余地が小さい")
     elif stars is not None:
@@ -176,8 +191,8 @@ def score_exclusivity(sig: dict) -> dict:
         if int(stars) >= 4:
             reasons.append("日本未上陸の可能性が高い → 独占販売の好機")
     else:
-        japan_openness = 50
-        reasons.append("日本販売状況チェック未実施（未上陸度は不明）")
+        japan_openness = 48
+        reasons.append("日本販売状況チェック未実施 → 未上陸度は不明（中立・要確認）")
 
     # メーカー規模（大企業→独占付与されにくい / 中小・独立→応じやすい）
     maker = (sig.get("maker_name") or "").lower()
@@ -252,17 +267,34 @@ def score_makuake_fit(sig: dict) -> dict:
 
 # ---------------- 総合・信頼度 ----------------
 def _confidence(sig: dict) -> int:
-    """入力の充足度（0〜100）。資金/実績・日本販売状況・説明文の有無で決める。"""
+    """入力の充足度（0〜100）。資金/実績・日本販売状況・説明文の有無で決める。
+
+    日本販売チェックの状態で加点を段階化する（根拠が強いほど加点大）。未実施/実行中/
+    失敗/inconclusive はスコアを極端に下げず、confidence のみ下げる。
+    """
     score = 30
     if _achievement_rate(sig) is not None or sig.get("backers"):
         score += 25
-    if sig.get("japan_checked"):
-        score += 25
+    # 日本販売状況：completed かつ確度が高いほど加点。未確定は小さめ。
+    jstate = sig.get("japan_state")
+    jr = sig.get("japan_result")
+    jconf = int(sig.get("japan_confidence") or 0)
+    if jstate == "completed" and jr in ("sold_in_japan", "not_found_in_japan"):
+        score += _clamp_add(10 + int(jconf * 0.2), 25)  # 最大 +25
+    elif jr == "inconclusive":
+        score += 5
+    elif jstate is None and sig.get("japan_checked"):
+        score += 25  # 後方互換（japan_state 未指定の呼び出し）
+    # not_checked / queued / running / failed は加点なし（confidence が下がる）
     if len((sig.get("description") or "")) >= 40:
         score += 15
     if sig.get("maker_name"):
         score += 5
     return _clamp(score)
+
+
+def _clamp_add(value: int, cap: int) -> int:
+    return max(0, min(cap, int(value)))
 
 
 def assess(sig: dict) -> dict:
@@ -304,22 +336,150 @@ def _latest_contact_discovery(db: Session, project_id: int):
     return cds.get_latest(db, project_id)
 
 
-def _gather_signals(db: Session, project: Project) -> dict:
+# --- 日本販売状況の解釈（根拠のある結果だけを使う） ---
+# 「売っている確証」があるチャネル（見つかったら sold_in_japan）。
+_JAPAN_PRESENCE_KEYS = ("distributor", "subsidiary", "amazon", "rakuten", "yahoo")
+_JAPAN_CF_KEYS = ("makuake", "greenfunding")
+
+# 案件別のスコア用グレード基準（要件）。
+_GRADE_BANDS = ((80, "A"), (65, "B"), (50, "C"), (35, "D"), (0, "E"))
+
+
+def grade(score: int | None) -> str | None:
+    """0〜100 のスコアを A〜E に変換する（None は None）。"""
+    if score is None:
+        return None
+    s = _clamp(score)
+    for lo, g in _GRADE_BANDS:
+        if s >= lo:
+            return g
+    return "E"
+
+
+def interpret_japan_check(jsc, *, job_status: str | None = None) -> dict:
+    """最新の japan_sales_check（＋任意のジョブ状態）を根拠付きで解釈する。
+
+    検索結果がゼロ＝「日本未販売」と断定しない。実際に販売を確認できたら
+    sold_in_japan、能動的に検索して見つからなければ not_found_in_japan（確度は中）、
+    判定材料が乏しければ inconclusive。
+
+    Returns:
+      {status, result, evidence[], source_urls[], checked_at, confidence,
+       error_reason, version}
+      status: not_checked / queued / running / completed / failed
+      result: sold_in_japan / not_found_in_japan / inconclusive / None
+    """
+    from app.models.japan_sales_check import JapanSalesStatus
+
+    # ジョブが進行中なら、まだ結果は無い（暫定）。
+    if job_status in ("queued", "running"):
+        return {
+            "status": job_status, "result": None, "evidence": [], "source_urls": [],
+            "checked_at": None, "confidence": 0, "error_reason": None, "version": None,
+        }
+    if jsc is None:
+        return {
+            "status": "not_checked", "result": None, "evidence": [],
+            "source_urls": [], "checked_at": None, "confidence": 0,
+            "error_reason": None, "version": None,
+        }
+
+    checked_at = jsc.created_at.isoformat() if getattr(jsc, "created_at", None) else None
+    version = getattr(jsc, "model", None)
+
+    if jsc.status == JapanSalesStatus.failed.value:
+        return {
+            "status": "failed", "result": None, "evidence": [], "source_urls": [],
+            "checked_at": checked_at, "confidence": 0,
+            "error_reason": (jsc.error or "check failed")[:300], "version": version,
+        }
+    if jsc.status != JapanSalesStatus.completed.value:
+        # pending 等（ジョブ経由でない直呼び）→ 未確定扱い
+        return {
+            "status": "running", "result": None, "evidence": [], "source_urls": [],
+            "checked_at": checked_at, "confidence": 0, "error_reason": None,
+            "version": version,
+        }
+
+    channels = jsc.channels or []
+    found, not_found, unknown = [], [], []
+    evidence: list[str] = []
+    source_urls: list[str] = []
+    for ch in channels:
+        st = str(ch.get("status", "")).lower()
+        key = str(ch.get("channel", "")).lower()
+        label = ch.get("label") or key
+        url = ch.get("search_url")
+        if st in ("found", "limited"):
+            found.append(key)
+            evidence.append(f"{label}: {st}" + (f"（{ch.get('note')}）" if ch.get("note") else ""))
+            if url:
+                source_urls.append(url)
+        elif st == "not_found":
+            not_found.append(key)
+            if url:
+                source_urls.append(url)
+        else:
+            unknown.append(key)
+
+    presence = any(k in found for k in _JAPAN_PRESENCE_KEYS)
+    on_cf = any(k in found for k in _JAPAN_CF_KEYS)
+    checked_keys = len(found) + len(not_found)
+
+    if presence or on_cf:
+        result = "sold_in_japan"
+        confidence = 85 if presence else 70
+    elif checked_keys >= 3 and not found:
+        # 主要チャネルを能動的に検索して販売を確認できなかった → 未販売の可能性（確定はしない）
+        result = "not_found_in_japan"
+        # 実検索できたチャネル比率で確度を作る（最大 65。断定しない）
+        total = max(1, len(channels))
+        confidence = _clamp(40 + int(checked_keys / total * 30))
+        confidence = min(confidence, 65)
+        evidence.append(f"{checked_keys} チャネルを検索し販売を確認できず（不在の確証ではない）")
+    else:
+        # 検索材料が乏しい（unknown 多数）→ 不確定
+        result = "inconclusive"
+        confidence = 25
+        evidence.append("判定できるチャネル情報が不足（inconclusive）")
+
+    return {
+        "status": "completed", "result": result, "evidence": evidence[:8],
+        "source_urls": sorted(set(source_urls))[:8], "checked_at": checked_at,
+        "confidence": confidence, "error_reason": None, "version": version,
+    }
+
+
+def missing_data(sig: dict) -> list[str]:
+    """confidence を下げている不足データを列挙する（画面の『データ不足』表示用）。"""
+    miss: list[str] = []
+    if _achievement_rate(sig) is None and not sig.get("backers"):
+        miss.append("funding_traction")
+    js = sig.get("japan_state")
+    if js in ("not_checked", "queued", "running", "failed") or sig.get("japan_result") == "inconclusive":
+        miss.append("japan_sales_check")
+    if not sig.get("has_contact") and not sig.get("has_official_site"):
+        miss.append("contact")
+    if len((sig.get("description") or "")) < 40:
+        miss.append("description")
+    return miss
+
+
+def _gather_signals(db: Session, project: Project, *, japan_job_status: str | None = None) -> dict:
     """project ＋ 最新の日本販売状況 ＋ 連絡先探索から入力シグナルを作る。"""
     jsc = _latest_japan_sales_check(db, project.id)
     disc = _latest_contact_discovery(db, project.id)
 
-    already_in_japan = on_makuake = False
-    stars = None
+    japan = interpret_japan_check(jsc, job_status=japan_job_status)
+    already_in_japan = japan["result"] == "sold_in_japan"
+    on_makuake = False
+    stars = jsc.sales_value_stars if jsc is not None else None
     if jsc is not None:
-        stars = jsc.sales_value_stars
         for ch in (jsc.channels or []):
             st = str(ch.get("status", "")).lower()
             key = str(ch.get("channel", "")).lower()
-            if st in ("found", "limited"):
-                already_in_japan = True
-                if "makuake" in key or "green" in key:
-                    on_makuake = True
+            if st in ("found", "limited") and ("makuake" in key or "green" in key):
+                on_makuake = True
 
     has_contact = False
     has_official = False
@@ -348,23 +508,35 @@ def _gather_signals(db: Session, project: Project) -> dict:
         "maker_name": project.maker_name,
         "has_official_site": has_official,
         "has_contact": has_contact,
-        "japan_checked": jsc is not None,
+        "japan_checked": japan["status"] == "completed",
         "japan_stars": stars,
         "already_in_japan": already_in_japan,
         "on_makuake": on_makuake,
         "source_site": project.source_site,
+        # 日本販売状況の解釈（根拠つき）
+        "japan_state": japan["status"],
+        "japan_result": japan["result"],
+        "japan_confidence": japan["confidence"],
+        "japan_evidence": japan["evidence"],
+        "japan_source_urls": japan["source_urls"],
+        "japan_checked_at": japan["checked_at"],
+        "japan_error_reason": japan["error_reason"],
+        "japan_version": japan["version"],
     }
 
 
-def run_assessment(db: Session, project: Project, *, ai_adjuster=None):
+def run_assessment(
+    db: Session, project: Project, *, ai_adjuster=None, japan_job_status: str | None = None
+):
     """アセスメントを実行して sales_assessments に保存する（非破壊・履歴追加）。
 
-    ai_adjuster(sig, result)->result を渡すとルールベース結果に AI 補正を重ねる
-    （ハイブリッド）。既定は rule-based のみ。失敗してもルールベース結果は保存する。
+    japan_job_status を渡すと、日本販売チェックが queued/running の暫定評価として
+    記録できる（confidence が下がる）。ai_adjuster を渡すとルールベース結果に AI
+    補正を重ねる（既定は rule-based のみ）。失敗してもルールベース結果は保存する。
     """
     from app.models.sales_assessment import SalesAssessment
 
-    sig = _gather_signals(db, project)
+    sig = _gather_signals(db, project, japan_job_status=japan_job_status)
     result = assess(sig)
     ai_adjusted = False
     if ai_adjuster is not None:
@@ -387,6 +559,8 @@ def run_assessment(db: Session, project: Project, *, ai_adjuster=None):
             "japan_market_fit": result["japan_market_fit"],
             "exclusivity": result["exclusivity"],
             "makuake_fit": result["makuake_fit"],
+            "missing_data": missing_data(sig),
+            "provisional": japan_job_status in ("queued", "running"),
             "signals": sig,
         },
         confidence=result["confidence"],
@@ -397,6 +571,56 @@ def run_assessment(db: Session, project: Project, *, ai_adjuster=None):
     db.commit()
     db.refresh(row)
     return row
+
+
+def ensure_japan_check(db: Session, project: Project, *, runner=None):
+    """日本販売状況が未実施/失敗なら背景ジョブを作成する（重複ジョブは作らない）。
+
+    Returns: (job|None, state)。state は not_checked/queued/running/completed/failed。
+    - 既に completed → ジョブ作成せず (None, "completed")。
+    - queued/running のジョブが既にある → 既存を返す（重複作成しない）。
+    - not_checked/failed → 新規ジョブを作成。
+    """
+    from app.models.contact_intelligence_job import CIJobType
+    from app.services import contact_intelligence_service as ci
+
+    active = ci.find_active(db, project.id, CIJobType.japan_sales_check.value)
+    if active is not None:
+        return active, active.status  # queued / running（重複作成しない）
+
+    jsc = _latest_japan_sales_check(db, project.id)
+    japan = interpret_japan_check(jsc)
+    if japan["status"] in ("not_checked", "failed"):
+        job, _from_cache = ci.create_job(
+            db, project, CIJobType.japan_sales_check.value, force=True, runner=runner
+        )
+        return job, job.status
+    return None, japan["status"]
+
+
+def assess_with_japan(db: Session, project: Project, *, auto_check: bool = True, runner=None) -> dict:
+    """営業適性アセスメントを実行。日本販売チェックが未実施なら背景ジョブを起動し、
+    現在取得可能なデータで暫定アセスメントを保存する（非破壊）。
+
+    ジョブ完了後は job 側で再計算され、新しい行として保存される（履歴保持）。
+
+    Returns: {assessment, japan_job_id, japan_job_status, japan_state, provisional}
+    """
+    job = None
+    japan_state = None
+    if auto_check:
+        job, japan_state = ensure_japan_check(db, project, runner=runner)
+    running = job is not None and job.status in ("queued", "running")
+    row = run_assessment(
+        db, project, japan_job_status=(job.status if running else None)
+    )
+    return {
+        "assessment": row,
+        "japan_job_id": job.id if job is not None else None,
+        "japan_job_status": job.status if job is not None else None,
+        "japan_state": japan_state,
+        "provisional": running,
+    }
 
 
 def get_latest(db: Session, project_id: int):
