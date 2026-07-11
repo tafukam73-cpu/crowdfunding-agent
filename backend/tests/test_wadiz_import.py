@@ -251,7 +251,80 @@ def test_no_guessed_emails():
     check("警告を返す", len(r["warnings"]) >= 1)
 
 
+def test_browser_capture_footer_context_source_type():
+    print("test_browser_capture_footer_context_source_type")
+    html = (
+        "<body><div class='maker'>메이커 고객센터 문의 이메일: contact@makerbrand.co.kr</div>"
+        "<footer><a href='mailto:help@thirdparty-svc.com'>help</a> support@wadiz.kr</footer></body>"
+    )
+    r = w.extract(html, "html", SRC, source_type="wadiz_browser_capture")
+    by = {e["value"]: e for e in r["emails"]}
+    check("本文メールは region=body", by["contact@makerbrand.co.kr"]["region"] == "body")
+    check("本文メールに文脈（고객센터/이메일）",
+          by["contact@makerbrand.co.kr"]["context"] is not None)
+    check("footer メールは region=chrome", by["help@thirdparty-svc.com"]["region"] == "chrome")
+    check("footer メールは低確度", by["help@thirdparty-svc.com"]["confidence"] == "low")
+    check("source_type を反映", by["contact@makerbrand.co.kr"]["source_type"] == "wadiz_browser_capture")
+    check("@wadiz.kr は除外", "support@wadiz.kr" not in by)
+
+
+def test_resolve_projects():
+    print("test_resolve_projects")
+    db = SessionLocal()
+    p = Project(title="R", source_site="wadiz",
+                source_url="https://www.wadiz.kr/web/campaign/detail/999123",
+                maker_name=None)
+    db.add(p); db.commit(); db.refresh(p)
+    # 完全一致
+    got = w.resolve_projects(db, "https://www.wadiz.kr/web/campaign/detail/999123")
+    check("完全一致で 1 件", len(got) == 1 and got[0].id == p.id)
+    # campaign ID 一致（クエリ付き）
+    got2 = w.resolve_projects(db, "https://www.wadiz.kr/web/campaign/detail/999123?ref=x")
+    check("campaign ID 一致", len(got2) == 1 and got2[0].id == p.id)
+    # 不一致
+    check("不一致は 0 件", len(w.resolve_projects(db, "https://www.wadiz.kr/web/campaign/detail/000")) == 0)
+    check("campaign id 抽出", w.extract_campaign_id(
+        "https://www.wadiz.kr/web/campaign/detail/999123") == "999123")
+    db.close()
+
+
+def test_build_capture_content():
+    print("test_build_capture_content")
+    content, ctype = w.build_capture_content({
+        "html": "<div>maker@x.com</div>",
+        "text": "innerText",
+        "json_ld": ['{"@type":"Organization","email":"ld@x.com"}'],
+        "mailtos": ["mailto:mt@x.com"],
+        "meta": {"og:email": "meta@x.com"},
+    })
+    check("html があれば content_type=html", ctype == "html")
+    for frag in ("maker@x.com", "ld@x.com", "mt@x.com", "meta@x.com"):
+        check(f"content に {frag} を含む", frag in content)
+
+
+def test_browser_capture_confirm_source_type():
+    print("test_browser_capture_confirm_source_type")
+    db = SessionLocal()
+    p = _mk(db)
+    pv = w.preview(db, p, content="<div>메이커 문의 real@makerz.co.kr</div>",
+                   content_type="html", source_url=SRC, source_type="wadiz_browser_capture")
+    out = w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
+                    source_url=SRC, source_type="wadiz_browser_capture")
+    db.refresh(p)
+    pub = (p.enrichment or {}).get("public_emails") or []
+    check("保存された", out["saved_emails"] >= 1)
+    check("source_type=wadiz_browser_capture で保存",
+          any(e["source_type"] == "wadiz_browser_capture" for e in pub))
+    check("provenance に wadiz_browser_capture",
+          "wadiz_browser_capture" in (p.enrichment.get("provenance") or {}))
+    db.close()
+
+
 if __name__ == "__main__":
+    test_browser_capture_footer_context_source_type()
+    test_resolve_projects()
+    test_build_capture_content()
+    test_browser_capture_confirm_source_type()
     test_extract_all_patterns()
     test_exclusion_only_wadiz_platform()
     test_socials_and_official()

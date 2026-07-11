@@ -77,6 +77,89 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_CAMPAIGN_ID_RE = re.compile(r"/campaign/(?:detail|example)/([A-Za-z0-9_\-]+)")
+
+
+def extract_campaign_id(url: str | None) -> str | None:
+    """Wadiz URL から campaign ID（/campaign/detail/{id}）を取り出す。"""
+    if not url:
+        return None
+    m = _CAMPAIGN_ID_RE.search(url)
+    return m.group(1) if m else None
+
+
+def _canon(url: str | None) -> str:
+    u = (url or "").strip().split("?")[0].split("#")[0].rstrip("/")
+    return u.lower()
+
+
+def resolve_projects(db: Session, url: str | None) -> list[Project]:
+    """Wadiz URL / campaign ID から対象 project 候補を返す（自動確定はしない）。
+
+    優先: 1) source_url 完全一致 → 2) campaign ID 一致 → 3) 正規化 URL 一致。
+    複数一致・不一致は呼び出し側（拡張機能）でユーザーに選ばせる。
+    """
+    from app.models.project import SourceSite
+
+    if not url:
+        return []
+    # 1) 完全一致
+    exact = db.scalar(select(Project).where(Project.source_url == url))
+    if exact is not None:
+        return [exact]
+    cid = extract_campaign_id(url)
+    canon = _canon(url)
+    rows = list(
+        db.scalars(select(Project).where(Project.source_site == SourceSite.wadiz.value))
+    )
+    by_cid = [p for p in rows if cid and extract_campaign_id(p.source_url) == cid]
+    if by_cid:
+        return by_cid
+    by_canon = [p for p in rows if _canon(p.source_url) == canon]
+    return by_canon
+
+
+def build_capture_content(payload: dict) -> tuple[str, str]:
+    """拡張機能の取得ペイロード → 抽出用テキストと content_type を作る。
+
+    outerHTML があれば HTML として使い、JSON-LD / mailto / meta / links / text を
+    連結して補う（本文/フッター区別のため HTML を優先）。
+    """
+    html = payload.get("html") or ""
+    text = payload.get("text") or ""
+    parts: list[str] = []
+    if html:
+        parts.append(html)
+        content_type = "html"
+    else:
+        parts.append(text)
+        content_type = "text"
+    for key in ("json_ld", "jsonld"):
+        for blk in (payload.get(key) or []):
+            parts.append(blk if isinstance(blk, str) else _json_dump(blk))
+    for m in (payload.get("mailtos") or payload.get("mailto") or []):
+        parts.append(str(m))
+    for m in (payload.get("tels") or []):
+        parts.append(str(m))
+    for lk in (payload.get("links") or []):
+        parts.append(str(lk))
+    meta = payload.get("meta") or {}
+    if isinstance(meta, dict):
+        parts.extend(str(v) for v in meta.values() if v)
+    if html and text and text not in html:
+        parts.append(text)  # innerText も補助的に含める
+    return "\n".join(p for p in parts if p), content_type
+
+
+def _json_dump(obj) -> str:
+    import json as _json
+
+    try:
+        return _json.dumps(obj, ensure_ascii=False)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def content_hash(content: str) -> str:
     """本文のハッシュ（冪等判定）。空白を正規化して安定化する。"""
     norm = " ".join((content or "").split())
@@ -147,6 +230,27 @@ def _official_candidates(content: str, base: str) -> list[str]:
     return out[:8]
 
 
+_CONTACT_URL_HINTS = ("contact", "inquiry", "cs", "support", "help", "문의", "고객")
+
+
+def _contact_url_candidates(content: str, base: str) -> list[str]:
+    """問い合わせ導線らしい URL（contact/문의 等を含む）を返す。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    links = list(cds.extract_links(content or "", base or "https://www.wadiz.kr"))
+    links += _BARE_URL_RE.findall(content or "")
+    for link in links:
+        low = link.lower()
+        if "wadiz.kr" in low:
+            continue
+        if any(h in low for h in _CONTACT_URL_HINTS):
+            root = link.split("#")[0]
+            if root not in seen:
+                seen.add(root)
+                out.append(root)
+    return out[:8]
+
+
 def _labeled_fields(content: str) -> dict:
     out: dict = {}
     for key, pat in _LABEL_PATTERNS.items():
@@ -162,12 +266,50 @@ def _labeled_fields(content: str) -> dict:
     return out
 
 
-def extract(content: str, content_type: str, source_url: str | None) -> dict:
-    """貼り付け本文/HTML から公開連絡先情報を抽出する（DB 非依存・純粋）。"""
+# サイト共通枠（footer/nav/header）内のメールは Wadiz 共通ナビ/運営寄りなので、
+# プロジェクト本文のメーカー情報と区別する（除外はしないが確度を下げて注記する）。
+_CHROME_REGION_RE = re.compile(
+    r"<(footer|nav|header)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
+# メーカー問い合わせ文脈のキーワード（周辺に出れば evidence/確度に反映）。
+_CONTACT_CONTEXT = (
+    "고객센터", "문의", "이메일", "메일", "연락처", "메이커", "판매자", "사업자",
+    "회사", "대표", "제휴", "해외", "수출", "contact", "inquiry", "maker", "email",
+)
+
+
+def _chrome_email_set(html: str) -> set[str]:
+    out: set[str] = set()
+    for m in _CHROME_REGION_RE.finditer(html or ""):
+        seg = _html.unescape(m.group(0))
+        for e in _RAW_EMAIL_RE.findall(seg):
+            out.add(e.strip().strip(".").lower())
+    return out
+
+
+def _context_for(content: str, email: str) -> str | None:
+    """メール周辺（前後 60 文字）に現れたメーカー問い合わせ文脈の語を返す。"""
+    text = content or ""
+    idx = text.lower().find(email.lower())
+    if idx < 0:
+        return None
+    window = text[max(0, idx - 60): idx + len(email) + 60]
+    for kw in _CONTACT_CONTEXT:
+        if kw in window:
+            return kw
+    return None
+
+
+def extract(
+    content: str, content_type: str, source_url: str | None, *,
+    source_type: str = SOURCE_TYPE,
+) -> dict:
+    """貼り付け/取得本文・HTML から公開連絡先情報を抽出する（DB 非依存・純粋）。"""
     content = content or ""
     base = source_url or "https://www.wadiz.kr"
     # HTML entity（数値/名前つき）を復号したテキストからも抽出する（&#64;=@ / &#115;=s 等）。
     unescaped = _html.unescape(content)
+    chrome_emails = _chrome_email_set(content)
 
     # 採用メール（既存抽出器：mailto/平文/難読化 + wadiz.kr 等の除外込み）。
     # 生本文と entity 復号後の双方から抽出して統合する。
@@ -177,17 +319,34 @@ def extract(content: str, content_type: str, source_url: str | None) -> dict:
         if e.lower() not in _acc_lc:
             accepted.append(e)
             _acc_lc.add(e.lower())
-    emails = [
-        {
+
+    def _email_record(e: str) -> dict:
+        in_chrome = e.lower() in chrome_emails
+        # 本文にも出るなら本文優先（メーカー情報）。footer/nav のみなら確度を下げる。
+        body_hit = _method_for(content, e) != "deobfuscated" and not in_chrome
+        ctx = _context_for(content, e)
+        conf = _confidence_for(e)
+        if in_chrome and not body_hit:
+            conf = "low"
+        elif ctx:
+            conf = "high" if conf != "low" else "medium"
+        ev = _evidence_for(content, e)
+        if in_chrome and not body_hit:
+            ev = "[サイト共通枠(footer/nav)] " + ev
+        elif ctx:
+            ev = f"[文脈: {ctx}] " + ev
+        return {
             "value": e,
             "source_url": source_url,
-            "source_type": SOURCE_TYPE,
-            "evidence": _evidence_for(content, e),
-            "confidence": _confidence_for(e),
+            "source_type": source_type,
+            "evidence": ev,
+            "context": ctx,
+            "region": "chrome" if (in_chrome and not body_hit) else "body",
+            "confidence": conf,
             "extraction_method": _method_for(content, e),
         }
-        for e in accepted
-    ]
+
+    emails = [_email_record(e) for e in accepted]
 
     # 除外メール（理由つき。@wadiz.kr / noreply / example / test 等）
     accepted_lc = {e.lower() for e in accepted}
@@ -214,6 +373,7 @@ def extract(content: str, content_type: str, source_url: str | None) -> dict:
 
     socials = _extract_socials(content, base)
     official = _official_candidates(content, base)
+    contact_urls = _contact_url_candidates(content, base)
     fields = _labeled_fields(content)
 
     warnings = []
@@ -234,8 +394,11 @@ def extract(content: str, content_type: str, source_url: str | None) -> dict:
         "socials": socials,
         # 複数形（要件）と従来の単数フィールドの両方を返す
         "websites": official,
+        "official_urls": official,
         "official_url_candidates": official,
         "official_url": official[0] if official else None,
+        "contact_urls": contact_urls,
+        "maker_names": [maker] if maker else [],
         "phones": fields.get("phones") or ([] if not fields.get("phone") else [fields["phone"]]),
         "company_names": company_names,
         "contact_names": contact_names,
@@ -275,9 +438,13 @@ def preview(
     source_url: str | None = None,
     captured_at: str | None = None,
     imported_by: str | None = None,
+    source_type: str = SOURCE_TYPE,
 ) -> dict:
     """抽出結果 + 既存との差分を返す（DB は一切変更しない）。"""
-    result = extract(content, content_type, source_url or project.source_url)
+    result = extract(
+        content, content_type, source_url or project.source_url,
+        source_type=source_type,
+    )
     existing = _existing_public_emails(project)
     for e in result["emails"]:
         e["is_new"] = e["value"].lower() not in existing
@@ -320,6 +487,7 @@ def confirm(
     captured_at: str | None = None,
     imported_by: str | None = None,
     note: str | None = None,
+    source_type: str = SOURCE_TYPE,
 ) -> dict:
     """確認済みの抽出結果を保存し、Contact Intelligence へ非破壊反映する。
 
@@ -361,11 +529,13 @@ def confirm(
         accepted.append({
             "value": v,
             "source_url": src,
-            "source_type": SOURCE_TYPE,
+            "source_type": source_type,
             "evidence": (e.get("evidence") or "")[:200],
+            "context": e.get("context"),
             "confidence": e.get("confidence") or "medium",
             "extraction_method": e.get("extraction_method") or "manual",
             "imported_at": now,
+            "confirmed_at": now,
             "imported_by": imported_by,
             "raw_content_hash": content_hash_value,
             "project_id": project.id,
@@ -417,7 +587,7 @@ def confirm(
                           "source": SOURCE_TYPE, "verdict": "candidate"})
         enr["official_site_candidates"] = cands
     prov = dict(enr.get("provenance") or {})
-    prov["wadiz_manual_import"] = now
+    prov[source_type] = now
     enr["provenance"] = prov
     project.enrichment = enr
 
@@ -428,7 +598,9 @@ def confirm(
         project.maker_url = off
 
     # --- Contact Intelligence（Contact Discovery）へ反映：最新行として追加 ---
-    contact_found = _write_contact_discovery(db, project, accepted, socs, off, src)
+    contact_found = _write_contact_discovery(
+        db, project, accepted, socs, off, src, source_type=source_type
+    )
 
     db.commit()
     db.refresh(project)
@@ -458,7 +630,8 @@ def confirm(
 
 def _write_contact_discovery(
     db: Session, project: Project, accepted: list[dict], socials: dict,
-    official_url: str | None, source_url: str | None,
+    official_url: str | None, source_url: str | None, *,
+    source_type: str = SOURCE_TYPE,
 ) -> bool:
     """手動取り込みメールを ContactDiscovery の最新結果として反映する。
 
@@ -476,7 +649,7 @@ def _write_contact_discovery(
         ranked.append({
             "email": rec["value"], "score": score, "tier": tier,
             "sources": [source_url] if source_url else [],
-            "source_type": SOURCE_TYPE,
+            "source_type": source_type,
         })
     ranked.sort(key=lambda x: x["score"], reverse=True)
     primary = ranked[0]["email"] if ranked else None
@@ -495,7 +668,7 @@ def _write_contact_discovery(
         twitter_url=socials.get("twitter"),
         linkedin_url=socials.get("linkedin"),
         confidence_score=90 if primary else 40,
-        notes=f"[{SOURCE_TYPE}] 手動取り込み（{source_url or ''}）",
+        notes=f"[{source_type}] 取り込み（{source_url or ''}）",
     )
     db.add(row)
     return bool(primary)

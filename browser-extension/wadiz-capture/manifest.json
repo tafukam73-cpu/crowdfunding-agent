@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Wadiz Contact Capture (Crowdfunding Agent)",
+  "version": "1.0.0",
+  "description": "Wadiz商品ページで表示中の公開情報を、ローカルのCrowdfunding Agentへ取り込む（Akamai回避なし・localhost限定送信）。",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.wadiz.kr/*",
+    "http://localhost:8000/*",
+    "http://localhost:3000/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.wadiz.kr/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Wadiz公開情報を取り込む"
+  }
+}

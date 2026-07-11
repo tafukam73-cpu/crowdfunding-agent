@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: system-ui, sans-serif; width: 420px; margin: 0; padding: 10px; font-size: 12px; color: #1e293b; }
+      h1 { font-size: 14px; margin: 0 0 6px; }
+      .muted { color: #64748b; }
+      .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+      button { font-size: 12px; padding: 5px 8px; border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; cursor: pointer; }
+      button.primary { background: #047857; color: #fff; border-color: #047857; }
+      button.save { background: #0f172a; color: #fff; border-color: #0f172a; }
+      input[type="text"] { flex: 1; padding: 4px; border: 1px solid #cbd5e1; border-radius: 4px; }
+      .warn { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; padding: 6px; border-radius: 4px; margin: 6px 0; }
+      .err { background: #fee2e2; border: 1px solid #fecaca; color: #b91c1c; padding: 6px; border-radius: 4px; margin: 6px 0; }
+      .ok { background: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 6px; border-radius: 4px; margin: 6px 0; }
+      .box { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin: 6px 0; }
+      .email { display: flex; gap: 6px; align-items: flex-start; margin: 3px 0; }
+      .mono { font-family: ui-monospace, monospace; }
+      .tag { font-size: 10px; border-radius: 3px; padding: 0 3px; }
+      .tag.high { background: #dcfce7; color: #166534; }
+      .tag.medium { background: #fef9c3; color: #854d0e; }
+      .tag.low { background: #fee2e2; color: #b91c1c; }
+      .tag.chrome { background: #e2e8f0; color: #475569; }
+      .tag.new { background: #dbeafe; color: #1d4ed8; }
+      .small { font-size: 10px; color: #94a3b8; }
+      select { padding: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>📥 Wadiz公開情報を取り込む</h1>
+    <p class="muted">
+      通常のChromeでWadiz商品ページを開き「もっと見る」を展開してから取得してください。
+      表示中の公開情報だけを取得し、localhostのCrowdfunding Agentに送ります。
+    </p>
+
+    <div class="row">
+      <span class="muted">API:</span>
+      <input type="text" id="apiBase" value="http://localhost:8000" />
+    </div>
+    <div class="row">
+      <button id="capture" class="primary">表示中の公開情報を取得</button>
+      <button id="highlight">「もっと見る」候補をハイライト</button>
+    </div>
+
+    <div id="status"></div>
+    <div id="project"></div>
+    <div id="result"></div>
+
+    <script src="lib.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

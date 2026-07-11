@@ -33,6 +33,7 @@ from app.routers import (
     sales_opportunities,
     scrape,
     usage,
+    wadiz_browser_capture,
     wadiz_import,
 )
 from app.seed import seed_if_empty
@@ -103,6 +104,7 @@ app.include_router(sales.router)
 app.include_router(sales_opportunities.router)
 app.include_router(usage.router)
 app.include_router(wadiz_import.router)
+app.include_router(wadiz_browser_capture.router)
 
 
 @app.get("/")
