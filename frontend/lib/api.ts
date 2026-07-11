@@ -1597,7 +1597,8 @@ export type CIJobType =
   | "contact_discovery"
   | "contact_discovery_v2"
   | "ai_research"
-  | "full_contact_intelligence";
+  | "full_contact_intelligence"
+  | "wadiz_contact_reassessment";
 
 export type CIJobStatus =
   | "queued"
@@ -3568,7 +3569,11 @@ export interface WadizConfirmResult {
   saved_emails: number;
   total_accepted?: number;
   contact_found?: boolean;
+  /** @deprecated confirm は同期再評価しなくなった。reassessment_status を参照。 */
   reassessed?: boolean;
+  // 再評価はバックグラウンドジョブ化。confirm は待たずに queued で返す。
+  reassessment_job_id?: number | null;
+  reassessment_status?: string;
   public_emails_total?: number;
   message?: string;
 }

@@ -320,6 +320,192 @@ def test_browser_capture_confirm_source_type():
     db.close()
 
 
+def test_confirm_is_async_queues_reassessment():
+    # confirm は同期で run_assessment を呼ばず、queued の再評価ジョブを作って即返す。
+    print("test_confirm_is_async_queues_reassessment")
+    import time
+
+    import app.services.contact_intelligence_service as ci
+    from app.services import sales_assessment_service as sa
+
+    sync_calls: list[int] = []
+    orig_ra = sa.run_assessment
+    orig_qr = ci.queue_reassessment
+    made: dict = {}
+
+    # 同期で run_assessment が呼ばれたら記録（呼ばれてはいけない）。
+    sa.run_assessment = lambda db, project, **k: sync_calls.append(project.id)
+
+    # 背景スレッドを起動させず job 行だけ作る（テストを決定的にする）。
+    def fake_qr(db, project, runner=None):
+        j = orig_qr(db, project, runner=lambda jid: None)
+        made["id"] = j.id
+        return j
+
+    ci.queue_reassessment = fake_qr
+    try:
+        db = SessionLocal()
+        p = _mk(db)
+        pv = w.preview(db, p, content=_HTML, content_type="html", source_url=SRC)
+        t0 = time.time()
+        out = w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
+                        socials=pv["socials"], official_url=pv["official_url"], source_url=SRC)
+        dt = time.time() - t0
+        check("confirm は同期で run_assessment を呼ばない", sync_calls == [])
+        check("confirm は数秒以内に返る（≤3s）", dt < 3.0)
+        check("reassessment_status=queued", out["reassessment_status"] == "queued")
+        check("reassessment_job_id を返す", out["reassessment_job_id"] == made.get("id"))
+        check("同期でも保存済みメールはある（0件成功扱いしない）", out["saved_emails"] >= 4)
+        from app.models.contact_intelligence_job import ContactIntelligenceJob as J
+        job = db.get(J, out["reassessment_job_id"])
+        check("job_type=wadiz_contact_reassessment", job.job_type == "wadiz_contact_reassessment")
+        db.close()
+    finally:
+        sa.run_assessment = orig_ra
+        ci.queue_reassessment = orig_qr
+
+
+def test_queue_reassessment_dedup():
+    # 同一 project・同一 job_type の queued/running を重複作成しない。
+    print("test_queue_reassessment_dedup")
+    import app.services.contact_intelligence_service as ci
+    from app.models.contact_intelligence_job import (
+        ContactIntelligenceJob as J,
+        CIJobStatus,
+    )
+
+    db = SessionLocal()
+    p = _mk(db)
+    j1 = ci.queue_reassessment(db, p, runner=lambda jid: None)  # queued のまま
+    j2 = ci.queue_reassessment(db, p, runner=lambda jid: None)
+    check("重複作成せず同一 active ジョブを返す", j1.id == j2.id)
+    n = (
+        db.query(J)
+        .filter_by(project_id=p.id, job_type="wadiz_contact_reassessment")
+        .count()
+    )
+    check("再評価ジョブは1件のみ", n == 1)
+    check("status=queued で作成", j1.status == CIJobStatus.queued.value)
+    db.close()
+
+
+def test_reassessment_runner_completes_rule_based():
+    # 再評価ジョブは run_assessment（ルールベース・外部HTTPなし）だけを実行して完了する。
+    print("test_reassessment_runner_completes_rule_based")
+    import app.services.contact_intelligence_service as ci
+    from app.services import sales_assessment_service as sa
+    from app.models.contact_intelligence_job import (
+        ContactIntelligenceJob as J,
+        CIJobStatus,
+    )
+
+    ran: list[int] = []
+    orig_ra = sa.run_assessment
+    sa.run_assessment = lambda db, project, **k: ran.append(project.id)
+    try:
+        db = SessionLocal()
+        p = _mk(db)
+        # runner=ci._run_job で同期実行（本番の実行経路をそのまま通す）。
+        j = ci.queue_reassessment(db, p, runner=ci._run_job)
+        db.expire_all()
+        job = db.get(J, j.id)
+        check("再評価で run_assessment を実行", ran == [p.id])
+        check("ジョブは completed", job.status == CIJobStatus.completed.value)
+        db.close()
+    finally:
+        sa.run_assessment = orig_ra
+
+
+def test_reassessment_failure_keeps_saved_emails():
+    # 再評価が失敗しても保存済みメールはロールバック・削除されない。
+    print("test_reassessment_failure_keeps_saved_emails")
+    import app.services.contact_intelligence_service as ci
+    from app.services import sales_assessment_service as sa
+    from app.models.contact_intelligence_job import (
+        ContactIntelligenceJob as J,
+        CIJobStatus,
+    )
+
+    orig_ra = sa.run_assessment
+    orig_qr = ci.queue_reassessment
+
+    # confirm 時はジョブ行を作らないスタブ（後で明示的に失敗ジョブを走らせる）。
+    class _Fake:
+        id = None
+        status = "queued"
+
+    ci.queue_reassessment = lambda db, project, runner=None: _Fake()
+    try:
+        db = SessionLocal()
+        p = _mk(db)
+        pv = w.preview(db, p, content=_HTML, content_type="html", source_url=SRC)
+        w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
+                  socials=pv["socials"], source_url=SRC)
+        db.refresh(p)
+        before = len((p.enrichment or {}).get("public_emails") or [])
+        check("confirm で保存済み（前提）", before >= 4)
+
+        # 実際の再評価ジョブを同期実行して失敗させる。
+        ci.queue_reassessment = orig_qr
+
+        def boom(db, project, **k):
+            raise RuntimeError("reassessment boom")
+
+        sa.run_assessment = boom
+        j = ci.queue_reassessment(db, p, runner=ci._run_job)
+        db.expire_all()
+        job = db.get(J, j.id)
+        p2 = db.get(Project, p.id)
+        after = len((p2.enrichment or {}).get("public_emails") or [])
+        check("再評価失敗でも保存済みメールは残る", after == before and after >= 4)
+        check("ジョブは failed として記録", job.status == CIJobStatus.failed.value)
+        check("失敗理由を保持", bool(job.error))
+        db.close()
+    finally:
+        sa.run_assessment = orig_ra
+        ci.queue_reassessment = orig_qr
+
+
+def test_confirm_resend_idempotent_status():
+    # タイムアウト後の再送（同一 content_hash）は重複保存せず already_imported を返す。
+    print("test_confirm_resend_idempotent_status")
+    import app.services.contact_intelligence_service as ci
+
+    orig_qr = ci.queue_reassessment
+    ci.queue_reassessment = lambda db, project, runner=None: orig_qr(
+        db, project, runner=lambda jid: None
+    )
+    try:
+        db = SessionLocal()
+        p = _mk(db)
+        pv = w.preview(db, p, content=_HTML, content_type="html", source_url=SRC)
+        w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
+                  socials=pv["socials"], source_url=SRC)
+        out2 = w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
+                         socials=pv["socials"], source_url=SRC)
+        check("再送は already_imported", out2["already_imported"] is True)
+        check("再送の reassessment_status=already_imported",
+              out2["reassessment_status"] == "already_imported")
+        check("再送でジョブを重複作成しない", out2["reassessment_job_id"] is None)
+        check("WadizImport は1件のまま", len(w.get_imports(db, p.id)) == 1)
+        db.close()
+    finally:
+        ci.queue_reassessment = orig_qr
+
+
+def test_preview_creates_no_reassessment_job():
+    # GET 相当の preview は再評価ジョブを作らない（重い処理を起動しない）。
+    print("test_preview_creates_no_reassessment_job")
+    from app.models.contact_intelligence_job import ContactIntelligenceJob as J
+
+    db = SessionLocal()
+    p = _mk(db)
+    w.preview(db, p, content=_HTML, content_type="html", source_url=SRC)
+    n = db.query(J).filter_by(project_id=p.id).count()
+    check("preview は CI ジョブを作らない", n == 0)
+    db.close()
+
+
 if __name__ == "__main__":
     test_browser_capture_footer_context_source_type()
     test_resolve_projects()
@@ -335,5 +521,11 @@ if __name__ == "__main__":
     test_confirm_rejects_wadiz_and_dummy()
     test_jsonld_and_script_and_plural_fields()
     test_no_guessed_emails()
+    test_confirm_is_async_queues_reassessment()
+    test_queue_reassessment_dedup()
+    test_reassessment_runner_completes_rule_based()
+    test_reassessment_failure_keeps_saved_emails()
+    test_confirm_resend_idempotent_status()
+    test_preview_creates_no_reassessment_job()
     print(f"\n{_passed} passed, {_failed} failed")
     sys.exit(1 if _failed else 0)

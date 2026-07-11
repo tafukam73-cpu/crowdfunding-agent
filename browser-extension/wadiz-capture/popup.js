@@ -171,14 +171,20 @@ function renderPreview(pv) {
 }
 
 async function doConfirm() {
+  var btn = $("save");
+  if (btn && btn.disabled) return;  // 二重クリック防止
+  if (btn) { btn.disabled = true; btn.textContent = "保存中…"; }
   try {
     var picked = [].slice.call(document.querySelectorAll(".em:checked")).map(function (cb) {
       return state.preview.emails[Number(cb.getAttribute("data-i"))];
     });
     if (!picked.length && !state.preview.official_url) {
-      setStatus("保存する項目を選択してください。", "err"); return;
+      setStatus("保存する項目を選択してください。", "err");
+      if (btn) { btn.disabled = false; btn.textContent = "確認して保存"; }
+      return;
     }
     setStatus("保存中…");
+    // 冪等：同一 content_hash は再送しても重複保存されない（サーバ側で判定）。
     var r = await api("/projects/" + state.projectId + "/wadiz-browser-capture/confirm", "POST", {
       content_hash: state.preview.content_hash,
       emails: picked,
@@ -187,15 +193,48 @@ async function doConfirm() {
       maker_name: state.preview.maker_name,
       source_url: state.capture.source_url,
     });
-    setStatus(
-      r.already_imported
-        ? "同一内容は取り込み済みでした（重複保存なし）。"
-        : "保存しました：メール " + r.saved_emails + " 件" +
-          (r.contact_found ? "・Contact Intelligence 反映" : "") +
-          (r.reassessed ? "・Sales Copilot 再評価" : ""),
-      "ok"
-    );
+    if (r.already_imported) {
+      setStatus("同一内容は取り込み済みでした（重複保存なし）。", "ok");
+      if (btn) btn.textContent = "保存済み";
+      return;
+    }
+    // 保存はここで完了。再評価は待たずにバックグラウンドで進む。
+    var base = "保存しました：メール " + r.saved_emails + " 件" +
+      (r.contact_found ? "・Contact Intelligence 反映" : "");
+    if (btn) btn.textContent = "保存済み";
+    if (r.reassessment_job_id) {
+      setStatus(base + "<br/><span class=\"small\">Sales Copilot を再評価中…（画面は待たずに閉じて構いません）</span>", "ok");
+      pollReassessment(r.reassessment_job_id, base);
+    } else {
+      setStatus(base, "ok");
+    }
   } catch (e) {
     setStatus("保存エラー: " + esc(e.message), "err");
+    if (btn) { btn.disabled = false; btn.textContent = "確認して保存"; }
   }
+}
+
+// 再評価ジョブを別APIでポーリング（3.5秒間隔・最大 ~1 分）。confirm 応答は待たない。
+function pollReassessment(jobId, base) {
+  var tries = 0;
+  var MAX = 18;  // 18 * 3.5s ≒ 63s で打ち切り
+  var timer = setInterval(async function () {
+    tries++;
+    try {
+      var j = await api("/contact-intelligence/jobs/" + jobId);
+      if (j.status === "completed") {
+        clearInterval(timer);
+        setStatus(base + "・Sales Copilot 再評価 完了", "ok");
+      } else if (j.status === "failed" || j.status === "cancelled") {
+        clearInterval(timer);
+        // 再評価が失敗しても保存済みメールは消えない。
+        setStatus(base + "<br/><span class=\"small\">（Sales Copilot 再評価は後で自動再試行されます）</span>", "ok");
+      } else if (tries >= MAX) {
+        clearInterval(timer);
+        setStatus(base + "<br/><span class=\"small\">（Sales Copilot 再評価は進行中。案件詳細で確認できます）</span>", "ok");
+      }
+    } catch (e) {
+      if (tries >= MAX) { clearInterval(timer); }
+    }
+  }, 3500);
 }

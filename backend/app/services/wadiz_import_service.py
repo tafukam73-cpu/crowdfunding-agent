@@ -504,11 +504,15 @@ def confirm(
         )
     )
     if dup is not None:
+        # 冪等性：タイムアウト後の再送などで同一 content_hash が来ても重複保存しない。
+        # 再評価ジョブも新規作成しない（既存の状態をそのまま返す）。
         return {
             "project_id": project.id,
             "already_imported": True,
             "wadiz_import_id": dup.id,
             "saved_emails": 0,
+            "reassessment_job_id": None,
+            "reassessment_status": "already_imported",
             "message": "同一内容は取り込み済みです（重複保存しません）。",
         }
 
@@ -605,15 +609,20 @@ def confirm(
     db.commit()
     db.refresh(project)
 
-    # --- Sales 適性を再評価（ルールベース・軽量・外部HTTPなし） ---
-    #   連絡先が増えたので独占スコアの reachability 等が更新される。
-    reassessed = False
+    # --- Sales 適性の再評価は「レスポンス後」にバックグラウンドで実行する ---
+    #   run_assessment を confirm の同期パスで呼ぶと、CPU 逼迫時に confirm 自体が
+    #   遅くなり 12 秒タイムアウトの原因になる。ここでは queued ジョブを作るだけで
+    #   即座に返す（重い処理は GET でもここでも同期実行しない、の原則）。
+    #   ジョブ作成に失敗しても保存済みメールはロールバックしない（取り込みは成功）。
+    reassessment_job_id: int | None = None
+    reassessment_status = "skipped"
     try:
-        from app.services import sales_assessment_service
+        from app.services import contact_intelligence_service
 
-        sales_assessment_service.run_assessment(db, project)
-        reassessed = True
-    except Exception:  # noqa: BLE001  再評価失敗でも取り込みは成功
+        job = contact_intelligence_service.queue_reassessment(db, project)
+        reassessment_job_id = job.id
+        reassessment_status = job.status  # "queued"（既存進行中なら running のこともある）
+    except Exception:  # noqa: BLE001  ジョブ作成失敗でも取り込みは成功扱い
         db.rollback()
 
     return {
@@ -623,7 +632,8 @@ def confirm(
         "saved_emails": saved,
         "total_accepted": len(accepted),
         "contact_found": contact_found,
-        "reassessed": reassessed,
+        "reassessment_job_id": reassessment_job_id,
+        "reassessment_status": reassessment_status,
         "public_emails_total": len(pub),
     }
 

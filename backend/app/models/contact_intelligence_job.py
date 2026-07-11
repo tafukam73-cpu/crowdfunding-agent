@@ -41,6 +41,9 @@ class CIJobType(str, enum.Enum):
     # 日本販売状況チェック（検索・AI 調査）。重いのでジョブ化し、完了後に営業適性
     # アセスメントを再計算する（独占販売可能性スコアの confidence を上げる）。
     japan_sales_check = "japan_sales_check"
+    # Wadiz 手動/ブラウザ取り込み後の営業適性再評価。confirm のレスポンス後に
+    # 非同期で実行する（confirm を同期で重くしないため）。ルールベースで外部HTTPなし。
+    wadiz_contact_reassessment = "wadiz_contact_reassessment"
 
 
 class ContactIntelligenceJob(Base):

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   fetchWadizImports,
+  getContactIntelligenceJob,
   wadizImportConfirm,
   wadizImportPreview,
   type WadizEmail,
@@ -123,6 +124,33 @@ export default function WadizImportPanel({
     [preview, checked]
   );
 
+  // 再評価ジョブを別APIでポーリング（3.5秒間隔・最大 ~1 分）。confirm 応答は待たない。
+  // 失敗しても保存済みメールは消えない（取り込みは成功扱い）。
+  const pollReassessment = useCallback(
+    async (jobId: number, base: string) => {
+      const MAX = 18; // 18 * 3.5s ≒ 63s で打ち切り
+      for (let i = 0; i < MAX; i++) {
+        await new Promise((res) => setTimeout(res, 3500));
+        try {
+          const j = await getContactIntelligenceJob(jobId);
+          if (j.status === "completed") {
+            setResult(`${base}・Sales Copilot 再評価 完了`);
+            return;
+          }
+          if (j.status === "failed" || j.status === "cancelled") {
+            setResult(`${base}（Sales Copilot 再評価は後で自動再試行されます）`);
+            return;
+          }
+          setResult(`${base}・Sales Copilot 再評価中…`);
+        } catch {
+          // ポーリング失敗は無視（次の周回で再試行）
+        }
+      }
+      setResult(`${base}（Sales Copilot 再評価は進行中。案件詳細で確認できます）`);
+    },
+    []
+  );
+
   const confirmSave = useCallback(async () => {
     if (!preview) return;
     if (acceptedEmails.length === 0 && !preview.official_url) {
@@ -143,13 +171,22 @@ export default function WadizImportPanel({
         imported_by: importedBy || null,
         note: note || null,
       });
-      setResult(
-        r.already_imported
-          ? "同一内容は取り込み済みです（重複保存しませんでした）。"
-          : `保存しました：メール ${r.saved_emails} 件${
-              r.contact_found ? "・Contact Intelligence に反映" : ""
-            }${r.reassessed ? "・Sales Copilot 再評価済み" : ""}`
-      );
+      if (r.already_imported) {
+        setResult("同一内容は取り込み済みです（重複保存しませんでした）。");
+      } else {
+        // 保存はここで完了。再評価（Sales Copilot）は待たずにバックグラウンドで進む。
+        const base = `保存しました：メール ${r.saved_emails} 件${
+          r.contact_found ? "・Contact Intelligence に反映" : ""
+        }`;
+        setResult(
+          r.reassessment_job_id
+            ? `${base}・Sales Copilot 再評価待ち…`
+            : base
+        );
+        if (r.reassessment_job_id) {
+          void pollReassessment(r.reassessment_job_id, base);
+        }
+      }
       setPreview(null);
       setRaw("");
       await loadHistory();
@@ -159,7 +196,7 @@ export default function WadizImportPanel({
     } finally {
       setSaving(false);
     }
-  }, [preview, acceptedEmails, projectId, sourceUrl, importedBy, note, loadHistory, onImported]);
+  }, [preview, acceptedEmails, projectId, sourceUrl, importedBy, note, loadHistory, onImported, pollReassessment]);
 
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">

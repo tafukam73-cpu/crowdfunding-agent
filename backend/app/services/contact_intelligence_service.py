@@ -182,6 +182,30 @@ def create_job(
     return job, False
 
 
+def queue_reassessment(
+    db: Session, project: Project, *, runner=None
+) -> ContactIntelligenceJob:
+    """Wadiz 取り込み後の営業適性再評価ジョブを重複なく作成する。
+
+    同一 project・同一 job_type の queued/running が既にあればそれを返す（重複作成禁止）。
+    confirm から呼ばれ、レスポンス後に非同期で実行される（confirm を同期で重くしない）。
+    runner を渡すと同期実行する（テスト用）。
+    """
+    active = find_active(
+        db, project.id, CIJobType.wadiz_contact_reassessment.value
+    )
+    if active is not None:
+        return active
+    job, _from_cache = create_job(
+        db,
+        project,
+        CIJobType.wadiz_contact_reassessment.value,
+        force=True,  # 24h キャッシュを無視して常に最新の連絡先で再評価
+        runner=runner,
+    )
+    return job
+
+
 def request_cancel(db: Session, job_id: int) -> ContactIntelligenceJob | None:
     """進行中ジョブに中断を要求する。queued/running のみ受け付ける。"""
     job = db.get(ContactIntelligenceJob, job_id)
@@ -270,6 +294,18 @@ def _run_japan_sales_check(db, project, cb=None) -> None:
     sales_assessment_service.run_assessment(db, project)
 
 
+def _run_wadiz_reassessment(db, project, cb=None) -> None:
+    # Wadiz 取り込み後の営業適性再評価。ルールベース・外部HTTPなし・軽量。
+    # confirm のレスポンス後に非同期で実行し、v1/v2 Sales Copilot に反映させる。
+    from app.services import sales_assessment_service
+
+    if cb:
+        cb("営業適性を再計算中（Wadiz 連絡先を反映）", 0.3)
+    sales_assessment_service.run_assessment(db, project)
+    if cb:
+        cb("再評価が完了しました", 0.95)
+
+
 def _run_zeczec_enrichment(db, project, cb=None) -> None:
     # Zeczec 詳細補完（Playwright で詳細ページを取得しメーカー名/カテゴリ/説明/公式
     # サイト候補を非破壊で書き戻す）。公式サイト候補の検索補完も行う。
@@ -298,6 +334,10 @@ _SINGLE_PHASES = {
     CIJobType.ai_research.value: ("AI連絡先リサーチ", _run_ai),
     CIJobType.zeczec_enrichment.value: ("Zeczec 詳細補完", _run_zeczec_enrichment),
     CIJobType.japan_sales_check.value: ("日本販売状況チェック", _run_japan_sales_check),
+    CIJobType.wadiz_contact_reassessment.value: (
+        "Wadiz 取り込み後の営業適性再評価",
+        _run_wadiz_reassessment,
+    ),
 }
 
 
