@@ -50,10 +50,21 @@ def run_hunt(
     research = company_research_service.to_context(
         company_research_service.get_latest_completed(db, project.id)
     )
+    # 外部呼び出し（Claude/HTTP 探索）の前に読み取りトランザクションを終了する。
+    # get_latest_completed の SELECT で company_researches に対するトランザクションが
+    # 始まっており、その状態で外部呼び出しに進むと接続が「idle in transaction」の
+    # まま長時間残る（セッションリークの原因）。research は to_context で dict 化済み
+    # なので DB から切り離せる。project は detach して、hunt 中の属性アクセスで
+    # 再クエリ（＝再トランザクション）が起きないようにする。保存は hunt 完了後に
+    # 新しい短命トランザクションで行う。
+    if project in db:
+        db.expunge(project)
+    db.rollback()
     try:
         result = hunter.hunt(project, research=research)
     except Exception as exc:  # noqa: BLE001  失敗は空で扱う
         logger.warning("contact hunt failed (project=%s): %s", project.id, exc)
+        db.rollback()  # 例外経路でもトランザクションを残さない
         return get_people(db, project.id)
 
     # 既存行を置き換える（最新の発見結果を保持）
