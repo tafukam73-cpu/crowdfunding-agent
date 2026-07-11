@@ -15,6 +15,7 @@ import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SalesModeGuide from "@/components/SalesModeGuide";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
+import WadizImportPanel from "@/components/WadizImportPanel";
 import WorkflowCard from "@/components/WorkflowCard";
 import {
   createMakerFromProject,
@@ -199,6 +200,15 @@ export default function ProjectDetail() {
                 searchKeyword={project.maker_name?.trim() || project.title}
                 onChanged={() => setDiscoveryVersion((v) => v + 1)}
               />
+              {project.source_site === "wadiz" && (
+                <div className="mt-3">
+                  <WadizImportPanel
+                    projectId={id}
+                    defaultSourceUrl={project.source_url}
+                    onImported={() => setDiscoveryVersion((v) => v + 1)}
+                  />
+                </div>
+              )}
             </Collapsible>
           </div>
 

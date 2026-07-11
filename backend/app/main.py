@@ -33,6 +33,7 @@ from app.routers import (
     sales_opportunities,
     scrape,
     usage,
+    wadiz_import,
 )
 from app.seed import seed_if_empty
 from app.services import scheduler
@@ -101,6 +102,7 @@ app.include_router(reply_assistant.router)
 app.include_router(sales.router)
 app.include_router(sales_opportunities.router)
 app.include_router(usage.router)
+app.include_router(wadiz_import.router)
 
 
 @app.get("/")

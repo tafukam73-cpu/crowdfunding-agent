@@ -3520,3 +3520,104 @@ export async function runSalesAssessment(id: number): Promise<{
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
+
+// ============================================================================
+//  Wadiz 手動取り込み（人間ブラウザ取得 → 安全な抽出・保存）
+// ============================================================================
+export interface WadizEmail {
+  value: string;
+  source_url?: string | null;
+  source_type?: string;
+  evidence?: string;
+  confidence?: string;
+  extraction_method?: string;
+  is_new?: boolean;
+}
+
+export interface WadizPreview {
+  emails: WadizEmail[];
+  excluded: { value: string; reason: string }[];
+  socials: Record<string, string>;
+  official_url_candidates: string[];
+  official_url: string | null;
+  maker_name: string | null;
+  brand_name: string | null;
+  company_name: string | null;
+  representative?: string | null;
+  phone: string | null;
+  address: string | null;
+  warnings: string[];
+  content_hash: string;
+  content_type: string;
+  source_url: string | null;
+  new_email_count: number;
+  already_have_count: number;
+  already_imported: boolean;
+}
+
+export interface WadizConfirmResult {
+  project_id: number;
+  already_imported: boolean;
+  wadiz_import_id?: number;
+  saved_emails: number;
+  total_accepted?: number;
+  contact_found?: boolean;
+  reassessed?: boolean;
+  public_emails_total?: number;
+  message?: string;
+}
+
+export interface WadizImportHistory {
+  items: {
+    id: number;
+    source_url: string | null;
+    content_type: string;
+    email_count: number;
+    imported_by: string | null;
+    note: string | null;
+    created_at: string | null;
+    emails: string[];
+  }[];
+}
+
+export async function wadizImportPreview(
+  id: number,
+  body: { content: string; content_type?: string; source_url?: string | null }
+): Promise<WadizPreview> {
+  const res = await apiFetch(`/projects/${id}/wadiz-import/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export async function wadizImportConfirm(
+  id: number,
+  body: {
+    content_hash: string;
+    emails: WadizEmail[];
+    socials?: Record<string, string>;
+    official_url?: string | null;
+    maker_name?: string | null;
+    source_url?: string | null;
+    content_type?: string;
+    imported_by?: string | null;
+    note?: string | null;
+  }
+): Promise<WadizConfirmResult> {
+  const res = await apiFetch(`/projects/${id}/wadiz-import/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export async function fetchWadizImports(id: number): Promise<WadizImportHistory> {
+  const res = await apiFetch(`/projects/${id}/wadiz-imports`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}

@@ -30,6 +30,7 @@ from app.models.project import Project, ProjectStatus, SalesStatus, SourceSite
 from app.models.reply_assistant import ReplyAssistant, ReplyStatus
 from app.models.sales_assessment import SalesAssessment
 from app.models.sales_opportunity import SalesOpportunity, SalesOpportunityStatus
+from app.models.wadiz_import import WadizImport
 from app.models.scrape_run import ScrapeRun, ScrapeStatus
 from app.models.usage_log import UsageLog
 
@@ -80,5 +81,6 @@ __all__ = [
     "SalesOpportunity",
     "SalesOpportunityStatus",
     "SalesAssessment",
+    "WadizImport",
     "UsageLog",
 ]
