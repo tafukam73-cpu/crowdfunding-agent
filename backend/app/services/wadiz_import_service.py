@@ -60,7 +60,7 @@ _LABEL_PATTERNS = {
 }
 # 値の中に別ラベル語が現れたらそこで打ち切る（1行に複数フィールドが並ぶ貼り付け対策）。
 _STOP_TOKENS = ("대표", "이메일", "주소", "전화", "문의", "사업자", "상호",
-                "브랜드", "메이커", "판매자", "제조사", "고객", "email", "@")
+                "브랜드", "메이커", "판매자", "제조사", "고객", "email", "@", "http")
 
 
 def _cut_at_stop(value: str) -> str:
@@ -123,10 +123,16 @@ def _extract_socials(content: str, base: str) -> dict[str, str]:
     return socials
 
 
+_BARE_URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+", re.IGNORECASE)
+
+
 def _official_candidates(content: str, base: str) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
-    for link in cds.extract_links(content or "", base or "https://www.wadiz.kr"):
+    # href 由来（HTML）＋ 本文中の裸 URL（テキスト貼り付け）の双方を候補にする。
+    links = list(cds.extract_links(content or "", base or "https://www.wadiz.kr"))
+    links += _BARE_URL_RE.findall(content or "")
+    for link in links:
         host = link.lower()
         if any(h in host for h in _NON_OFFICIAL_HINTS):
             continue
@@ -152,6 +158,7 @@ def _labeled_fields(content: str) -> dict:
     phones = sorted(set(_PHONE_RE.findall(content or "")))
     if phones:
         out["phone"] = phones[0]
+        out["phones"] = phones[:5]
     return out
 
 
@@ -216,18 +223,33 @@ def extract(content: str, content_type: str, source_url: str | None) -> dict:
             "外部リンク先の可能性）。展開後の本文全体を貼り付けたか確認してください。"
         )
 
+    maker = fields.get("maker_name") or fields.get("company_name")
+    company_names = list(dict.fromkeys(
+        [x for x in (fields.get("company_name"), fields.get("maker_name")) if x]
+    ))
+    contact_names = [fields["representative"]] if fields.get("representative") else []
     return {
         "emails": emails,
         "excluded": excluded,
         "socials": socials,
+        # 複数形（要件）と従来の単数フィールドの両方を返す
+        "websites": official,
         "official_url_candidates": official,
         "official_url": official[0] if official else None,
-        "maker_name": fields.get("maker_name") or fields.get("company_name"),
+        "phones": fields.get("phones") or ([] if not fields.get("phone") else [fields["phone"]]),
+        "company_names": company_names,
+        "contact_names": contact_names,
+        "maker_name": maker,
         "brand_name": fields.get("brand_name"),
         "company_name": fields.get("company_name"),
         "representative": fields.get("representative"),
         "phone": fields.get("phone"),
         "address": fields.get("address"),
+        "evidence": {
+            "source_url": source_url,
+            "email_count": len(emails),
+            "excluded_count": len(excluded),
+        },
         "warnings": warnings,
         "content_hash": content_hash(content),
         "content_type": content_type or "text",

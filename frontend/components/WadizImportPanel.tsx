@@ -16,9 +16,10 @@ import {
 // 公開 DOM だけを取得する。
 const BOOKMARKLET =
   "javascript:(function(){try{" +
-  "var ms=[].slice.call(document.querySelectorAll('a[href^=\"mailto:\"]')).map(function(a){return a.getAttribute('href')});" +
-  "var ls=[].slice.call(document.querySelectorAll('a[href^=\"http\"]')).map(function(a){return a.href}).filter(function(h){return h.indexOf('wadiz.kr')<0}).slice(0,50);" +
-  "var d={url:location.href,title:document.title,text:document.body.innerText,mailto:ms,links:ls,captured_at:new Date().toISOString()};" +
+  "var ms=[].slice.call(document.querySelectorAll('a[href^=\"mailto:\"]')).map(function(a){return a.href});" +
+  "var ls=[].slice.call(document.links).map(function(a){return a.href});" +
+  "var meta={};[].slice.call(document.querySelectorAll('meta')).forEach(function(m){var k=m.getAttribute('property')||m.getAttribute('name');if(k)meta[k]=m.getAttribute('content')});" +
+  "var d={url:location.href,title:document.title,text:document.body.innerText,html:document.documentElement.outerHTML,links:ls,mailtos:ms,meta:meta,captured_at:new Date().toISOString()};" +
   "var j=JSON.stringify(d);" +
   "function ok(){alert('Wadiz公開情報をコピーしました。アプリの入力欄に貼り付けてください。')}" +
   "if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(j).then(ok).catch(function(){window.prompt('コピーしてください:',j)})}" +
@@ -30,17 +31,22 @@ function normalizeContent(
   raw: string
 ): { content: string; content_type: string; source_url: string | null } {
   const t = raw.trim();
-  if (t.startsWith("{") && t.includes('"text"')) {
+  if (t.startsWith("{") && (t.includes('"html"') || t.includes('"text"'))) {
     try {
       const j = JSON.parse(t);
+      const url = typeof j.url === "string" ? j.url : null;
+      // outerHTML があれば HTML として渡す（JSON-LD / script / meta まで抽出できる）
+      if (typeof j.html === "string" && j.html.length > 0) {
+        return { content: j.html, content_type: "html", source_url: url };
+      }
       const parts = [j.text || ""];
+      if (Array.isArray(j.mailtos)) parts.push(j.mailtos.join("\n"));
       if (Array.isArray(j.mailto)) parts.push(j.mailto.join("\n"));
       if (Array.isArray(j.links)) parts.push(j.links.join("\n"));
-      return {
-        content: parts.join("\n"),
-        content_type: "text",
-        source_url: typeof j.url === "string" ? j.url : null,
-      };
+      if (j.meta && typeof j.meta === "object") {
+        parts.push(Object.values(j.meta).join("\n"));
+      }
+      return { content: parts.join("\n"), content_type: "text", source_url: url };
     } catch {
       // fallthrough
     }

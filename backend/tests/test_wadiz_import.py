@@ -218,6 +218,31 @@ def test_confirm_rejects_wadiz_and_dummy():
     db.close()
 
 
+def test_jsonld_and_script_and_plural_fields():
+    print("test_jsonld_and_script_and_plural_fields")
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type":"Organization","name":"놀로","email":"ld@nolo-brand.com",
+     "telephone":"02-123-4567","sameAs":["https://www.instagram.com/nolo.official"]}
+    </script>
+    </head><body>
+    <script>var contact = "js" + "@" + "scriptmaker.com";</script>
+    <p>상호: 놀로  대표자: 홍길동  전화: 010-9876-5432</p>
+    <a href="https://nolo-brand.com">website</a>
+    </body></html>
+    """
+    r = w.extract(html, "html", SRC)
+    vals = {e["value"].lower() for e in r["emails"]}
+    check("JSON-LD 内メールを抽出", "ld@nolo-brand.com" in vals)
+    check("script 文字列連結メールを抽出", "js@scriptmaker.com" in vals)
+    check("websites（複数形）を返す", "https://nolo-brand.com" in r["websites"])
+    check("phones（複数形）を返す", any("9876" in p or "123" in p for p in r["phones"]))
+    check("company_names（複数形）を返す", len(r["company_names"]) >= 1)
+    check("contact_names（複数形）を返す", "홍길동" in (r["contact_names"] or [""])[0]
+          if r["contact_names"] else False)
+
+
 def test_no_guessed_emails():
     print("test_no_guessed_emails")
     # メールが本文に無ければ 0 件（推測で作らない）
@@ -235,6 +260,7 @@ if __name__ == "__main__":
     test_idempotent_and_no_duplicate_email()
     test_non_destructive_merge()
     test_confirm_rejects_wadiz_and_dummy()
+    test_jsonld_and_script_and_plural_fields()
     test_no_guessed_emails()
     print(f"\n{_passed} passed, {_failed} failed")
     sys.exit(1 if _failed else 0)

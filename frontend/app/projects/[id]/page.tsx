@@ -202,6 +202,14 @@ export default function ProjectDetail() {
               />
               {project.source_site === "wadiz" && (
                 <div className="mt-3">
+                  <div className="mb-1 text-right">
+                    <Link
+                      href={`/projects/${id}/wadiz-import`}
+                      className="text-xs text-emerald-700 underline"
+                    >
+                      専用画面で開く ↗
+                    </Link>
+                  </div>
                   <WadizImportPanel
                     projectId={id}
                     defaultSourceUrl={project.source_url}
