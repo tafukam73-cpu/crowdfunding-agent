@@ -623,6 +623,59 @@ def assess_with_japan(db: Session, project: Project, *, auto_check: bool = True,
     }
 
 
+def list_unevaluated(db: Session, *, site: str | None = None, limit: int | None = None):
+    """営業対象で sales_assessment がまだ無い案件を返す（未評価バッチ対象）。"""
+    from sqlalchemy import exists, select
+
+    from app.models.project import SALES_TARGET_SITES, Project
+    from app.models.sales_assessment import SalesAssessment
+
+    values = [s.value for s in SALES_TARGET_SITES]
+    has_assessment = exists().where(SalesAssessment.project_id == Project.id)
+    stmt = select(Project).where(
+        Project.source_site.in_(values), ~has_assessment
+    )
+    if site:
+        stmt = stmt.where(Project.source_site == site)
+    stmt = stmt.order_by(Project.id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(db.scalars(stmt))
+
+
+def run_missing_assessments(
+    db: Session, *, site: str | None = None, limit: int | None = None, runner=None
+) -> dict:
+    """未評価の営業対象案件を明示的に一括評価する（GET からは呼ばない）。
+
+    各案件で assess_with_japan を実行：現在のデータで暫定 Assessment を保存し、
+    日本販売チェックが未実施なら背景ジョブを起動する（重複ジョブは作らない）。
+    連絡先が無くても日本市場適性/Makuake 適性は評価でき、総合を 0 点にはしない。
+    """
+    projects = list_unevaluated(db, site=site, limit=limit)
+    results = []
+    for p in projects:
+        try:
+            out = assess_with_japan(db, p, auto_check=True, runner=runner)
+            results.append({
+                "project_id": p.id,
+                "overall": out["assessment"].overall_priority_score,
+                "confidence": out["assessment"].confidence,
+                "provisional": out["provisional"],
+                "japan_job_status": out["japan_job_status"],
+            })
+        except Exception as exc:  # noqa: BLE001  1 件失敗で全体を止めない
+            logger.warning("run_missing_assessment failed (project=%s): %s", p.id, exc)
+            db.rollback()
+            results.append({"project_id": p.id, "error": str(exc)[:200]})
+    return {
+        "requested_site": site,
+        "unevaluated_found": len(projects),
+        "evaluated": sum(1 for r in results if "overall" in r),
+        "results": results,
+    }
+
+
 def get_latest(db: Session, project_id: int):
     from app.models.sales_assessment import SalesAssessment
 

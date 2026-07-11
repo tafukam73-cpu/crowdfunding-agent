@@ -1937,11 +1937,16 @@ export type SalesTask = {
   has_email: boolean;
   days_since_last_outreach: number | null;
   follow_up_level: FollowUpLevel | null;
+  assessment_overall?: number | null;
+  evaluated?: boolean;
+  visibility_reason?: string | null;
   reasons: string[];
 };
 
 export type TodayTasks = {
-  to_contact: SalesTask[];   // 今日営業する案件
+  to_contact: SalesTask[];        // 今日営業する案件（連絡先あり）
+  needs_contact?: SalesTask[];    // 今日連絡先を探す案件（有望・連絡先なし）
+  needs_evaluation?: SalesTask[]; // 評価待ちの案件（未評価）
   followup: SalesTask[];     // 今日フォローする案件
   replied: SalesTask[];      // 返信あり
   negotiating: SalesTask[];  // 商談中
@@ -3448,7 +3453,7 @@ export interface SalesCopilotV2Card {
   } | null;
   decision: V2Decision;
   base_decision: string;
-  priority_score: number;
+  priority_score: number | null;
   priority_grade: ScoreGrade | null;
   priority_label: string;
   next_action: string | null;
@@ -3458,6 +3463,7 @@ export interface SalesCopilotV2Card {
   v2_decision: string;
   decision_changed: boolean;
   decision_change_reason: string | null;
+  visibility_reason?: string;
   v1_decision_label: string | null;
   assessment: V2Assessment;
   japan_sales_check: V2JapanCheck;

@@ -147,6 +147,21 @@ def run_sales_assessment(
     }
 
 
+@router.post("/sales/assessments/run-missing")
+def run_missing_assessments(
+    site: str | None = Query(None, description="対象サイト（例: wadiz）。未指定は全営業対象"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> dict:
+    """未評価の営業対象案件を明示的に一括評価する（バッチ POST）。
+
+    GET 表示中には起動しない。各案件で暫定 Assessment を保存し、日本販売チェックが
+    未実施なら背景ジョブを起動する（重複ジョブは作らない）。連絡先が無くても市場
+    適性/Makuake 適性は評価でき、総合を 0 点にはしない。
+    """
+    return sales_assessment_service.run_missing_assessments(db, site=site, limit=limit)
+
+
 @router.get("/sales/tasks", response_model=TodayTasksOut)
 def sales_tasks(
     per_group: int = Query(5, ge=1, le=20),

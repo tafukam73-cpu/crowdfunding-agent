@@ -261,17 +261,21 @@ function V2Row({
             ))}
           </div>
         </div>
-        {/* 総合優先度 */}
+        {/* 総合優先度（未評価は 0 点/grade E にせず「未評価」表示） */}
         <div className="flex flex-col items-center">
           <span className="text-[10px] text-slate-400">総合</span>
-          <span className="flex items-center gap-1">
-            <span className="text-sm font-bold text-slate-900">{card.priority_score}</span>
-            {card.priority_grade && (
-              <span className={`rounded px-1 text-[10px] font-bold ${GRADE_COLORS[card.priority_grade]}`}>
-                {card.priority_grade}
-              </span>
-            )}
-          </span>
+          {card.priority_score == null ? (
+            <span className="text-xs font-medium text-slate-400">未評価</span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <span className="text-sm font-bold text-slate-900">{card.priority_score}</span>
+              {card.priority_grade && (
+                <span className={`rounded px-1 text-[10px] font-bold ${GRADE_COLORS[card.priority_grade]}`}>
+                  {card.priority_grade}
+                </span>
+              )}
+            </span>
+          )}
         </div>
         <ScoreBadge score={a.japan_market_fit.score} grade={a.japan_market_fit.grade} label="日本適性" />
         <ScoreBadge score={a.exclusivity.score} grade={a.exclusivity.grade} label="独占" />

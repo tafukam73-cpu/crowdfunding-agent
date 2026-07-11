@@ -24,9 +24,23 @@ const GROUPS: {
   {
     key: "to_contact",
     num: "①",
-    label: "今日営業する案件",
+    label: "今日営業する案件（連絡先あり）",
     cls: "border-emerald-300 bg-emerald-50",
     cta: "営業メール作成",
+  },
+  {
+    key: "needs_contact",
+    num: "①-b",
+    label: "今日連絡先を探す案件（有望・連絡先なし）",
+    cls: "border-sky-300 bg-sky-50",
+    cta: "連絡先を探索",
+  },
+  {
+    key: "needs_evaluation",
+    num: "①-c",
+    label: "評価待ちの案件（営業適性が未評価）",
+    cls: "border-slate-300 bg-white",
+    cta: null,
   },
   {
     key: "followup",
@@ -274,7 +288,7 @@ export default function TodayTasksPanel({ reloadKey }: { reloadKey?: number }) {
       {data && (
         <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {GROUPS.map((g) => {
-            const items = data[g.key];
+            const items = data[g.key] ?? [];
             return (
               <div key={g.key} className={`rounded-lg border p-3 ${g.cls}`}>
                 <p className="text-xs font-bold text-slate-700">

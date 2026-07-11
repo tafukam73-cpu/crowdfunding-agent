@@ -198,11 +198,65 @@ def _assessment_state(saved_row, japan: dict) -> str:
 def build_v2_card(db: Session, project: Project) -> dict:
     """1 案件の Sales Copilot v2 統合カードを返す。"""
     base_card = v1.build_card(db, project)
-    assessment, saved, _conf = _assessment_dict(db, project)
     saved_row = sas.get_latest(db, project.id)
     contact = _contact_flags(base_card)
-    rec = combine_v2(base_card, assessment, contact)
     japan = _japan_block(db, project)
+
+    # 未評価：その場で評価しない。0 点 / grade E ではなく None（未評価）を返す。
+    if saved_row is None:
+        return {
+            "project_id": project.id,
+            "title": project.title,
+            "source_site": project.source_site,
+            "maker_name": project.maker_name,
+            "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+            "funding": (base_card.get("summary") or {}).get("funding"),
+            "decision": "not_evaluated",
+            "base_decision": "not_evaluated",
+            "priority_score": None,
+            "priority_grade": None,
+            "priority_label": "unrated",
+            "next_action": "営業適性を評価してください（バッチ評価 or POST /projects/{id}/sales-assessment）",
+            "reason": "営業適性アセスメント未実施（0 点ではなく未評価）",
+            "tags": ["未評価"],
+            "v1_decision": "not_evaluated",
+            "v2_decision": "not_evaluated",
+            "decision_changed": False,
+            "decision_change_reason": None,
+            "v1_decision_label": base_card.get("decision_label"),
+            "visibility_reason": "not_evaluated",
+            "assessment": {
+                "japan_market_fit": {"score": None, "grade": None, "level": None, "reasons": []},
+                "exclusivity": {"score": None, "grade": None, "level": None, "reasons": []},
+                "makuake_fit": {"score": None, "grade": None, "level": None, "reasons": []},
+                "overall_priority_score": None, "overall_grade": None,
+                "confidence": None, "engine": None, "saved": False,
+                "evaluated_at": None, "missing_data": None, "state": "not_evaluated",
+            },
+            "japan_sales_check": {
+                "status": japan["status"], "result": japan["result"],
+                "confidence": japan["confidence"], "evidence": japan["evidence"],
+                "source_urls": japan["source_urls"], "checked_at": japan["checked_at"],
+                "error_reason": japan["error_reason"], "version": japan["version"],
+                "job_id": japan.get("job_id"), "job_status": japan.get("job_status"),
+            },
+            "contact": {
+                "has_email": contact.get("has_email"),
+                "has_form": contact.get("has_form"),
+                "recommended_channel": base_card.get("recommended_channel"),
+                "recommended_email": base_card.get("recommended_email"),
+            },
+            "pipeline": {
+                "sales_status": (base_card.get("summary") or {}).get("sales_status"),
+                "last_action": (base_card.get("summary") or {}).get("last_action"),
+                "contact_person_found": (base_card.get("summary") or {}).get("contact_person_found"),
+            },
+            "actions": base_card.get("actions"),
+            "assessment_state": "not_evaluated",
+        }
+
+    assessment, saved, _conf = _assessment_dict(db, project)
+    rec = combine_v2(base_card, assessment, contact)
     state = _assessment_state(saved_row, japan)
 
     def _score_block(key: str) -> dict:
@@ -241,6 +295,7 @@ def build_v2_card(db: Session, project: Project) -> dict:
         "decision_changed": base_decision != v2_decision,
         "decision_change_reason": rec["reason"] if base_decision != v2_decision else None,
         "v1_decision_label": base_card.get("decision_label"),
+        "visibility_reason": _visibility_reason(v2_decision, state, japan, contact),
         # 3 スコア（0〜100 + grade + 理由）
         "assessment": {
             "japan_market_fit": _score_block("japan_market_fit"),
@@ -349,6 +404,26 @@ def _batch_latest_japan_jobs(db: Session, project_ids: list[int]):
     return {r.project_id: r for r in rows}
 
 
+def _visibility_reason(decision: str, state: str, japan: dict, contact: dict) -> str:
+    """「今日やること/ランキングにどう扱われるか」の理由（画面で確認できる）。"""
+    has_contact = bool(contact.get("has_email") or contact.get("has_form"))
+    if decision in ("closed", "drop"):
+        return "not_sales_target"
+    if state == "not_evaluated":
+        return "not_evaluated"
+    if state == "data_insufficient":
+        return "data_insufficient"
+    if state == "checking_japan":
+        return "japan_not_checked"
+    if decision in ("sell_now_exclusive", "sell_now", "needs_email"):
+        return "actionable_today"
+    if decision == "needs_contact" or not has_contact:
+        return "needs_contact"
+    if decision == "deprioritize":
+        return "low_priority"
+    return "actionable_today"
+
+
 def _dashboard_card(project: Project, sa_row, japan_job, jsc, contact: dict) -> dict:
     """保存済みデータだけから v2 カードを作る（DB アクセスなし・純粋）。"""
     japan_active = (
@@ -384,20 +459,22 @@ def _dashboard_card(project: Project, sa_row, japan_job, jsc, contact: dict) -> 
     }
 
     if sa_row is None:
-        # 未評価：その場で評価しない。ランキング用に latest_score を暫定優先度に使う。
+        # 未評価：その場で評価しない。スコアは 0 でなく None（未評価は 0 点・grade E に
+        # しない）。ランキングは None を末尾に回す。
         base.update({
             "decision": "not_evaluated",
             "base_decision": "not_evaluated",
-            "priority_score": int(project.latest_score or 0),
-            "priority_grade": sas.grade(project.latest_score or 0),
-            "priority_label": "low",
-            "next_action": "適性を評価してください（POST /projects/{id}/sales-assessment）",
-            "reason": "営業適性アセスメント未実施",
-            "tags": [],
+            "priority_score": None,
+            "priority_grade": None,
+            "priority_label": "unrated",
+            "next_action": "営業適性を評価してください（バッチ評価 or POST /projects/{id}/sales-assessment）",
+            "reason": "営業適性アセスメント未実施（0 点ではなく未評価）",
+            "tags": ["未評価"],
             "v1_decision": "not_evaluated",
             "v2_decision": "not_evaluated",
             "decision_changed": False,
             "decision_change_reason": None,
+            "visibility_reason": "not_evaluated",
             "assessment": {
                 "japan_market_fit": {"score": None, "grade": None, "level": None, "reasons": []},
                 "exclusivity": {"score": None, "grade": None, "level": None, "reasons": []},
@@ -447,6 +524,9 @@ def _dashboard_card(project: Project, sa_row, japan_job, jsc, contact: dict) -> 
         "v2_decision": rec["decision"],
         "decision_changed": rec["base_decision"] != rec["decision"],
         "decision_change_reason": rec["reason"] if rec["base_decision"] != rec["decision"] else None,
+        "visibility_reason": _visibility_reason(
+            rec["decision"], state, japan, contact
+        ),
         "assessment": {
             "japan_market_fit": _sb("japan_market_fit"),
             "exclusivity": _sb("exclusivity"),
@@ -516,7 +596,11 @@ def copilot_v2_dashboard(
         )
         for p in projects
     ]
-    cards.sort(key=lambda c: c["priority_score"], reverse=True)
+    # 未評価（priority_score=None）は末尾へ回す（0 点扱いにしない）。
+    cards.sort(
+        key=lambda c: c["priority_score"] if c["priority_score"] is not None else -1,
+        reverse=True,
+    )
 
     counts: dict[str, int] = {}
     for c in cards:

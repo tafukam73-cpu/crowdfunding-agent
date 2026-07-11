@@ -393,6 +393,26 @@ def _ids_with_email(db: Session, ids: list[int]) -> set[int]:
     return {pid for pid in rows if pid is not None}
 
 
+def _assessment_overall_map(db: Session, ids: list[int]) -> dict[int, int | None]:
+    """各案件の最新 sales_assessment の総合スコアをバッチ取得（無ければキー無し）。"""
+    if not ids:
+        return {}
+    from sqlalchemy import func
+
+    from app.models.sales_assessment import SalesAssessment as SA
+
+    sub = (
+        select(SA.project_id, func.max(SA.id).label("mid"))
+        .where(SA.project_id.in_(ids))
+        .group_by(SA.project_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(SA.project_id, SA.overall_priority_score).join(sub, SA.id == sub.c.mid)
+    ).all()
+    return {pid: ov for pid, ov in rows}
+
+
 def _last_outreach_map(db: Session, ids: list[int]) -> dict[int, datetime]:
     """project_id -> 最終営業日時。SalesActivity を優先し、無ければ EmailDraft。"""
     out: dict[int, datetime] = {}
@@ -520,23 +540,39 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
         )
         return list(db.scalars(stmt))
 
+    # 既存の to_contact（今日営業する案件）は従来どおり latest_score 順の未営業案件。
     tc_rows = _fetch(_READY_STATUSES)
+    # 追加の「連絡先探索/評価待ち」用に、未営業を広めに取る（latest_score 順で切ると
+    # 未評価＝latest_score None が scan_cap の外に落ちて消えるため、更新日時順で広く取る）。
+    ns_stmt = (
+        select(Project)
+        .where(target, Project.sales_status.in_(_READY_STATUSES))
+        .order_by(Project.updated_at.desc())
+        .limit(max(per_group * 12, 150))
+    )
+    ns_rows = list(db.scalars(ns_stmt))
     fu_rows = _fetch(_FOLLOWUP_STATUSES)
     rep_rows = _fetch((SalesStatus.replied.value,))
     neg_rows = _fetch((SalesStatus.negotiating.value,))
 
-    all_rows = tc_rows + fu_rows + rep_rows + neg_rows
+    all_rows = tc_rows + ns_rows + fu_rows + rep_rows + neg_rows
     all_ids = [p.id for p in all_rows]
     contact_ids = _ids_with_contact(db, all_ids)
     email_ids = _ids_with_email(db, all_ids)
+    assess_overall = _assessment_overall_map(db, [p.id for p in tc_rows + ns_rows])
     outreach = _last_outreach_map(db, [p.id for p in fu_rows])
     success_cats = _success_categories(db)
 
     def _enrich(p: Project, *, group: str, days: int | None = None) -> dict:
         has_contact = p.id in contact_ids
         has_email = p.id in email_ids
+        # 適性の総合スコア（あれば）で latest_score を補う（未 AI 評価でも埋もれさせない）。
+        overall = assess_overall.get(p.id)
+        eff_latest = max(p.latest_score or 0, overall or 0) if (
+            p.latest_score is not None or overall is not None
+        ) else None
         score = compute_priority_score(
-            latest_score=p.latest_score,
+            latest_score=eff_latest,
             research_done=False,
             contact_available=has_contact,
             email_done=has_email,
@@ -546,6 +582,15 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
             is_sales_target_candidate=p.is_sales_target_candidate,
             sales_status=p.sales_status,
         )
+        evaluated = p.id in assess_overall
+        if group in ("followup", "replied", "negotiating", "idle"):
+            vis = "actionable_today"
+        elif not evaluated:
+            vis = "not_evaluated"
+        elif not (has_contact or has_email):
+            vis = "needs_contact"
+        else:
+            vis = "actionable_today"
         level = _followup_level(days) if group == "followup" else None
         return {
             "project_id": p.id,
@@ -554,6 +599,9 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
             "sales_status": p.sales_status,
             "latest_score": p.latest_score,
             "priority_score": score,
+            "assessment_overall": overall,
+            "evaluated": evaluated,
+            "visibility_reason": vis,
             "stars": stars_for(score),
             "has_contact": has_contact,
             "has_email": has_email,
@@ -566,9 +614,25 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
             ),
         }
 
-    # 今日営業する案件：営業価値スコア順
+    # to_contact（今日営業する案件）は従来どおり（後方互換）。
     to_contact = [_enrich(p, group="to_contact") for p in tc_rows]
     to_contact.sort(key=lambda t: t["priority_score"], reverse=True)
+
+    # 追加の可視化グループ：埋もれがちな「評価済み・連絡先なし＝連絡先探索」と
+    # 「未評価＝評価待ち」を別枠で表示する（未評価は latest_score 順の to_contact から
+    # 落ちて消えるため、ここで確実に拾う）。
+    needs_contact: list[dict] = []
+    needs_evaluation: list[dict] = []
+    for p in ns_rows:
+        item = _enrich(p, group="to_contact")
+        if item["visibility_reason"] == "not_evaluated":
+            needs_evaluation.append(item)
+        elif item["visibility_reason"] == "needs_contact":
+            needs_contact.append(item)
+    needs_contact.sort(
+        key=lambda t: (t["assessment_overall"] or 0, t["priority_score"]), reverse=True
+    )
+    needs_evaluation.sort(key=lambda t: t["priority_score"], reverse=True)
 
     # フォロー（3日以上）と放置でよい（3日未満）に分ける
     followup: list[dict] = []
@@ -596,6 +660,8 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
 
     return {
         "to_contact": to_contact[:per_group],
+        "needs_contact": needs_contact[:per_group],
+        "needs_evaluation": needs_evaluation[:per_group],
         "followup": followup[:per_group],
         "replied": replied[:per_group],
         "negotiating": negotiating[:per_group],

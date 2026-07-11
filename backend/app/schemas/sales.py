@@ -89,12 +89,18 @@ class TaskItem(BaseModel):
     # 最終営業からの経過日数とフォロー優先度（normal/high/final）。フォロー以外は None。
     days_since_last_outreach: int | None = None
     follow_up_level: str | None = None
+    # 営業適性の総合スコア（評価済みのみ）と評価有無・可視化理由。
+    assessment_overall: int | None = None
+    evaluated: bool = True
+    visibility_reason: str | None = None
     # この案件を今やるべき理由（人間可読）。
     reasons: list[str] = []
 
 
 class TodayTasksOut(BaseModel):
-    to_contact: list[TaskItem]    # 今日営業する案件（未営業 / 準備完了）
+    to_contact: list[TaskItem]        # 今日営業する案件（連絡先あり・未営業）
+    needs_contact: list[TaskItem] = []      # 今日連絡先探索（評価済みだが連絡先なし）
+    needs_evaluation: list[TaskItem] = []   # 評価待ち（営業適性が未評価）
     followup: list[TaskItem]      # 今日フォローする案件（3日以上返信なし）
     replied: list[TaskItem]       # 返信あり
     negotiating: list[TaskItem]   # 商談中
