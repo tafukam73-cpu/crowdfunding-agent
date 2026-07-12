@@ -11,12 +11,14 @@ import {
   DISCOVERY_STATUS_COLORS,
   DISCOVERY_STATUS_LABELS,
   DISCOVERY_STATUS_ORDER,
-  isDiscoveryLiveFetch,
+  getDiscoveryJob,
+  getDiscoveryPlatforms,
   type DiscoveredProduct,
   type DiscoveredProductCreate,
+  type DiscoveryJob,
   type DiscoveryListParams,
+  type DiscoveryPlatformInfo,
   type DiscoveryRunRequest,
-  type DiscoveryRunResult,
   type DiscoverySourcePlatform,
   type DiscoveredProductStatus,
   listDiscoveredProducts,
@@ -73,52 +75,89 @@ function money(n: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// A. Discovery 実行フォーム
+// A. Discovery 実行フォーム（発掘元の対応状況は backend /discovery/platforms を単一の
+//    真実源とする。実行はジョブ方式：POST 後に GET でポーリングする）。
 // ---------------------------------------------------------------------------
+const POLL_INTERVAL_MS = 4000; // ポーリング間隔（3〜5 秒）
+const POLL_MAX_TRIES = 90; // 最大試行（約 6 分。無限ポーリングしない）
+
 function RunForm({ onRan }: { onRan: () => void }) {
+  const [platforms, setPlatforms] = useState<DiscoveryPlatformInfo[]>([]);
   const [platform, setPlatform] =
     useState<DiscoverySourcePlatform>("kickstarter");
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(20);
-  const [autoScore, setAutoScore] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<DiscoveryRunResult | null>(null);
+  const [job, setJob] = useState<DiscoveryJob | null>(null);
 
-  // 実サイト取得に対応しているプラットフォームか（未対応は実行不可）。
-  const liveFetch = isDiscoveryLiveFetch(platform);
+  // 対応状況（単一の真実源）を取得する。
+  useEffect(() => {
+    getDiscoveryPlatforms()
+      .then((list) => {
+        setPlatforms(list);
+        // 既定は先頭の実取得対応プラットフォーム。
+        const firstAvail = list.find((p) => p.available);
+        if (firstAvail) setPlatform(firstAvail.platform);
+      })
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const current = platforms.find((p) => p.platform === platform);
+  const available = current?.available ?? false;
+  const querySupported = current?.query_supported ?? false;
 
   async function run() {
-    if (!liveFetch) return; // 未接続（準備中）は実行しない
+    if (!available || busy) return; // 準備中 / 実行中は起動しない（二重押下防止）
     setBusy(true);
     setError(null);
+    setJob(null);
     try {
       const payload: DiscoveryRunRequest = {
         source_platform: platform,
-        query: query || null,
+        // 検索クエリ非対応サイトへは query を送らない（新着/注目を取得）。
+        query: querySupported ? query || null : null,
         limit,
-        auto_score: autoScore,
+        auto_score: true,
       };
       const res = await runDiscovery(payload);
-      setResult(res);
-      onRan();
+      await pollJob(res.job_id);
     } catch (e) {
       setError(String(e));
-    } finally {
       setBusy(false);
     }
   }
 
+  // 完了/失敗まで一定間隔でポーリングする（無限ポーリングしない）。
+  async function pollJob(jobId: number) {
+    for (let i = 0; i < POLL_MAX_TRIES; i++) {
+      let j: DiscoveryJob;
+      try {
+        j = await getDiscoveryJob(jobId);
+      } catch (e) {
+        setError(String(e));
+        break;
+      }
+      setJob(j);
+      if (j.status === "completed" || j.status === "failed") {
+        onRan(); // 一覧を再読み込み
+        break;
+      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    setBusy(false);
+  }
+
+  const running = busy && (!job || job.status === "queued" || job.status === "running");
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <h2 className="mb-1 text-base font-bold text-slate-900">
-        Discovery 実行
-      </h2>
+      <h2 className="mb-1 text-base font-bold text-slate-900">Discovery 実行</h2>
       <p className="mb-3 text-xs text-slate-500">
-        発掘元を指定して収集フレームワークを実行します。
-        <span className="font-medium text-slate-700">Kickstarter は実サイト取得に対応</span>
-        （robots 尊重・レート制限・タイムアウト付き）。Indiegogo / BackerKit は未接続
-        （準備中）のため実行できません。
+        発掘元を指定して収集フレームワークを実行します。Kickstarter / Wadiz / Zeczec /
+        Ulule / Indiegogo は実取得に対応しています。その他のプラットフォームは接続状況に
+        応じて表示されます（実行可否は各サイトの状態バッジに従います）。重い収集は
+        バックグラウンドのジョブで実行され、進捗をここに表示します。
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="text-xs text-slate-600">
@@ -128,25 +167,25 @@ function RunForm({ onRan }: { onRan: () => void }) {
             onChange={(e) =>
               setPlatform(e.target.value as DiscoverySourcePlatform)
             }
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            disabled={busy}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-100"
           >
-            {DISCOVERY_PLATFORM_ORDER.filter(
-              (p) => p !== "manual" && p !== "other"
-            ).map((p) => (
-              <option key={p} value={p}>
-                {platformLabel(p)}
-                {isDiscoveryLiveFetch(p) ? "" : "（準備中）"}
+            {platforms.map((p) => (
+              <option key={p.platform} value={p.platform}>
+                {p.label}
+                {p.available ? "（実取得対応）" : "（準備中）"}
               </option>
             ))}
           </select>
         </label>
         <label className="text-xs text-slate-600">
-          検索クエリ（任意）
+          検索クエリ{querySupported ? "（任意）" : "（このサイトでは使用しません）"}
           <input
-            value={query}
+            value={querySupported ? query : ""}
             onChange={(e) => setQuery(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
-            placeholder="例：kitchen gadget"
+            disabled={!querySupported || busy}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-100 disabled:text-slate-400"
+            placeholder={querySupported ? "例：kitchen gadget" : "新着・注目案件を取得"}
           />
         </label>
         <label className="text-xs text-slate-600">
@@ -157,89 +196,92 @@ function RunForm({ onRan }: { onRan: () => void }) {
             max={200}
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value))}
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            disabled={busy}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-100"
           />
-        </label>
-        <label className="flex items-center gap-2 pt-5 text-xs text-slate-600">
-          <input
-            type="checkbox"
-            checked={autoScore}
-            onChange={(e) => setAutoScore(e.target.checked)}
-          />
-          保存時に自動スコアリング（Kickstarter は常に自動評価）
         </label>
       </div>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-      {!liveFetch && (
-        <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-          {platformLabel(platform)} は実サイト取得が未接続（準備中）です。
-          現在は <b>Kickstarter</b> のみ実取得に対応しています。
+
+      {/* 検索クエリ非対応サイトの説明（Wadiz / Zeczec などの一覧取得型） */}
+      {current && !querySupported && (
+        <p className="mt-2 text-xs text-slate-500">
+          このサイトでは検索クエリは使用せず、新着・注目案件を取得します。
         </p>
       )}
+      {current && (
+        <p className="mt-1 text-xs text-slate-500">{current.note}</p>
+      )}
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {!available && current && (
+        <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          {current.label} は実サイト取得が未接続（準備中）のため実行できません。
+        </p>
+      )}
+
       <button
         onClick={run}
-        disabled={busy || !liveFetch}
+        disabled={busy || !available}
         title={
-          liveFetch
+          available
             ? undefined
-            : `${platformLabel(platform)} は準備中のため実行できません`
+            : `${current?.label ?? platform} は準備中のため実行できません`
         }
         className="mt-3 rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy
-          ? "実行中…"
-          : liveFetch
+        {running
+          ? "実行中…（バックグラウンド収集）"
+          : available
           ? "Discovery を実行"
           : "準備中（実行できません）"}
       </button>
 
-      {result && (
+      {job && (
         <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+          <div className="mb-1 flex items-center gap-2 text-xs text-slate-600">
+            <span>
+              ジョブ #{job.id} / ステータス: <b>{job.status}</b>
+            </span>
+            {job.current_step && <span>· {job.current_step}</span>}
+            <span>· 進捗 {job.progress}%</span>
+          </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <span>
-              取得 <b>{result.found_count}</b> 件
+              取得 <b>{job.found_count}</b> 件
             </span>
             <span>
-              保存 <b className="text-green-700">{result.saved_count}</b> 件
+              保存 <b className="text-green-700">{job.saved_count}</b> 件
             </span>
             <span>
-              重複 <b className="text-amber-700">{result.duplicate_count}</b> 件
+              重複 <b className="text-amber-700">{job.duplicate_count}</b> 件
             </span>
             <span>
               スコアリング済み{" "}
-              <b className="text-blue-700">{result.scored_count}</b> 件
+              <b className="text-blue-700">{job.scored_count}</b> 件
             </span>
             <span>
-              ステータス: <b>{result.status}</b>
+              失敗 <b className="text-red-700">{job.failed_count}</b> 件
             </span>
           </div>
-          {/* 実取得 / 未接続 / 0件 / エラー を分かりやすく表示 */}
-          <p className="mt-1 text-xs">
-            {result.network_fetched ? (
-              <span className="text-slate-600">実サイトから取得しました</span>
-            ) : (
-              <span className="text-slate-500">
-                実サイト取得は未接続のプラットフォームです（0 件は仕様・外部送信なし）
-              </span>
-            )}
-          </p>
-          {result.network_fetched &&
-            result.found_count === 0 &&
-            !result.error_message && (
+          {job.status === "completed" &&
+            job.found_count === 0 &&
+            !job.error && (
               <p className="mt-1 text-xs text-amber-700">
                 実サイトへアクセスしましたが、該当する案件は 0 件でした。
-                クエリを変えて再実行してください。
               </p>
             )}
-          {result.product_ids.length > 0 && (
+          {job.product_ids.length > 0 && (
             <p className="mt-1 text-xs text-slate-600">
-              作成された product ids: {result.product_ids.join(", ")}
+              作成された product ids: {job.product_ids.join(", ")}
             </p>
           )}
-          {result.error_message && (
-            <p className="mt-1 text-xs text-red-600">
-              エラー: {result.error_message}
+          {job.warnings.length > 0 && (
+            <p className="mt-1 text-xs text-amber-700">
+              警告: {job.warnings.join(" / ")}
             </p>
+          )}
+          {job.error && (
+            <p className="mt-1 text-xs text-red-600">エラー: {job.error}</p>
           )}
         </div>
       )}

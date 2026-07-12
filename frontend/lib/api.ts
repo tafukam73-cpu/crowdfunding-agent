@@ -2990,6 +2990,9 @@ export async function fetchAvailabilityChecks(
 export type DiscoverySourcePlatform =
   | "kickstarter"
   | "indiegogo"
+  | "wadiz"
+  | "zeczec"
+  | "ulule"
   | "backerkit"
   | "backertracker"
   | "crowdsupply"
@@ -3012,6 +3015,9 @@ export type DiscoveredProductStatus =
 export const DISCOVERY_PLATFORM_LABELS: Record<string, string> = {
   kickstarter: "Kickstarter",
   indiegogo: "Indiegogo",
+  wadiz: "Wadiz",
+  zeczec: "Zeczec",
+  ulule: "Ulule",
   backerkit: "BackerKit",
   backertracker: "BackerTracker",
   crowdsupply: "Crowd Supply",
@@ -3021,25 +3027,34 @@ export const DISCOVERY_PLATFORM_LABELS: Record<string, string> = {
   other: "その他",
 };
 
-// 手動登録フォーム等で選ばせる発掘元の並び順。
+// 手動登録フォーム・フィルター等で選ばせる発掘元の並び順。
 export const DISCOVERY_PLATFORM_ORDER: DiscoverySourcePlatform[] = [
   "kickstarter",
   "indiegogo",
+  "ulule",
+  "wadiz",
+  "zeczec",
   "backerkit",
   "manual",
   "other",
 ];
 
-// Discovery 実行で「実サイト取得」に対応済みのプラットフォーム。
-// backend の routers/discovery.py `_LIVE_FETCH_PLATFORMS` と必ず一致させること。
-// ここに無いものは未接続（準備中）＝実行ボタンを無効化する。
-export const DISCOVERY_LIVE_FETCH_PLATFORMS: DiscoverySourcePlatform[] = [
-  "kickstarter",
-];
+// 発掘元プラットフォームの対応状況（backend DiscoveryPlatformInfo に対応）。
+// 実取得対応 / 準備中 / 検索クエリ対応の「単一の真実源」は backend
+// GET /discovery/platforms。フロントで対応状態をハードコードしない。
+export type DiscoveryPlatformInfo = {
+  platform: DiscoverySourcePlatform;
+  label: string;
+  available: boolean; // 実取得対応（true）/ 準備中（false）
+  query_supported: boolean; // 検索クエリを使うか
+  note: string;
+};
 
-// 指定プラットフォームが実サイト取得に対応済みか。
-export function isDiscoveryLiveFetch(platform: string): boolean {
-  return (DISCOVERY_LIVE_FETCH_PLATFORMS as string[]).includes(platform);
+// GET /discovery/platforms
+export async function getDiscoveryPlatforms(): Promise<DiscoveryPlatformInfo[]> {
+  const res = await apiFetch("/discovery/platforms");
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
 }
 
 // ステータスの日本語表示。
@@ -3145,23 +3160,35 @@ export type DiscoveryRunRequest = {
   auto_score?: boolean;
 };
 
-// Discovery 実行の結果サマリ（backend DiscoveryRunResult に対応）。
-export type DiscoveryRunResult = {
-  run_id: number | null;
+// POST /discovery/run のレスポンス（ジョブを作成して即返す）。
+export type DiscoveryRunJobResponse = {
+  job_id: number;
+  platform: string;
+  status: string; // queued
+  reused: boolean; // 同一条件の進行中ジョブを再利用したか
+};
+
+// 発掘ジョブの進捗・結果（backend DiscoveryJobOut に対応）。
+export type DiscoveryJob = {
+  id: number;
   source_platform: string;
   query: string | null;
-  status: string;
+  limit: number;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  progress: number;
+  current_step: string | null;
   found_count: number;
   saved_count: number;
   duplicate_count: number;
-  error_message: string | null;
-  product_ids: number[];
-  started_at: string | null;
-  finished_at: string | null;
-  // true: 実サイトから取得を試みた（Kickstarter 等）。false: fetch 未接続（0件は仕様）。
-  network_fetched: boolean;
-  // 取得直後に自動スコアリングできた件数。
   scored_count: number;
+  failed_count: number;
+  product_ids: number[];
+  warnings: string[];
+  run_id: number | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
 };
 
 // 一覧の絞り込み・並び替え。sort は backend の
@@ -3243,10 +3270,10 @@ export async function scoreDiscoveredProduct(
   return res.json();
 }
 
-// POST /discovery/run
+// POST /discovery/run — 発掘ジョブを作成して即返す（重い収集は待たない）。
 export async function runDiscovery(
   payload: DiscoveryRunRequest
-): Promise<DiscoveryRunResult> {
+): Promise<DiscoveryRunJobResponse> {
   const res = await fetch(`${API_BASE}/discovery/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -3256,6 +3283,13 @@ export async function runDiscovery(
     const msg = await res.text();
     throw new Error(`API error: ${res.status} ${msg}`);
   }
+  return res.json();
+}
+
+// GET /discovery/jobs/{id} — ジョブの進捗・結果を取得（読み取り専用）。
+export async function getDiscoveryJob(jobId: number): Promise<DiscoveryJob> {
+  const res = await apiFetch(`/discovery/jobs/${jobId}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
