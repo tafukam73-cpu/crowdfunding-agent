@@ -250,28 +250,32 @@ def test_run_api_endpoint():
         return
 
     client = TestClient(app)
-    # manual：API 経由では records が無いので found=0 だが 200 で完了する（安全）
-    r = client.post("/discovery/run", json={
-        "source_platform": "manual", "query": "kitchen gadgets",
-        "limit": 5, "auto_score": False,
-    })
-    check("POST /discovery/run 200", r.status_code == 200)
-    body = r.json()
-    check("サマリのキーが揃う",
-          {"source_platform", "status", "found_count", "saved_count",
-           "duplicate_count", "product_ids"} <= set(body))
-    check("manual はネットワーク未注入で found=0（外部アクセスなし）",
-          body["found_count"] == 0 and body["saved_count"] == 0)
 
-    # 未接続プラットフォーム（indiegogo）は API からは外部アクセスせず
-    # 200・found=0・network_fetched=False で安全に返る（Kickstarter のみ実取得）。
-    r2 = client.post("/discovery/run", json={
-        "source_platform": "indiegogo", "query": "gadgets", "limit": 5,
+    # /discovery/run はジョブ方式：準備中プラットフォーム（backerkit）は 400 で弾く。
+    r = client.post("/discovery/run", json={
+        "source_platform": "backerkit", "limit": 5,
     })
-    b2 = r2.json()
-    check("未接続 indiegogo は 200・found=0・network_fetched=False",
-          r2.status_code == 200 and b2["found_count"] == 0
-          and b2.get("network_fetched") is False)
+    check("準備中プラットフォームの run は 400", r.status_code == 400)
+
+    # manual も実取得対応ではないため 400（実行不可）。
+    r_manual = client.post("/discovery/run", json={
+        "source_platform": "manual", "limit": 5,
+    })
+    check("manual run は 400（実取得非対応）", r_manual.status_code == 400)
+
+    # GET /discovery/platforms が対応状況を返す（UI の単一の真実源）。
+    rp = client.get("/discovery/platforms")
+    check("GET /discovery/platforms 200", rp.status_code == 200)
+    avail = {p["platform"]: p for p in rp.json()}
+    check("wadiz/zeczec が実取得対応",
+          avail["wadiz"]["available"] and avail["zeczec"]["available"])
+    check("backerkit は準備中", avail["backerkit"]["available"] is False)
+    check("wadiz は検索クエリ非対応（一覧取得型）",
+          avail["wadiz"]["query_supported"] is False)
+
+    # 存在しないジョブは 404。
+    rj = client.get("/discovery/jobs/99999")
+    check("未知ジョブは 404", rj.status_code == 404)
 
     # 既存 /discovery/products 系が壊れていないこと
     r3 = client.get("/discovery/products")

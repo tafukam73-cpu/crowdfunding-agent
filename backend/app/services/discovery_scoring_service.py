@@ -84,6 +84,25 @@ _LOGISTICS_HEAVY = ("wireless", "radio", "large battery")
 # 説明文がこの文字数未満なら「情報不足」とみなし confidence を下げる
 _SHORT_DESC_THRESHOLD = 40
 
+# 調達額の「大きさ」を通貨をまたいで比較するための概算 USD 換算レート（1 通貨単位＝USD）。
+# 目的は KRW / TWD などの大きな額面を USD/JPY と誤解しないこと（厳密な為替ではない）。
+# 未知の通貨・通貨不明は 1.0（USD 相当）として扱う。
+_APPROX_USD_PER_UNIT: dict[str, float] = {
+    "USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CAD": 0.73, "AUD": 0.66,
+    "JPY": 0.0067, "KRW": 0.00075, "TWD": 0.031, "HKD": 0.128,
+    "SGD": 0.74, "CHF": 1.1, "NZD": 0.6, "BRL": 0.18, "INR": 0.012,
+}
+# 「大型調達」とみなす USD 換算のしきい値（この額を超えると CF 適性を少し加点）。
+_LARGE_FUNDING_USD = 100_000.0
+
+
+def _funding_usd(amount: float | None, currency: Any) -> float | None:
+    """調達額を概算 USD に換算する（通貨不明は 1.0 倍＝USD 相当）。"""
+    if amount is None:
+        return None
+    code = str(getattr(currency, "value", currency) or "USD").strip().upper()
+    return amount * _APPROX_USD_PER_UNIT.get(code, 1.0)
+
 
 def _clamp(value: Any, default: int = 50) -> int:
     """0〜100 の整数に正規化する。None / 不正値は default に丸める。"""
@@ -183,7 +202,7 @@ def _extract_info(product: Any) -> dict:
         return {}
     keys = (
         "category", "product_name", "project_title", "description",
-        "status", "backers_count", "funding_amount", "funding_goal",
+        "status", "backers_count", "funding_amount", "funding_goal", "currency",
     )
     if isinstance(product, dict):
         return {k: product.get(k) for k in keys}
@@ -254,7 +273,10 @@ def _rule_based_scores(info: dict) -> dict:
         if backers >= 5000:
             crowdfunding_fit += 5
             novelty += 5
-    if funding is not None and funding >= 100_000:
+    # 調達額は通貨をまたいで比較するため概算 USD 換算で判定する（KRW/TWD を USD と
+    # 誤解して過大加点しない）。
+    funding_usd = _funding_usd(funding, info.get("currency"))
+    if funding_usd is not None and funding_usd >= _LARGE_FUNDING_USD:
         crowdfunding_fit += 5
 
     # 説明文が短すぎる場合は confidence を下げる（overall を減点し reasoning に明記）

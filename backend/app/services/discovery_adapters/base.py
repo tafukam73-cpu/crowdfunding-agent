@@ -205,12 +205,15 @@ class DiscoveryCandidate:
     image_url: str | None = None
     country: str | None = None
     status: str | None = None
+    currency: str | None = None
     funding_amount: Any = None
     funding_goal: Any = None
     backers_count: Any = None
     launch_date: Any = None
     end_date: Any = None
     official_website_url: str | None = None
+    # 発掘元固有の生データ（必要最小限）。推測値は入れない。
+    raw_data: dict | None = None
 
     def merge_missing(self, other: "DiscoveryCandidate") -> None:
         """自分が未設定（None）の項目のみ other の値で補完する。"""
@@ -239,12 +242,15 @@ class DiscoveryCandidate:
             "image_url": self.image_url or None,
             "country": self.country or None,
             "status": normalize_status(self.status),
+            "currency": (str(self.currency).strip().upper() or None)
+            if self.currency else None,
             "funding_amount": _to_decimal(self.funding_amount),
             "funding_goal": _to_decimal(self.funding_goal),
             "backers_count": _to_int(self.backers_count),
             "launch_date": _to_date(self.launch_date),
             "end_date": _to_date(self.end_date),
             "official_website_url": self.official_website_url or None,
+            "raw_data": self.raw_data or None,
         }
 
 
@@ -422,6 +428,9 @@ class BaseAdapter:
     """
 
     platform: str = DiscoverySourcePlatform.other.value
+    # True の adapter は fetch_fn を注入されなくても自前で実サイト取得を行う
+    # （既存スクレイパー流用型）。UI の「実取得したか」表示に使う。
+    network_backed: bool = False
 
     def build_query_url(self, query: str | None) -> str | None:
         """検索/一覧の取得先 URL を返す（既定は None＝取得先なし）。"""

@@ -58,6 +58,13 @@ async def lifespan(app: FastAPI):
         contact_intelligence_service.recover_orphaned_jobs(db)
     except Exception:  # noqa: BLE001  回収失敗でも起動は止めない
         db.rollback()
+    # 発掘ジョブ（discovery_jobs）の孤児も同様に回収する。
+    try:
+        from app.services import discovery_job_service
+
+        discovery_job_service.recover_orphaned_jobs(db)
+    except Exception:  # noqa: BLE001  回収失敗でも起動は止めない
+        db.rollback()
     finally:
         db.close()
 

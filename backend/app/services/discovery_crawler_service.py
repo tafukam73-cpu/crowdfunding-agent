@@ -83,6 +83,7 @@ def run(
     product_ids: list[int] = []
     duplicate_count = 0
     scored_count = 0
+    failed_count = 0
     seen_urls: set[str] = set()
 
     for candidate in candidates:
@@ -103,6 +104,7 @@ def run(
         except Exception as exc:  # noqa: BLE001  1件保存失敗は継続
             logger.warning("discovery save failed (%s): %s", norm_url, exc)
             errors.append(f"保存エラー({norm_url}): {exc}")
+            failed_count += 1
             continue
 
         if created:
@@ -141,9 +143,12 @@ def run(
             error_message=error_message,
         )
 
-    # 実ネットワーク取得を試みたか（fetch_fn 注入の有無）。取得0件のとき
-    # 「実取得したが0件」と「fetch未接続で0件」を画面で区別するために返す。
-    network_fetched = fetch_fn is not None
+    # 実ネットワーク取得を試みたか。fetch_fn 注入型（Kickstarter）に加えて、
+    # 自前で実サイト取得する network_backed adapter（Wadiz/Zeczec/Ulule/Indiegogo）も
+    # 実取得とみなす。取得0件のとき「実取得したが0件」と「fetch未接続で0件」を区別する。
+    network_fetched = fetch_fn is not None or bool(
+        getattr(adapter, "network_backed", False)
+    )
 
     logger.info(
         "discovery run done: platform=%s found=%s saved=%s dup=%s status=%s "
@@ -161,7 +166,9 @@ def run(
         "saved_count": saved_count,
         "duplicate_count": duplicate_count,
         "scored_count": scored_count,
+        "failed_count": failed_count,
         "error_message": error_message,
+        "warnings": errors,
         "product_ids": product_ids,
         "started_at": started_at,
         "finished_at": finished_at,

@@ -18,59 +18,70 @@ from app.schemas.discovery import (
     DiscoveredProductOut,
     DiscoveredProductUpdate,
     DiscoveryContactIntelligenceResult,
+    DiscoveryJobOut,
+    DiscoveryPlatformInfo,
+    DiscoveryRunJobResponse,
     DiscoveryRunRequest,
-    DiscoveryRunResult,
 )
-from app.services import (
-    discovery_crawler_service,
-    discovery_fetch,
-    discovery_service,
-)
+from app.services import discovery_job_service, discovery_service
+from app.services.discovery_adapters import is_live_fetch, platform_availability
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
-# 実サイト取得を有効化するプラットフォーム（v1-6 は Kickstarter のみ）。
-# ここに無いプラットフォームは fetch 未接続のまま（従来どおり 0 件・外部送信なし）。
-_LIVE_FETCH_PLATFORMS = {"kickstarter"}
+
+@router.get("/platforms", response_model=list[DiscoveryPlatformInfo])
+def list_platforms() -> list[DiscoveryPlatformInfo]:
+    """発掘元プラットフォームの対応状況（実取得対応 / 準備中）を返す。
+
+    UI はこれを取得して選択肢・実行ボタンの活性を決める（backend の実態と一致させ、
+    「準備中」と「実行可能」のハードコード二重管理を避ける）。読み取り専用・DB 非依存。
+    """
+    return platform_availability()
 
 
-@router.post("/run", response_model=DiscoveryRunResult)
+@router.post("/run", response_model=DiscoveryRunJobResponse)
 def run_discovery(
     payload: DiscoveryRunRequest, db: Session = Depends(get_db)
-) -> DiscoveryRunResult:
-    """Discovery Crawler Framework を 1 回実行し、結果サマリを返す。
+) -> DiscoveryRunJobResponse:
+    """発掘ジョブを作成して即返す（重い収集は待たない）。
 
-    source_platform に対応する adapter で候補を収集し、URL 正規化・重複排除の上で
-    discovered_products に保存する。auto_score=True なら保存時に自動スコアリングする。
+    実体はデーモンスレッドで実行され、進捗・結果は GET /discovery/jobs/{job_id} で
+    取得する。この POST 内で収集・外部 HTTP は行わない（画面を固めない）。
+    同一条件（platform × query × limit）の進行中ジョブがあれば再利用する。
 
-    v1-6：Kickstarter は実サイト（discover/advanced JSON）から取得する。取得は
-    robots 尊重・レート制限・タイムアウト・専用 User-Agent 付き（``discovery_fetch``）。
-    取得失敗は例外で落とさず discovery_runs.error_message に記録する。
-    その他プラットフォームは fetch 未接続のまま（候補 0 件・外部送信なし）。
+    実取得未対応（準備中）のプラットフォームは 400 で弾く（実行ボタンは UI 側でも無効）。
     """
-    # Kickstarter のみ実取得の fetch_fn を注入。他は None（未接続）のまま。
-    fetch_fn = None
-    if payload.source_platform in _LIVE_FETCH_PLATFORMS:
-        fetch_fn = discovery_fetch.build_http_fetcher()
+    platform = payload.source_platform
+    if not is_live_fetch(platform):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{platform} は実サイト取得が未接続（準備中）のため実行できません。",
+        )
 
     # 実取得プラットフォームは取得直後に自動スコアリングして「営業すべき順」に
     # 並べられる状態にする（UI チェックボックスに関わらず既定で評価する）。
-    auto_score = payload.auto_score or payload.source_platform in _LIVE_FETCH_PLATFORMS
+    job, is_new = discovery_job_service.create_job(
+        db,
+        source_platform=platform,
+        query=payload.query,
+        limit=payload.limit,
+        auto_score=True,
+    )
+    return DiscoveryRunJobResponse(
+        job_id=job.id, platform=job.source_platform, status=job.status,
+        reused=not is_new,
+    )
 
-    try:
-        result = discovery_crawler_service.run(
-            db,
-            source_platform=payload.source_platform,
-            query=payload.query,
-            limit=payload.limit,
-            auto_score=auto_score,
-            fetch_fn=fetch_fn,
-        )
-    finally:
-        # 実取得 fetcher（Playwright ブラウザ等）を必ず解放する。
-        if fetch_fn is not None:
-            fetch_fn.close()
-    return result
+
+@router.get("/jobs/{job_id}", response_model=DiscoveryJobOut)
+def get_discovery_job(
+    job_id: int, db: Session = Depends(get_db)
+) -> DiscoveryJobOut:
+    """発掘ジョブの進捗・結果を取得する（読み取り専用。収集は起動しない）。"""
+    job = discovery_job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="発掘ジョブが見つかりません")
+    return job
 
 
 @router.post("/products", response_model=DiscoveredProductOut)

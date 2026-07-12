@@ -14,6 +14,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Date,
     DateTime,
@@ -33,6 +34,9 @@ class DiscoverySourcePlatform(str, enum.Enum):
 
     kickstarter = "kickstarter"
     indiegogo = "indiegogo"
+    wadiz = "wadiz"              # 韓国発（プレオーダー/リワード型）
+    zeczec = "zeczec"            # 台湾発（嘖嘖・デザイン/ガジェット雑貨）
+    ulule = "ulule"             # フランス発（サステナブル/エコ/デザイン雑貨）
     backerkit = "backerkit"
     backertracker = "backertracker"
     crowdsupply = "crowdsupply"
@@ -90,6 +94,9 @@ class DiscoveredProduct(Base):
     funding_amount: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True)
     funding_goal: Mapped[Decimal | None] = mapped_column(Numeric(16, 2), nullable=True)
     backers_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # 調達額の通貨（KRW / TWD / EUR / USD 等）。null 可。金額の解釈を誤らないために保存する
+    # （KRW / TWD を USD/JPY として誤解しないよう、達成率は funding_amount/goal の比率で扱う）。
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     # --- 掲載期間 ---
     launch_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -97,6 +104,11 @@ class DiscoveredProduct(Base):
 
     # --- 営業先情報 ---
     official_website_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- 発掘元の生データ（必要最小限。source 固有フィールドの根拠保管） ---
+    # 例: Wadiz {amount, rate, participants, categoryName, makerName}、
+    #     Zeczec {amount, rate, backers, enrichment...}。推測値は入れない。
+    raw_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # --- AI 発掘スコア（将来の AI 評価で付与。今回は nullable のまま） ---
     japan_fit_score: Mapped[int | None] = mapped_column(Integer, nullable=True)

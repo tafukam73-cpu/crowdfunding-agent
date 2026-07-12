@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # 重い外部クロール/検索ジョブを無制限に並列起動すると CPU/コネクションを
     # 食い潰して画面表示が固まる。同時実行数をこの値に制限する（超過分は待機）。
     ci_max_concurrent_jobs: int = 2
+    # 商品発掘（Discovery Crawler）ジョブの同時実行上限。Contact Intelligence とは
+    # 別枠のセマフォで制限し、収集ジョブと探索ジョブが互いに枠を奪わないようにする。
+    discovery_max_concurrent_jobs: int = 1
 
     # AI 評価：未設定ならモック評価器が使われる
     anthropic_api_key: str = ""

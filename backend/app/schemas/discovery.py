@@ -28,6 +28,7 @@ class DiscoveredProductCreate(BaseModel):
     country: str | None = None
 
     status: DiscoveredProductStatus = DiscoveredProductStatus.unknown
+    currency: str | None = None
     funding_amount: Decimal | None = None
     funding_goal: Decimal | None = None
     backers_count: int | None = None
@@ -36,6 +37,7 @@ class DiscoveredProductCreate(BaseModel):
     end_date: date | None = None
 
     official_website_url: str | None = None
+    raw_data: dict | None = None
 
     japan_fit_score: int | None = None
     crowdfunding_fit_score: int | None = None
@@ -172,6 +174,59 @@ class DiscoveryRunResult(BaseModel):
     scored_count: int = 0
 
 
+class DiscoveryRunJobResponse(BaseModel):
+    """POST /discovery/run のレスポンス（ジョブを作成して即返す）。"""
+
+    job_id: int
+    platform: str
+    status: str
+    # 同一条件の進行中ジョブを再利用したか（True なら重複起動を抑止した）。
+    reused: bool = False
+
+
+class DiscoveryJobOut(BaseModel):
+    """発掘ジョブの進捗・結果（GET /discovery/jobs/{id}）。"""
+
+    id: int
+    source_platform: str
+    query: str | None = None
+    limit: int
+    status: str
+    progress: int
+    current_step: str | None = None
+
+    found_count: int = 0
+    saved_count: int = 0
+    duplicate_count: int = 0
+    scored_count: int = 0
+    failed_count: int = 0
+    product_ids: list[int] = []
+    warnings: list[str] = []
+    run_id: int | None = None
+    error: str | None = None
+
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("product_ids", "warnings", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
+
+
+class DiscoveryPlatformInfo(BaseModel):
+    """発掘元プラットフォームの対応状況（UI 表示の単一の真実源）。"""
+
+    platform: str
+    label: str
+    available: bool
+    query_supported: bool
+    note: str
+
+
 class DiscoveryContactIntelligenceResult(BaseModel):
     """発掘商品から Contact Intelligence を開始した結果。"""
 
@@ -198,6 +253,7 @@ class DiscoveredProductOut(BaseModel):
     country: str | None = None
 
     status: DiscoveredProductStatus
+    currency: str | None = None
     funding_amount: Decimal | None = None
     funding_goal: Decimal | None = None
     backers_count: int | None = None
@@ -206,6 +262,7 @@ class DiscoveredProductOut(BaseModel):
     end_date: date | None = None
 
     official_website_url: str | None = None
+    raw_data: dict | None = None
 
     japan_fit_score: int | None = None
     crowdfunding_fit_score: int | None = None

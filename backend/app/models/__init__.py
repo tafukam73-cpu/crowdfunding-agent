@@ -18,6 +18,7 @@ from app.models.discovered_product import (
     DiscoveredProductStatus,
     DiscoverySourcePlatform,
 )
+from app.models.discovery_job import DiscoveryJob, DiscoveryJobStatus
 from app.models.discovery_run import DiscoveryRun, DiscoveryRunStatus
 from app.models.japan_opportunity_analysis import JapanOpportunityAnalysis
 from app.models.email_draft import EmailDraft, EmailType
@@ -75,6 +76,8 @@ __all__ = [
     "DiscoverySourcePlatform",
     "DiscoveryRun",
     "DiscoveryRunStatus",
+    "DiscoveryJob",
+    "DiscoveryJobStatus",
     "JapanOpportunityAnalysis",
     "ReplyAssistant",
     "ReplyStatus",
