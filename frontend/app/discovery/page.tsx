@@ -8,6 +8,8 @@ import {
   createDiscoveredProduct,
   DISCOVERY_PLATFORM_LABELS,
   DISCOVERY_PLATFORM_ORDER,
+  DISCOVERY_PROMOTION_COLORS,
+  DISCOVERY_PROMOTION_LABELS,
   DISCOVERY_STATUS_COLORS,
   DISCOVERY_STATUS_LABELS,
   DISCOVERY_STATUS_ORDER,
@@ -18,10 +20,16 @@ import {
   type DiscoveryJob,
   type DiscoveryListParams,
   type DiscoveryPlatformInfo,
+  type DiscoveryPromotionStatus,
   type DiscoveryRunRequest,
   type DiscoverySourcePlatform,
   type DiscoveredProductStatus,
   listDiscoveredProducts,
+  type PromotePreview,
+  type PromoteResult,
+  promoteDiscoveredProduct,
+  promoteDiscoveredProductPreview,
+  promoteDiscoveredProductsBatch,
   runDiscovery,
   scoreDiscoveredProduct,
   startDiscoveryContactIntelligence,
@@ -54,6 +62,23 @@ function StatusBadge({ status }: { status: string }) {
       {DISCOVERY_STATUS_LABELS[status] ?? status}
     </span>
   );
+}
+
+function PromotionBadge({ status }: { status: DiscoveryPromotionStatus }) {
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-xs font-medium ${
+        DISCOVERY_PROMOTION_COLORS[status] ?? "bg-slate-100 text-slate-500"
+      }`}
+    >
+      {DISCOVERY_PROMOTION_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+// 昇格が実行可能なのは未昇格 / 失敗のときだけ（promoted / duplicate / 処理中は不可）。
+function isPromotable(status: DiscoveryPromotionStatus): boolean {
+  return status === "not_promoted" || status === "promotion_failed";
 }
 
 function ScoreChip({ label, value }: { label: string; value: number | null }) {
@@ -462,18 +487,165 @@ function ManualForm({ onCreated }: { onCreated: () => void }) {
 // ---------------------------------------------------------------------------
 // C/D. 商品候補カード（スコア表示・操作ボタン）
 // ---------------------------------------------------------------------------
+// 昇格の確認パネル（preview を表示し、ユーザー確認後に promote する）。
+function PromoteConfirm({
+  preview,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  preview: PromotePreview;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const f = preview.target_fields as Record<string, unknown>;
+  const dup = preview.duplicate_project;
+  const str = (v: unknown): string =>
+    v == null || v === "" ? "-" : String(v);
+  return (
+    <div className="mt-2 rounded-md border border-indigo-200 bg-indigo-50 p-3 text-xs">
+      <p className="mb-2 font-bold text-indigo-900">
+        営業案件に追加する前に確認してください
+      </p>
+
+      {/* 移す予定の項目 */}
+      <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
+        <div>タイトル: <b>{str(f.title)}</b></div>
+        <div>メーカー: {str(f.maker_name)}</div>
+        <div>カテゴリ: {str(f.category)}</div>
+        <div>公式サイト: {str(f.official_website_url)}</div>
+        <div>調達額: {str(f.raised_amount)} {str(f.currency)}</div>
+        <div>達成率: {f.achievement_rate == null ? "-" : `${f.achievement_rate}%`}</div>
+        <div>支援者: {str(f.backers)}</div>
+        <div className="truncate">source_url: {str(f.source_url)}</div>
+      </div>
+
+      {/* 重複警告（自動統合しない・既存案件へのリンク） */}
+      {dup && (
+        <div className="mt-2 rounded border border-indigo-300 bg-white px-2 py-1.5">
+          <span className="font-medium text-indigo-800">
+            既存の営業案件と重複しています（一致: {dup.match_kind}）。
+          </span>{" "}
+          新規作成せず既存案件を使います。{" "}
+          <a
+            href={`/projects/${dup.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            既存案件 #{dup.id} を開く ↗
+          </a>
+        </div>
+      )}
+
+      {/* 近似一致（警告のみ） */}
+      {preview.approximate_matches.length > 0 && (
+        <p className="mt-2 text-amber-700">
+          類似案件があります（近似一致・自動統合しません）:{" "}
+          {preview.approximate_matches
+            .map((m) => `#${m.id} ${m.title}`)
+            .join(", ")}
+        </p>
+      )}
+
+      {/* 欠損データ警告 */}
+      {preview.missing_fields.length > 0 && (
+        <p className="mt-2 text-amber-700">
+          欠損データ: {preview.missing_fields.join(", ")}（推測はしません）
+        </p>
+      )}
+      {preview.warnings.map((w, i) => (
+        <p key={i} className="mt-1 text-amber-700">
+          ⚠ {w}
+        </p>
+      ))}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={onConfirm}
+          disabled={busy}
+          className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {busy
+            ? "追加中…"
+            : dup
+            ? "重複を確認して続行"
+            : "確定して営業案件に追加"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProductCard({
   product,
   onChanged,
+  selected,
+  onToggleSelect,
 }: {
   product: DiscoveredProduct;
   onChanged: (p: DiscoveredProduct) => void;
+  selected: boolean;
+  onToggleSelect: (id: number, checked: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ciBusy, setCiBusy] = useState(false);
   const [ciError, setCiError] = useState<string | null>(null);
   const [ciMessage, setCiMessage] = useState<string | null>(null);
+
+  // 昇格（営業案件化）フロー
+  const [preview, setPreview] = useState<PromotePreview | null>(null);
+  const [promoBusy, setPromoBusy] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoMsg, setPromoMsg] = useState<string | null>(null);
+
+  const promotable = isPromotable(product.promotion_status);
+
+  async function loadPreview() {
+    if (promoBusy) return; // 二重押下防止
+    setPromoBusy(true);
+    setPromoError(null);
+    setPromoMsg(null);
+    try {
+      const pv = await promoteDiscoveredProductPreview(product.id);
+      setPreview(pv);
+    } catch (e) {
+      setPromoError(String(e));
+    } finally {
+      setPromoBusy(false);
+    }
+  }
+
+  async function confirmPromote() {
+    if (promoBusy) return; // 二重押下防止
+    setPromoBusy(true);
+    setPromoError(null);
+    try {
+      const res: PromoteResult = await promoteDiscoveredProduct(product.id);
+      setPreview(null);
+      setPromoMsg(res.message ?? "営業案件へ昇格しました。");
+      // カードの昇格状態を即時反映（再取得なしで UI を更新）。
+      onChanged({
+        ...product,
+        promotion_status: (res.promotion_status ??
+          "promoted") as DiscoveryPromotionStatus,
+        promoted_project_id: res.project_id,
+      });
+    } catch (e) {
+      setPromoError(String(e));
+    } finally {
+      setPromoBusy(false);
+    }
+  }
 
   async function score() {
     setBusy(true);
@@ -516,16 +688,34 @@ function ProductCard({
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-bold text-slate-900">{title}</h3>
-          {product.project_title &&
-            product.project_title !== product.product_name && (
-              <p className="truncate text-xs text-slate-500">
-                {product.project_title}
-              </p>
-            )}
+        <div className="flex min-w-0 items-start gap-2">
+          {/* 複数選択（昇格可能な商品のみ選択可） */}
+          <input
+            type="checkbox"
+            className="mt-1 disabled:cursor-not-allowed disabled:opacity-40"
+            checked={selected}
+            disabled={!promotable}
+            onChange={(e) => onToggleSelect(product.id, e.target.checked)}
+            title={
+              promotable
+                ? "一括で営業案件に追加する対象に含める"
+                : "この商品は昇格対象外です（既に昇格済み/重複/処理中）"
+            }
+          />
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-bold text-slate-900">{title}</h3>
+            {product.project_title &&
+              product.project_title !== product.product_name && (
+                <p className="truncate text-xs text-slate-500">
+                  {product.project_title}
+                </p>
+              )}
+          </div>
         </div>
-        <StatusBadge status={product.status} />
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatusBadge status={product.status} />
+          <PromotionBadge status={product.promotion_status} />
+        </div>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
@@ -603,6 +793,69 @@ function ProductCard({
       {ciError && <p className="mt-2 text-xs text-red-600">{ciError}</p>}
       {ciMessage && <p className="mt-2 text-xs text-green-700">{ciMessage}</p>}
 
+      {/* --- 営業案件化（Discovery → Projects 昇格） --- */}
+      <div className="mt-3 border-t border-slate-100 pt-3">
+        {/* promoted / duplicate_project → 既存 project へのリンク */}
+        {(product.promotion_status === "promoted" ||
+          product.promotion_status === "duplicate_project") &&
+          product.promoted_project_id != null && (
+            <a
+              href={`/projects/${product.promoted_project_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+            >
+              {product.promotion_status === "duplicate_project"
+                ? "既存の営業案件を開く"
+                : "営業案件を開く"}{" "}
+              #{product.promoted_project_id} ↗
+            </a>
+          )}
+
+        {/* promotion_failed → 失敗理由 */}
+        {product.promotion_status === "promotion_failed" &&
+          product.promotion_error && (
+            <p className="mb-1 text-xs text-red-600">
+              昇格失敗: {product.promotion_error}
+            </p>
+          )}
+
+        {/* 処理中 */}
+        {product.promotion_status === "promotion_pending" && (
+          <span className="text-xs font-medium text-amber-700">
+            営業案件化を処理中です…
+          </span>
+        )}
+
+        {/* 未昇格 / 失敗 → 「営業案件に追加」ボタン（preview 確認を挟む） */}
+        {promotable && !preview && (
+          <button
+            onClick={loadPreview}
+            disabled={promoBusy}
+            className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {promoBusy
+              ? "確認を準備中…"
+              : product.promotion_status === "promotion_failed"
+              ? "営業案件に追加を再試行"
+              : "営業案件に追加"}
+          </button>
+        )}
+
+        {promoError && <p className="mt-1 text-xs text-red-600">{promoError}</p>}
+        {promoMsg && <p className="mt-1 text-xs text-green-700">{promoMsg}</p>}
+
+        {/* preview 確認パネル */}
+        {preview && (
+          <PromoteConfirm
+            preview={preview}
+            busy={promoBusy}
+            onConfirm={confirmPromote}
+            onCancel={() => setPreview(null)}
+          />
+        )}
+      </div>
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           onClick={score}
@@ -637,17 +890,34 @@ function ProductCard({
 // ---------------------------------------------------------------------------
 type SortUi = "sales" | "japan" | "created";
 
+// 追加フィルター（昇格状態・スコア・データ有無）。client 側で一覧に適用する。
+type PromoFilter = "" | "not_promoted" | "promoted" | "duplicate_project";
+type ScoreFilter = "" | "60" | "70";
+
 export default function DiscoveryPage() {
   const [products, setProducts] = useState<DiscoveredProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // E. フィルター
+  // E. フィルター（サーバー側）
   const [platform, setPlatform] = useState("");
   const [status, setStatus] = useState("");
   const [category, setCategory] = useState("");
   const [minScore, setMinScore] = useState("");
   const [sortUi, setSortUi] = useState<SortUi>("sales");
+
+  // 追加フィルター（client 側）
+  const [promoFilter, setPromoFilter] = useState<PromoFilter>("");
+  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>("");
+  const [onlyMaker, setOnlyMaker] = useState(false);
+  const [contactReady, setContactReady] = useState(false);
+  const [highConfidence, setHighConfidence] = useState(false);
+
+  // 複数選択・一括昇格
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMsg, setBatchMsg] = useState<string | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -660,6 +930,7 @@ export default function DiscoveryPage() {
       if (minScore !== "") params.min_score = Number(minScore);
       const list = await listDiscoveredProducts(params);
       setProducts(list);
+      setSelected(new Set()); // 再読み込み時は選択をクリア
     } catch (e) {
       setError(String(e));
     } finally {
@@ -675,6 +946,94 @@ export default function DiscoveryPage() {
     setProducts((prev) =>
       prev.map((p) => (p.id === updated.id ? updated : p))
     );
+    // 昇格などで対象外になった選択は外す
+    if (!isPromotable(updated.promotion_status)) {
+      setSelected((prev) => {
+        if (!prev.has(updated.id)) return prev;
+        const next = new Set(prev);
+        next.delete(updated.id);
+        return next;
+      });
+    }
+  }
+
+  // client 側の追加フィルターを適用した一覧。
+  const visible = products.filter((p) => {
+    if (promoFilter && p.promotion_status !== promoFilter) return false;
+    if (scoreFilter) {
+      const s = p.overall_discovery_score;
+      if (s == null || s < Number(scoreFilter)) return false;
+    }
+    if (onlyMaker && !p.creator_name) return false;
+    // 連絡先探索向き：URL があり、メーカー名も取れている（探索の起点になる）。
+    if (
+      contactReady &&
+      !((p.official_website_url || p.source_url) && p.creator_name)
+    )
+      return false;
+    // 情報が揃っている（confidence 高）：達成率・スコア・メーカー名が揃う。
+    if (
+      highConfidence &&
+      !(p.achievement_rate != null && p.overall_discovery_score != null && p.creator_name)
+    )
+      return false;
+    return true;
+  });
+
+  // 選択可能（昇格可能）な表示中の商品 ID。
+  const selectableIds = visible
+    .filter((p) => isPromotable(p.promotion_status))
+    .map((p) => p.id);
+  const selectedVisible = selectableIds.filter((id) => selected.has(id));
+  const allSelected =
+    selectableIds.length > 0 && selectedVisible.length === selectableIds.length;
+
+  function toggleSelect(id: number, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      if (allSelected) {
+        const next = new Set(prev);
+        selectableIds.forEach((id) => next.delete(id));
+        return next;
+      }
+      const next = new Set(prev);
+      selectableIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  async function runBatchPromote() {
+    if (batchBusy) return; // 二重押下防止
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    setBatchMsg(null);
+    setBatchError(null);
+    try {
+      const res = await promoteDiscoveredProductsBatch(ids);
+      const c = res.counts || {};
+      setBatchMsg(
+        `一括昇格：成功 ${c.promoted ?? 0} / 重複 ${c.duplicate_project ?? 0} / ` +
+          `既昇格 ${c.already_promoted ?? 0} / 失敗 ${c.failed ?? 0} / ` +
+          `不存在 ${c.not_found ?? 0}（処理 ${res.processed} 件）` +
+          (res.skipped_over_limit
+            ? ` ／ 上限超過で ${res.skipped_over_limit} 件は未処理`
+            : "")
+      );
+      await load(); // 最新の昇格状態を反映（選択もクリアされる）
+    } catch (e) {
+      setBatchError(String(e));
+    } finally {
+      setBatchBusy(false);
+    }
   }
 
   return (
@@ -762,6 +1121,59 @@ export default function DiscoveryPage() {
             </label>
           </div>
 
+          {/* F. 追加フィルター（昇格状態・スコア・データ有無）＝client 側 */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            <label className="text-xs text-slate-600">
+              昇格状態
+              <select
+                value={promoFilter}
+                onChange={(e) => setPromoFilter(e.target.value as PromoFilter)}
+                className="ml-1 rounded border border-slate-300 px-2 py-1 text-sm"
+              >
+                <option value="">すべて</option>
+                <option value="not_promoted">未昇格</option>
+                <option value="promoted">昇格済み</option>
+                <option value="duplicate_project">重複</option>
+              </select>
+            </label>
+            <label className="text-xs text-slate-600">
+              スコア
+              <select
+                value={scoreFilter}
+                onChange={(e) => setScoreFilter(e.target.value as ScoreFilter)}
+                className="ml-1 rounded border border-slate-300 px-2 py-1 text-sm"
+              >
+                <option value="">指定なし</option>
+                <option value="60">60以上</option>
+                <option value="70">70以上</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={onlyMaker}
+                onChange={(e) => setOnlyMaker(e.target.checked)}
+              />
+              メーカー名あり
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={contactReady}
+                onChange={(e) => setContactReady(e.target.checked)}
+              />
+              連絡先探索向き
+            </label>
+            <label className="flex items-center gap-1 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={highConfidence}
+                onChange={(e) => setHighConfidence(e.target.checked)}
+              />
+              情報が揃っている（confidence高）
+            </label>
+          </div>
+
           <div className="mt-3 flex items-center gap-3">
             <button
               onClick={load}
@@ -770,22 +1182,71 @@ export default function DiscoveryPage() {
             >
               {loading ? "読み込み中…" : "再読み込み"}
             </button>
-            <span className="text-xs text-slate-500">{products.length} 件</span>
+            <span className="text-xs text-slate-500">
+              {visible.length} / {products.length} 件
+            </span>
           </div>
 
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         </section>
 
+        {/* G. 一括昇格バー（複数選択して営業案件へまとめて追加） */}
+        <section className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs font-medium text-indigo-900">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                disabled={selectableIds.length === 0}
+                onChange={toggleSelectAll}
+              />
+              表示中の昇格可能な商品をすべて選択（{selectableIds.length} 件）
+            </label>
+            <span className="text-xs text-indigo-700">
+              選択中: {selected.size} 件
+            </span>
+            <button
+              onClick={runBatchPromote}
+              disabled={batchBusy || selected.size === 0}
+              className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {batchBusy
+                ? "一括追加中…"
+                : `選択した ${selected.size} 件を営業案件に追加`}
+            </button>
+            {selected.size > 0 && !batchBusy && (
+              <button
+                onClick={() => setSelected(new Set())}
+                className="rounded border border-indigo-300 px-3 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+              >
+                選択をクリア
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-indigo-600">
+            自動昇格はしません。選択した商品のみを、ユーザー確認のうえ営業案件へ追加します。
+          </p>
+          {batchMsg && <p className="mt-1 text-xs text-green-700">{batchMsg}</p>}
+          {batchError && <p className="mt-1 text-xs text-red-600">{batchError}</p>}
+        </section>
+
         {/* C. 一覧 */}
-        {!loading && products.length === 0 && !error && (
+        {!loading && visible.length === 0 && !error && (
           <p className="text-sm text-slate-500">
-            商品候補がありません。上のフォームから手動登録するか、Discovery
-            を実行してください。
+            {products.length === 0
+              ? "商品候補がありません。上のフォームから手動登録するか、Discovery を実行してください。"
+              : "フィルター条件に一致する商品候補がありません。"}
           </p>
         )}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {products.map((p) => (
-            <ProductCard key={p.id} product={p} onChanged={onProductChanged} />
+          {visible.map((p) => (
+            <ProductCard
+              key={p.id}
+              product={p}
+              onChanged={onProductChanged}
+              selected={selected.has(p.id)}
+              onToggleSelect={toggleSelect}
+            />
           ))}
         </div>
       </main>

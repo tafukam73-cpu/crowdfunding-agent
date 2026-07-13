@@ -3088,6 +3088,30 @@ export const DISCOVERY_STATUS_ORDER: DiscoveredProductStatus[] = [
   "unknown",
 ];
 
+// 営業対象 projects への昇格状態（backend DiscoveryPromotionStatus に対応）。
+export type DiscoveryPromotionStatus =
+  | "not_promoted"
+  | "promotion_pending"
+  | "promoted"
+  | "promotion_failed"
+  | "duplicate_project";
+
+export const DISCOVERY_PROMOTION_LABELS: Record<DiscoveryPromotionStatus, string> = {
+  not_promoted: "未昇格",
+  promotion_pending: "処理中",
+  promoted: "営業案件化済み",
+  promotion_failed: "昇格失敗",
+  duplicate_project: "既存案件と重複",
+};
+
+export const DISCOVERY_PROMOTION_COLORS: Record<DiscoveryPromotionStatus, string> = {
+  not_promoted: "bg-slate-100 text-slate-500",
+  promotion_pending: "bg-amber-100 text-amber-700",
+  promoted: "bg-green-100 text-green-700",
+  promotion_failed: "bg-red-100 text-red-700",
+  duplicate_project: "bg-indigo-100 text-indigo-700",
+};
+
 // 発掘商品候補（backend DiscoveredProductOut に対応）。
 export type DiscoveredProduct = {
   id: number;
@@ -3118,6 +3142,11 @@ export type DiscoveredProduct = {
   discovery_reasoning: string | null;
   recommended_next_action: string | null;
   contact_discovery_id: number | null;
+  // 営業対象 projects への昇格状態（Discovery → Projects 昇格ワークフロー）。
+  promotion_status: DiscoveryPromotionStatus;
+  promoted_project_id: number | null;
+  promoted_at: string | null;
+  promotion_error: string | null;
   created_at: string;
   updated_at: string;
   // 派生指標（backend の computed field）。未スコアリング/目標額なしは null。
@@ -3312,6 +3341,114 @@ export async function startDiscoveryContactIntelligence(
     `${API_BASE}/discovery/products/${productId}/contact-intelligence`,
     { method: "POST" }
   );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// ===== Discovery → Projects 昇格ワークフロー =====
+
+// 重複と判定された既存 project（backend PromotionDuplicateProject に対応）。
+export type PromotionDuplicateProject = {
+  id: number;
+  title: string;
+  source_url: string | null;
+  source_site: string;
+  // source_url / platform_source_id / normalized_url
+  match_kind: string | null;
+};
+
+// 近似一致（title + maker_name）の既存 project（警告のみ・自動統合しない）。
+export type PromotionApproximateMatch = {
+  id: number;
+  title: string;
+  maker_name: string | null;
+  source_url: string | null;
+};
+
+// 昇格プレビュー（backend PromotePreviewOut に対応）。DB は更新されない。
+export type PromotePreview = {
+  product_id: number;
+  promotion_status: string;
+  promoted_project_id: number | null;
+  target_fields: Record<string, unknown>;
+  target_field_keys: string[];
+  duplicate_project: PromotionDuplicateProject | null;
+  approximate_matches: PromotionApproximateMatch[];
+  missing_fields: string[];
+  warnings: string[];
+  // promote / review_duplicate / already_promoted
+  recommended_action: string;
+};
+
+// 昇格確定の結果（backend PromoteResult に対応）。
+export type PromoteResult = {
+  // promoted / duplicate_project / failed / not_found
+  status: string;
+  already_promoted: boolean;
+  product_id: number;
+  project_id: number | null;
+  promotion_status: string | null;
+  created_project: boolean;
+  duplicate_match_kind: string | null;
+  // created / failed / skipped
+  assessment_status: string | null;
+  assessment_id: number | null;
+  contact_job_id: number | null;
+  contact_job_status: string | null;
+  message: string | null;
+};
+
+// 一括昇格の結果（backend PromoteBatchResult に対応）。
+export type PromoteBatchResult = {
+  requested: number;
+  processed: number;
+  skipped_over_limit: number;
+  counts: Record<string, number>;
+  results: PromoteResult[];
+};
+
+// POST /discovery/products/{id}/promote/preview — 昇格プレビュー（DB 非更新）。
+export async function promoteDiscoveredProductPreview(
+  productId: number
+): Promise<PromotePreview> {
+  const res = await fetch(
+    `${API_BASE}/discovery/products/${productId}/promote/preview`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// POST /discovery/products/{id}/promote — ユーザー確認後に営業案件へ昇格する。
+export async function promoteDiscoveredProduct(
+  productId: number
+): Promise<PromoteResult> {
+  const res = await fetch(
+    `${API_BASE}/discovery/products/${productId}/promote`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`API error: ${res.status} ${msg}`);
+  }
+  return res.json();
+}
+
+// POST /discovery/products/promote-batch — 複数商品を一括昇格する（1 件ずつ独立）。
+export async function promoteDiscoveredProductsBatch(
+  productIds: number[]
+): Promise<PromoteBatchResult> {
+  const res = await fetch(`${API_BASE}/discovery/products/promote-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_ids: productIds }),
+  });
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(`API error: ${res.status} ${msg}`);
