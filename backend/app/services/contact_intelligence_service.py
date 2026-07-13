@@ -302,6 +302,14 @@ def _run_outreach_generation(db, project, cb=None) -> None:
     sales_outreach_service.run_generation(db, project, progress_cb=cb)
 
 
+def _run_followup_generation(db, project, cb=None) -> None:
+    # 送信後フォローアップメールを生成し、sales_outreach の下書きを差し替える。
+    # 決定的（ルールベース）だが既存の初回生成と同じく背景ジョブ化する。
+    from app.services import sales_outreach_service
+
+    sales_outreach_service.run_followup_generation(db, project, progress_cb=cb)
+
+
 def _run_wadiz_reassessment(db, project, cb=None) -> None:
     # Wadiz 取り込み後の営業適性再評価。ルールベース・外部HTTPなし・軽量。
     # confirm のレスポンス後に非同期で実行し、v1/v2 Sales Copilot に反映させる。
@@ -349,6 +357,10 @@ _SINGLE_PHASES = {
     CIJobType.outreach_generation.value: (
         "営業メール生成（4 言語）",
         _run_outreach_generation,
+    ),
+    CIJobType.followup_generation.value: (
+        "フォローアップメール生成",
+        _run_followup_generation,
     ),
 }
 

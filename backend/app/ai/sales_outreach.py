@@ -257,10 +257,93 @@ def build_multilang_outreach(
     }
 
 
+FOLLOWUP_MODEL_NAME = "rule-sales-followup-v1"
+
+
+def _followup_subject(lang: str, product: str, n: int) -> str:
+    """フォローアップ件名（Re: を付け、n 回目の丁寧な再送であることを示す）。"""
+    if lang == "ko":
+        base = f"[재문의] {product}의 일본 시장(Makuake) 진출 제안"
+    elif lang == "zh":
+        base = f"[再次聯繫] 關於 {product} 進軍日本市場（Makuake）的合作提案"
+    elif lang == "ja":
+        base = f"【再送】{product} の日本展開（Makuake）に関するご提案"
+    else:
+        base = f"Following up: bringing {product} to Japan via Makuake"
+    return base
+
+
+def _followup_body(
+    lang: str, product: str, maker_name: str | None, ctx: SenderContext, n: int
+) -> str:
+    """フォローアップ本文（初回メールへの丁寧なリマインド）。押し売りにしない。"""
+    greeting = _greeting(lang, maker_name)
+    sign = _signature(lang, ctx)
+    nth = {2: ("두 번째", "第二次", "2 回目", "second")}.get(n, ("", "", "", ""))
+
+    if lang == "ko":
+        para = (
+            "얼마 전 일본 크라우드펀딩(Makuake / GreenFunding)을 통한 "
+            f"{product} 의 일본 진출 제안을 드렸는데, 바쁘신 와중에 놓치셨을 수도 있어 "
+            "다시 한 번 정중히 연락드립니다.\n\n"
+            "일본 독점 판매 파트너십에 조금이라도 관심이 있으시면, 짧은 온라인 미팅으로 "
+            "부담 없이 이야기 나눌 수 있습니다. 답장 주시면 감사하겠습니다."
+        )
+    elif lang == "zh":
+        para = (
+            "先前曾與您聯繫，提案透過日本群眾募資（Makuake / GreenFunding）"
+            f"將 {product} 引進日本市場，想再次禮貌地跟進，或許先前的訊息不巧被遺漏。\n\n"
+            "若貴司對日本獨家銷售合作有任何興趣，歡迎安排一次簡短的線上會議輕鬆聊聊。"
+            "期待您的回覆。"
+        )
+    elif lang == "ja":
+        para = (
+            "先日、日本のクラウドファンディング（Makuake / GreenFunding）を通じた "
+            f"{product} の日本展開についてご提案いたしましたが、行き違いになっていた"
+            "場合を考え、改めてご連絡差し上げました。\n\n"
+            "日本での独占販売パートナーシップに少しでもご関心がございましたら、"
+            "短いオンライン面談で気軽にお話しできればと存じます。ご返信いただけますと幸いです。"
+        )
+    else:
+        para = (
+            "I recently reached out about bringing "
+            f"{product} to Japan through crowdfunding (Makuake / GreenFunding), and "
+            "wanted to gently follow up in case my earlier note slipped through.\n\n"
+            "If there's any interest in an exclusive Japan distribution partnership, a "
+            "short call is an easy way to explore it. I'd love to hear your thoughts."
+        )
+    return f"{greeting}\n\n{para}\n\n{sign}"
+
+
+def build_followup_outreach(
+    project: Project,
+    ctx: SenderContext | None = None,
+    *,
+    language: str,
+    followup_number: int = 1,
+) -> dict:
+    """送信後のフォローアップメールを 1 通生成する（決定的・DB 非依存）。
+
+    language は送信時の言語（sent_language）を使う。followup_number は今回で何回目か。
+    Returns: {"language", "subject", "body", "model"}
+    """
+    ctx = ctx or SenderContext.fallback()
+    lang = language if language in OUTREACH_LANGUAGES else "en"
+    product = project.title
+    return {
+        "language": lang,
+        "subject": _followup_subject(lang, product, followup_number),
+        "body": _followup_body(lang, product, project.maker_name, ctx, followup_number),
+        "model": FOLLOWUP_MODEL_NAME,
+    }
+
+
 __all__ = [
     "OUTREACH_LANGUAGES",
     "LANGUAGE_LABELS",
     "recommended_language",
     "build_multilang_outreach",
+    "build_followup_outreach",
     "OUTREACH_MODEL_NAME",
+    "FOLLOWUP_MODEL_NAME",
 ]

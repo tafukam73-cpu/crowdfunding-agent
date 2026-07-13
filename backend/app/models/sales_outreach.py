@@ -22,6 +22,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -72,6 +73,43 @@ class SalesOutreach(Base):
     generated_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # 4 言語（en/ko/zh/ja）の全バリアント {lang: {subject, subject_options, body}}。
     generated_variants: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # --- 送信時スナップショット（0045：送信後ワークフロー） ---
+    # 「送信済みとして記録」した瞬間の宛先・件名・本文・言語を凍結して保持する。
+    # 以後 draft を編集・再生成しても、実際に送った内容の記録は変わらない。
+    recipient_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sent_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_body_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+
+    # --- フォローアップ（送信後） ---
+    # followup_due_at：次にフォローすべき期日（送信/前回フォローの 5 営業日後）。
+    followup_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    followup_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_followup_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # --- 返信の手動登録（preview は非保存、confirm でここへ保存） ---
+    reply_intent: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    reply_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 解析の確度（high / medium / low）。
+    reply_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_reply_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # --- ユーザー編集の保護（AI 再生成で勝手に上書きしない） ---
+    user_edited: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # --- ライフサイクルのタイムスタンプ ---
     generated_at: Mapped[datetime | None] = mapped_column(

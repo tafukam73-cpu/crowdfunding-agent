@@ -15,10 +15,18 @@ from app.schemas.project import ProjectOut
 from app.schemas.sales import (
     CopilotCard,
     CopilotDashboardOut,
+    ExecutionTasksOut,
+    FollowupGenerateOut,
+    OutreachDraftUpdate,
     OutreachGenerateIn,
     OutreachGenerateOut,
+    OutreachMarkSentIn,
+    OutreachMarkSentOut,
     OutreachOut,
     RankingListOut,
+    ReplyConfirmOut,
+    ReplyIn,
+    ReplyPreviewOut,
     SalesDashboardOut,
     SalesStatusUpdate,
     TodayListOut,
@@ -220,6 +228,123 @@ def get_outreach(project_id: int, db: Session = Depends(get_db)) -> OutreachOut:
     if row is None:
         raise HTTPException(status_code=404, detail="営業アウトリーチがありません")
     return OutreachOut(**sales_outreach_service.serialize(db, row))
+
+
+# ================= 送信後ワークフロー（0045） =================
+def _require_project(db: Session, project_id: int):
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return project
+
+
+@router.patch("/sales/outreach/{project_id}/draft", response_model=OutreachOut)
+def edit_outreach_draft(
+    project_id: int, payload: OutreachDraftUpdate, db: Session = Depends(get_db)
+) -> OutreachOut:
+    """下書きの件名・本文を編集して保存する（同期・高速・AI 非依存）。
+
+    保存すると user_edited が立ち、以後の AI 再生成から編集内容を保護する。
+    """
+    if payload.subject is None and payload.body is None and payload.language is None:
+        raise HTTPException(status_code=400, detail="変更内容がありません")
+    project = _require_project(db, project_id)
+    row = sales_outreach_service.update_draft(
+        db, project, subject=payload.subject, body=payload.body,
+        language=payload.language,
+    )
+    return OutreachOut(**sales_outreach_service.serialize(db, row))
+
+
+@router.post("/sales/outreach/{project_id}/mark-sent", response_model=OutreachMarkSentOut)
+def mark_outreach_sent(
+    project_id: int,
+    payload: OutreachMarkSentIn | None = None,
+    db: Session = Depends(get_db),
+) -> OutreachMarkSentOut:
+    """ユーザー操作による「送信済みとして記録」。実メールは送らない（冪等）。
+
+    送信時の宛先・件名・本文・言語をスナップショット保存し、5 営業日後を
+    フォロー期日に設定する。Gmail で開いただけでは sent にならない（本 API のみ）。
+    """
+    payload = payload or OutreachMarkSentIn()
+    project = _require_project(db, project_id)
+    out = sales_outreach_service.mark_sent(
+        db, project, language=payload.language, subject=payload.subject,
+        body=payload.body, recipient=payload.recipient,
+    )
+    return OutreachMarkSentOut(
+        outreach=OutreachOut(**sales_outreach_service.serialize(db, out["outreach"])),
+        already_sent=out["already_sent"],
+    )
+
+
+@router.post(
+    "/sales/outreach/{project_id}/generate-followup",
+    response_model=FollowupGenerateOut,
+)
+def generate_outreach_followup(
+    project_id: int, db: Session = Depends(get_db)
+) -> FollowupGenerateOut:
+    """フォローアップメール生成を背景ジョブで起動する（重複ジョブ禁止・最大 2 回）。
+
+    返信あり・商談中・成約・失注は対象外（eligible=False で理由を返す）。
+    """
+    project = _require_project(db, project_id)
+    out = sales_outreach_service.request_followup_generation(db, project)
+    return FollowupGenerateOut(
+        outreach=OutreachOut(**sales_outreach_service.serialize(db, out["outreach"])),
+        job_id=out["job_id"],
+        job_status=out["job_status"],
+        created=out["created"],
+        duplicate=out["duplicate"],
+        eligible=out["eligible"],
+        reason=out["reason"],
+    )
+
+
+@router.post(
+    "/sales/outreach/{project_id}/reply-preview", response_model=ReplyPreviewOut
+)
+def preview_outreach_reply(
+    project_id: int, payload: ReplyIn, db: Session = Depends(get_db)
+) -> ReplyPreviewOut:
+    """貼り付けた返信を解析してプレビューを返す（DB 非更新）。"""
+    project = _require_project(db, project_id)
+    analysis = sales_outreach_service.reply_preview(
+        db, project, incoming_subject=payload.incoming_subject,
+        incoming_body=payload.incoming_body, incoming_from=payload.incoming_from,
+    )
+    return ReplyPreviewOut(analysis=analysis)
+
+
+@router.post(
+    "/sales/outreach/{project_id}/reply-confirm", response_model=ReplyConfirmOut
+)
+def confirm_outreach_reply(
+    project_id: int, payload: ReplyIn, db: Session = Depends(get_db)
+) -> ReplyConfirmOut:
+    """返信を確定登録する。解析結果を保存し状態を「返信あり」に遷移させる（CRM・履歴反映）。"""
+    project = _require_project(db, project_id)
+    out = sales_outreach_service.reply_confirm(
+        db, project, incoming_subject=payload.incoming_subject,
+        incoming_body=payload.incoming_body, incoming_from=payload.incoming_from,
+    )
+    return ReplyConfirmOut(
+        outreach=OutreachOut(**sales_outreach_service.serialize(db, out["outreach"])),
+        analysis=out["analysis"],
+    )
+
+
+@router.get("/sales/execution-tasks", response_model=ExecutionTasksOut)
+def sales_execution_tasks(
+    limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)
+) -> ExecutionTasksOut:
+    """送信後の実行タスク（今日フォロー / 期限超過 / 返信対応 / 返信待ち）。読み取り専用。
+
+    GET 内で重い処理・外部 HTTP・保存・ジョブ起動は一切行わない。
+    """
+    return ExecutionTasksOut(**sales_outreach_service.execution_tasks(db, limit=limit))
 
 
 @router.get("/sales/ranking", response_model=RankingListOut)

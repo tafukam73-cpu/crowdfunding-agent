@@ -47,6 +47,9 @@ class CIJobType(str, enum.Enum):
     # 営業実行パイプライン：4 言語の営業メール下書き生成。外部 Claude 呼び出しを
     # 含みうるため背景ジョブ化し、同期 POST での画面待ちを避ける。
     outreach_generation = "outreach_generation"
+    # 送信後フォローアップメール生成（sales_outreach）。既存の初回生成と同じく
+    # 背景ジョブ化し、同一案件の生成ジョブ重複を禁止する（同期 POST を重くしない）。
+    followup_generation = "followup_generation"
 
 
 class ContactIntelligenceJob(Base):

@@ -226,6 +226,21 @@ class OutreachOut(BaseModel):
     # 既存 Gmail compose を再利用した送信 URL（推奨言語・宛先入り。未生成なら None）。
     gmail_compose_url: str | None = None
     recipient: str | None = None
+    # --- 送信後ワークフロー（0045） ---
+    recipient_email: str | None = None
+    sent_subject: str | None = None
+    sent_body_snapshot: str | None = None
+    sent_language: str | None = None
+    followup_due_at: str | None = None
+    followup_count: int = 0
+    last_followup_at: str | None = None
+    followups_remaining: int = 0
+    reply_intent: str | None = None
+    reply_summary: str | None = None
+    reply_confidence: str | None = None
+    last_reply_at: str | None = None
+    user_edited: bool = False
+    edited_at: str | None = None
 
 
 class OutreachGenerateOut(BaseModel):
@@ -234,3 +249,92 @@ class OutreachGenerateOut(BaseModel):
     job_status: str
     created: bool           # 新規に生成ジョブを起動したか
     duplicate: bool         # 既に生成ジョブが動作中で重複起動を防いだか
+
+
+# ---------------- 送信後ワークフロー（0045） ----------------
+class OutreachDraftUpdate(BaseModel):
+    """下書きの編集保存（同期・高速）。少なくとも 1 つは指定する。"""
+
+    subject: str | None = None
+    body: str | None = None
+    language: str | None = None
+
+
+class OutreachMarkSentIn(BaseModel):
+    """「送信済みとして記録」。実メールは送らない。すべて任意（未指定は現下書きを採用）。"""
+
+    language: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    recipient: str | None = None
+
+
+class OutreachMarkSentOut(BaseModel):
+    outreach: OutreachOut
+    already_sent: bool      # 既に送信済みで冪等に無視したか
+
+
+class FollowupGenerateOut(BaseModel):
+    outreach: OutreachOut
+    job_id: int | None = None
+    job_status: str | None = None
+    created: bool = False
+    duplicate: bool = False
+    eligible: bool = True
+    reason: str | None = None   # 不適格時の理由（返信あり/上限到達など）
+
+
+class ReplyIn(BaseModel):
+    """手動で貼り付けた受信返信。"""
+
+    incoming_body: str
+    incoming_subject: str | None = None
+    incoming_from: str | None = None
+
+
+class ReplyAnalysis(BaseModel):
+    intent: str
+    sentiment: str
+    detected_language: str
+    summary: str
+    confidence: str
+    key_points: list[str] = []
+    requested_actions: list[str] = []
+    recommended_next_action: str = ""
+    model: str = ""
+
+
+class ReplyPreviewOut(BaseModel):
+    """返信プレビュー（DB 非更新）。"""
+
+    analysis: ReplyAnalysis
+
+
+class ReplyConfirmOut(BaseModel):
+    outreach: OutreachOut
+    analysis: ReplyAnalysis
+
+
+class ExecutionTaskItem(BaseModel):
+    project_id: int
+    title: str
+    source_site: str | None = None
+    outreach_status: str
+    recipient: str | None = None
+    sent_at: str | None = None
+    sent_language: str | None = None
+    followup_count: int = 0
+    followups_remaining: int = 0
+    followup_due_at: str | None = None
+    days_overdue: int | None = None
+    reply_intent: str | None = None
+    reply_summary: str | None = None
+    reply_confidence: str | None = None
+    last_reply_at: str | None = None
+
+
+class ExecutionTasksOut(BaseModel):
+    follow_today: list[ExecutionTaskItem]
+    overdue: list[ExecutionTaskItem]
+    replied: list[ExecutionTaskItem]
+    awaiting_reply: list[ExecutionTaskItem]
