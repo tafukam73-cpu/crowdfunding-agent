@@ -11,6 +11,7 @@ import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import Header from "@/components/Header";
 import JapanSalesPanel from "@/components/JapanSalesPanel";
+import OutreachPanel from "@/components/OutreachPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SalesModeGuide from "@/components/SalesModeGuide";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
@@ -228,6 +229,13 @@ export default function ProjectDetail() {
                 setProject((p) => (p ? { ...p, sales_status: s } : p))
               }
             />
+          </Collapsible>
+
+          <Collapsible
+            title="✉️ 営業実行（メール生成・送信）"
+            hint="4言語生成・下書き・営業状況"
+          >
+            <OutreachPanel projectId={id} />
           </Collapsible>
 
           <Collapsible title="📊 AI評価" hint={evaluation ? `${evaluation.total_score}点` : "未評価"}>

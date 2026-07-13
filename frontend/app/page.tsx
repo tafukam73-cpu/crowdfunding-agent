@@ -14,6 +14,7 @@ import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
 import ScrapePanel from "@/components/ScrapePanel";
 import ScrapeStatsPanel from "@/components/ScrapeStatsPanel";
 import SourceBadge from "@/components/SourceBadge";
+import TodayPriorityPanel from "@/components/TodayPriorityPanel";
 import TodaySalesPanel from "@/components/TodaySalesPanel";
 import StatusBadge from "@/components/StatusBadge";
 import {
@@ -145,6 +146,11 @@ export default function Home() {
         {/* AI 営業優先ランキング（Executive Summary 統合） */}
         <div className="mb-6">
           <RankingPanel reloadKey={reloadKey} />
+        </div>
+
+        {/* 営業実行パイプライン：今日営業する案件（優先度順） */}
+        <div className="mb-6">
+          <TodayPriorityPanel reloadKey={reloadKey} />
         </div>
 
         {/* 今日営業する案件 + 営業ダッシュボード */}

@@ -579,6 +579,111 @@ export async function fetchSalesDashboard(): Promise<SalesDashboard> {
   return res.json();
 }
 
+// ===== 営業実行パイプライン（sales_outreach） =====
+export type OutreachStatus =
+  | "draft"
+  | "sent"
+  | "opened"
+  | "replied"
+  | "negotiating"
+  | "contract"
+  | "lost";
+
+export const OUTREACH_STATUS_LABELS: Record<OutreachStatus, string> = {
+  draft: "下書き",
+  sent: "送信済み",
+  opened: "開封",
+  replied: "返信あり",
+  negotiating: "商談中",
+  contract: "成約",
+  lost: "失注",
+};
+
+export const OUTREACH_LANGUAGE_LABELS: Record<string, string> = {
+  en: "英語",
+  ko: "韓国語",
+  zh: "中国語",
+  ja: "日本語",
+};
+
+export type TodayPriorityItem = {
+  project_id: number;
+  title: string;
+  source_site: SourceSite;
+  score: number;
+  reasons: string[];
+  contact_ready: boolean;
+  recommended_action: "open_draft" | "generate_email" | "find_contact" | string;
+  outreach_status: OutreachStatus | null;
+  recommended_language: string;
+  evaluated: boolean;
+};
+
+export type OutreachVariant = {
+  subject: string;
+  subject_options?: string[];
+  body: string;
+};
+
+export type Outreach = {
+  id: number;
+  project_id: number;
+  outreach_status: OutreachStatus;
+  priority_score: number | null;
+  generated_subject: string | null;
+  generated_body: string | null;
+  generated_language: string | null;
+  generated_variants: Record<string, OutreachVariant> | null;
+  generated_at: string | null;
+  sent_at: string | null;
+  replied_at: string | null;
+  last_activity_at: string | null;
+  notes: string | null;
+  gmail_compose_url: string | null;
+  recipient: string | null;
+};
+
+export type OutreachGenerateResult = {
+  outreach: Outreach;
+  job_id: number;
+  job_status: CIJobStatus | string;
+  created: boolean;
+  duplicate: boolean;
+};
+
+// 今日営業する案件（優先度順・読み取り専用）。GET は重い処理を起動しない。
+export async function fetchTodayPriority(
+  limit = 20
+): Promise<TodayPriorityItem[]> {
+  const res = await apiFetch(`/sales/today-priority?limit=${limit}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data = await res.json();
+  return data.items as TodayPriorityItem[];
+}
+
+// 営業メール生成を背景ジョブで起動（4 言語）。すぐ返る（Claude は背景で実行）。
+export async function generateOutreach(
+  projectId: number
+): Promise<OutreachGenerateResult> {
+  const res = await fetch(`${API_BASE}/sales/outreach/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// 案件の営業アウトリーチ（下書き・状態・Gmail 送信 URL）。未生成なら 404 → null。
+export async function fetchOutreach(
+  projectId: number
+): Promise<Outreach | null> {
+  const res = await apiFetch(`/sales/outreach/${projectId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchProjects(params: ListParams = {}): Promise<ProjectList> {
   const qs = new URLSearchParams();
   if (params.site) qs.set("site", params.site);
@@ -1598,7 +1703,8 @@ export type CIJobType =
   | "contact_discovery_v2"
   | "ai_research"
   | "full_contact_intelligence"
-  | "wadiz_contact_reassessment";
+  | "wadiz_contact_reassessment"
+  | "outreach_generation";
 
 export type CIJobStatus =
   | "queued"
