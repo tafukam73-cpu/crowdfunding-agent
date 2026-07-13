@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 from app.models.discovered_product import (
     DiscoveredProductStatus,
+    DiscoveryPromotionStatus,
     DiscoverySourcePlatform,
 )
 from app.services import discovery_scoring_service
@@ -238,6 +239,79 @@ class DiscoveryContactIntelligenceResult(BaseModel):
     message: str
 
 
+# --- Discovery → Projects 昇格ワークフロー -------------------------------------
+class PromotionDuplicateProject(BaseModel):
+    """重複と判定された既存 project の概要。"""
+
+    id: int
+    title: str
+    source_url: str | None = None
+    source_site: str
+    # source_url / platform_source_id / normalized_url
+    match_kind: str | None = None
+
+
+class PromotionApproximateMatch(BaseModel):
+    """近似一致（title + maker_name）の既存 project（警告のみ・自動統合しない）。"""
+
+    id: int
+    title: str
+    maker_name: str | None = None
+    source_url: str | None = None
+
+
+class PromotePreviewOut(BaseModel):
+    """昇格プレビュー（DB 非更新）。"""
+
+    product_id: int
+    promotion_status: str
+    promoted_project_id: int | None = None
+    # projects へ移す予定の項目（値）と、その項目キー一覧。
+    target_fields: dict
+    target_field_keys: list[str]
+    duplicate_project: PromotionDuplicateProject | None = None
+    approximate_matches: list[PromotionApproximateMatch] = []
+    missing_fields: list[str] = []
+    warnings: list[str] = []
+    # promote / review_duplicate / already_promoted
+    recommended_action: str
+
+
+class PromoteResult(BaseModel):
+    """昇格確定の結果。"""
+
+    # promoted / duplicate_project / failed / not_found
+    status: str
+    already_promoted: bool = False
+    product_id: int
+    project_id: int | None = None
+    promotion_status: str | None = None
+    created_project: bool = False
+    duplicate_match_kind: str | None = None
+    # created / failed / skipped
+    assessment_status: str | None = None
+    assessment_id: int | None = None
+    contact_job_id: int | None = None
+    contact_job_status: str | None = None
+    message: str | None = None
+
+
+class PromoteBatchRequest(BaseModel):
+    """一括昇格のリクエスト（複数選択された商品 ID）。"""
+
+    product_ids: list[int]
+
+
+class PromoteBatchResult(BaseModel):
+    """一括昇格の結果（成功/重複/失敗を個別返却）。"""
+
+    requested: int
+    processed: int
+    skipped_over_limit: int = 0
+    counts: dict
+    results: list[PromoteResult]
+
+
 class DiscoveredProductOut(BaseModel):
     id: int
 
@@ -276,6 +350,12 @@ class DiscoveredProductOut(BaseModel):
     recommended_next_action: str | None = None
 
     contact_discovery_id: int | None = None
+
+    # --- 営業対象 projects への昇格状態（Discovery → Projects 昇格ワークフロー） ---
+    promotion_status: DiscoveryPromotionStatus = DiscoveryPromotionStatus.not_promoted
+    promoted_project_id: int | None = None
+    promoted_at: datetime | None = None
+    promotion_error: str | None = None
 
     created_at: datetime
     updated_at: datetime

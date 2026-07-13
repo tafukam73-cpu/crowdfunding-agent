@@ -18,6 +18,7 @@ from sqlalchemy import (
     BigInteger,
     Date,
     DateTime,
+    ForeignKey,
     Integer,
     Numeric,
     String,
@@ -56,6 +57,19 @@ class DiscoveredProductStatus(str, enum.Enum):
     canceled = "canceled"        # 中止
     preorder = "preorder"        # 予約受付
     unknown = "unknown"          # 不明
+
+
+class DiscoveryPromotionStatus(str, enum.Enum):
+    """営業対象 projects への昇格状態（Discovery → Projects 昇格ワークフロー）。
+
+    自動昇格はしない。必ずユーザー確認（preview → promote）を経て promoted になる。
+    """
+
+    not_promoted = "not_promoted"          # 未昇格（既定・既存行もこれ扱い）
+    promotion_pending = "promotion_pending"  # 昇格処理中（二重押下・重複処理の抑止）
+    promoted = "promoted"                  # 昇格済み（promoted_project_id を保持）
+    promotion_failed = "promotion_failed"  # 昇格失敗（promotion_error に理由）
+    duplicate_project = "duplicate_project"  # 既存 project と重複（新規作成せず既存を指す）
 
 
 class DiscoveredProduct(Base):
@@ -129,6 +143,27 @@ class DiscoveredProduct(Base):
     contact_discovery_id: Mapped[int | None] = mapped_column(
         Integer, nullable=True, index=True
     )
+
+    # --- 営業対象 projects への昇格状態（Discovery → Projects 昇格ワークフロー） ---
+    # 既存行・新規行の既定は not_promoted。自動昇格はせず、ユーザー確認後にのみ更新する。
+    promotion_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=DiscoveryPromotionStatus.not_promoted.value,
+        server_default=DiscoveryPromotionStatus.not_promoted.value,
+        index=True,
+    )
+    # 昇格先 / 重複先の project.id（promoted / duplicate_project のとき設定）。
+    # projects.id への FK。project が万一削除されても昇格状態を壊さず NULL に落とす
+    # （ondelete=SET NULL・非破壊）。projects の削除は運用上禁止。
+    promoted_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    promoted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 昇格失敗時の理由（promotion_failed のとき）。
+    promotion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

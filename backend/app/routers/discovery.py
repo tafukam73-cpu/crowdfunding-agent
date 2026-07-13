@@ -22,8 +22,16 @@ from app.schemas.discovery import (
     DiscoveryPlatformInfo,
     DiscoveryRunJobResponse,
     DiscoveryRunRequest,
+    PromoteBatchRequest,
+    PromoteBatchResult,
+    PromotePreviewOut,
+    PromoteResult,
 )
-from app.services import discovery_job_service, discovery_service
+from app.services import (
+    discovery_job_service,
+    discovery_promotion_service,
+    discovery_service,
+)
 from app.services.discovery_adapters import is_live_fetch, platform_availability
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
@@ -112,6 +120,55 @@ def list_products(
         db, platform=platform, status=status, category=category,
         min_score=min_score, sort=sort,
     )
+
+
+# --- Discovery → Projects 昇格ワークフロー ------------------------------------
+# 注意：`/products/promote-batch` は `/products/{product_id}` より前に登録して、
+# batch エンドポイントが path パラメータに吸われないようにする。
+@router.post("/products/promote-batch", response_model=PromoteBatchResult)
+def promote_batch(
+    payload: PromoteBatchRequest, db: Session = Depends(get_db)
+) -> PromoteBatchResult:
+    """複数の発掘商品を営業対象 projects へ一括昇格する（ユーザー確認後）。
+
+    1 件ずつ独立に処理し、一部が失敗・重複でも他を継続する。同一 ID の重複処理は
+    しない（重複除去）。最大件数を超えた分は処理しない（安全上限）。
+    """
+    return discovery_promotion_service.promote_batch(db, payload.product_ids)
+
+
+@router.post(
+    "/products/{product_id}/promote/preview", response_model=PromotePreviewOut
+)
+def promote_preview(
+    product_id: int, db: Session = Depends(get_db)
+) -> PromotePreviewOut:
+    """昇格プレビューを返す（DB は一切更新しない）。
+
+    projects へ移す予定の項目・重複 project 候補・欠損項目・警告・推奨アクションを返す。
+    近似一致（title + maker_name）は警告としてのみ提示し、自動統合はしない。
+    """
+    product = discovery_service.get(db, product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="商品候補が見つかりません")
+    return discovery_promotion_service.build_preview(db, product)
+
+
+@router.post("/products/{product_id}/promote", response_model=PromoteResult)
+def promote_product(
+    product_id: int, db: Session = Depends(get_db)
+) -> PromoteResult:
+    """発掘商品を営業対象 projects へ昇格する（ユーザー確認後にのみ実行）。
+
+    - projects へ非破壊追加（推測メーカー/URL/メールは作らない）。
+    - 既に projects にある商品は新規作成せず duplicate_project として既存 id を返す。
+    - 昇格後に Sales Assessment を作成し、Contact Intelligence ジョブを queued にする
+      （重い探索は背景・同期実行しない）。レスポンスは 3 秒以内。
+    """
+    result = discovery_promotion_service.promote(db, product_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="商品候補が見つかりません")
+    return result
 
 
 @router.get("/products/{product_id}", response_model=DiscoveredProductOut)
