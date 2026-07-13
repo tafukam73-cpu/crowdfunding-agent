@@ -183,3 +183,54 @@ class CopilotDashboardOut(BaseModel):
     counts: dict[str, int] = {}                # 判断カテゴリ別件数
     ai_comment: str                            # AI からのコメント
     scanned: int                               # 走査した案件数
+
+
+# ===== 営業実行パイプライン（sales_outreach） =====
+class TodayPriorityItem(BaseModel):
+    """「今日営業する案件」1 件（優先度順）。"""
+
+    project_id: int
+    title: str
+    source_site: str
+    score: int
+    reasons: list[str]
+    contact_ready: bool
+    recommended_action: str          # open_draft / generate_email / find_contact
+    outreach_status: str | None = None
+    recommended_language: str        # en / ko / zh / ja
+    evaluated: bool = True
+
+
+class TodayPriorityOut(BaseModel):
+    items: list[TodayPriorityItem]
+
+
+class OutreachGenerateIn(BaseModel):
+    project_id: int
+
+
+class OutreachOut(BaseModel):
+    id: int
+    project_id: int
+    outreach_status: str
+    priority_score: int | None = None
+    generated_subject: str | None = None
+    generated_body: str | None = None
+    generated_language: str | None = None
+    generated_variants: dict | None = None
+    generated_at: str | None = None
+    sent_at: str | None = None
+    replied_at: str | None = None
+    last_activity_at: str | None = None
+    notes: str | None = None
+    # 既存 Gmail compose を再利用した送信 URL（推奨言語・宛先入り。未生成なら None）。
+    gmail_compose_url: str | None = None
+    recipient: str | None = None
+
+
+class OutreachGenerateOut(BaseModel):
+    outreach: OutreachOut
+    job_id: int
+    job_status: str
+    created: bool           # 新規に生成ジョブを起動したか
+    duplicate: bool         # 既に生成ジョブが動作中で重複起動を防いだか

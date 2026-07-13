@@ -15,10 +15,14 @@ from app.schemas.project import ProjectOut
 from app.schemas.sales import (
     CopilotCard,
     CopilotDashboardOut,
+    OutreachGenerateIn,
+    OutreachGenerateOut,
+    OutreachOut,
     RankingListOut,
     SalesDashboardOut,
     SalesStatusUpdate,
     TodayListOut,
+    TodayPriorityOut,
     TodayTasksOut,
     WorkflowOut,
 )
@@ -27,6 +31,7 @@ from app.services import (
     sales_assessment_service,
     sales_copilot_service,
     sales_copilot_v2_service,
+    sales_outreach_service,
     workflow_service,
 )
 
@@ -169,6 +174,52 @@ def sales_tasks(
 ) -> TodayTasksOut:
     """トップページ「今日やること」（営業状況で分類した案件リスト）。"""
     return TodayTasksOut(**workflow_service.today_tasks(db, per_group=per_group))
+
+
+@router.get("/sales/today-priority", response_model=TodayPriorityOut)
+def sales_today_priority(
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> TodayPriorityOut:
+    """今日営業する案件（営業実行パイプライン）。優先度順・読み取り専用。
+
+    重み: 日本市場適性 / 独占販売可能性 / Makuake 適性 / email 取得 / maker 取得 /
+    新規案件。Contact Intelligence 未完了の案件は除外する。GET 内で重い処理は行わない。
+    """
+    items = sales_outreach_service.today_priority(db, limit=limit)
+    return TodayPriorityOut(items=items)
+
+
+@router.post("/sales/outreach/generate", response_model=OutreachGenerateOut)
+def generate_outreach(
+    payload: OutreachGenerateIn, db: Session = Depends(get_db)
+) -> OutreachGenerateOut:
+    """営業メール（英語/韓国語/中国語/日本語）を背景ジョブで生成する。
+
+    生成は sales_outreach の draft に保存し、CRM（sales_opportunities）へ反映する。
+    同一案件の下書きは 1 本のみ（重複作成防止）。外部 Claude 呼び出しは POST 内では
+    行わず、背景ジョブで実行する（GET/POST を同期で重くしない）。
+    """
+    project = project_service.get_project(db, payload.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    out = sales_outreach_service.request_generation(db, project)
+    return OutreachGenerateOut(
+        outreach=OutreachOut(**sales_outreach_service.serialize(db, out["outreach"])),
+        job_id=out["job_id"],
+        job_status=out["job_status"],
+        created=out["created"],
+        duplicate=out["duplicate"],
+    )
+
+
+@router.get("/sales/outreach/{project_id}", response_model=OutreachOut)
+def get_outreach(project_id: int, db: Session = Depends(get_db)) -> OutreachOut:
+    """案件の営業アウトリーチ（下書き・状態・Gmail 送信 URL）を返す。"""
+    row = sales_outreach_service.get_by_project(db, project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="営業アウトリーチがありません")
+    return OutreachOut(**sales_outreach_service.serialize(db, row))
 
 
 @router.get("/sales/ranking", response_model=RankingListOut)

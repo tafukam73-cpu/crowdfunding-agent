@@ -44,6 +44,9 @@ class CIJobType(str, enum.Enum):
     # Wadiz 手動/ブラウザ取り込み後の営業適性再評価。confirm のレスポンス後に
     # 非同期で実行する（confirm を同期で重くしないため）。ルールベースで外部HTTPなし。
     wadiz_contact_reassessment = "wadiz_contact_reassessment"
+    # 営業実行パイプライン：4 言語の営業メール下書き生成。外部 Claude 呼び出しを
+    # 含みうるため背景ジョブ化し、同期 POST での画面待ちを避ける。
+    outreach_generation = "outreach_generation"
 
 
 class ContactIntelligenceJob(Base):
