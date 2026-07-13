@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import CostPanel from "@/components/CostPanel";
 import CrmRegisterButton from "@/components/CrmRegisterButton";
+import ExecutionTasksPanel from "@/components/ExecutionTasksPanel";
 import Header from "@/components/Header";
 import RankingPanel from "@/components/RankingPanel";
 import RecBadge from "@/components/RecBadge";
@@ -151,6 +152,11 @@ export default function Home() {
         {/* 営業実行パイプライン：今日営業する案件（優先度順） */}
         <div className="mb-6">
           <TodayPriorityPanel reloadKey={reloadKey} />
+        </div>
+
+        {/* 送信後ワークフロー：今日フォロー・期限超過・返信対応 */}
+        <div className="mb-6">
+          <ExecutionTasksPanel reloadKey={reloadKey} />
         </div>
 
         {/* 今日営業する案件 + 営業ダッシュボード */}

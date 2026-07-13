@@ -641,6 +641,21 @@ export type Outreach = {
   notes: string | null;
   gmail_compose_url: string | null;
   recipient: string | null;
+  // 送信後ワークフロー（0045）
+  recipient_email: string | null;
+  sent_subject: string | null;
+  sent_body_snapshot: string | null;
+  sent_language: string | null;
+  followup_due_at: string | null;
+  followup_count: number;
+  last_followup_at: string | null;
+  followups_remaining: number;
+  reply_intent: string | null;
+  reply_summary: string | null;
+  reply_confidence: string | null;
+  last_reply_at: string | null;
+  user_edited: boolean;
+  edited_at: string | null;
 };
 
 export type OutreachGenerateResult = {
@@ -680,6 +695,151 @@ export async function fetchOutreach(
 ): Promise<Outreach | null> {
   const res = await apiFetch(`/sales/outreach/${projectId}`);
   if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// ---------------- 送信後ワークフロー（0045） ----------------
+
+// 下書きの編集保存（同期・高速）。保存すると user_edited が立ち AI 再生成から保護される。
+export async function saveOutreachDraft(
+  projectId: number,
+  payload: { subject?: string; body?: string; language?: string }
+): Promise<Outreach> {
+  const res = await fetch(`${API_BASE}/sales/outreach/${projectId}/draft`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export type MarkSentResult = { outreach: Outreach; already_sent: boolean };
+
+// 「送信済みとして記録」。実メールは送らない（ユーザー操作のみ・冪等）。
+export async function markOutreachSent(
+  projectId: number,
+  payload: { language?: string; subject?: string; body?: string; recipient?: string } = {}
+): Promise<MarkSentResult> {
+  const res = await fetch(`${API_BASE}/sales/outreach/${projectId}/mark-sent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export type FollowupGenerateResult = {
+  outreach: Outreach;
+  job_id: number | null;
+  job_status: string | null;
+  created: boolean;
+  duplicate: boolean;
+  eligible: boolean;
+  reason: string | null;
+};
+
+// フォローアップ生成を背景ジョブで起動（重複禁止・最大 2 回・返信/終端は対象外）。
+export async function generateOutreachFollowup(
+  projectId: number
+): Promise<FollowupGenerateResult> {
+  const res = await fetch(
+    `${API_BASE}/sales/outreach/${projectId}/generate-followup`,
+    { method: "POST", headers: { "Content-Type": "application/json" } }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export type ReplyAnalysis = {
+  intent: string;
+  sentiment: string;
+  detected_language: string;
+  summary: string;
+  confidence: string;
+  key_points: string[];
+  requested_actions: string[];
+  recommended_next_action: string;
+  model: string;
+};
+
+export const REPLY_INTENT_LABELS: Record<string, string> = {
+  interested: "前向き",
+  needs_more_info: "追加情報要望",
+  asks_terms: "条件確認",
+  requests_call: "面談希望",
+  not_interested: "見送り",
+  already_has_distributor: "既存代理店あり",
+  unclear: "意図不明",
+};
+
+// 返信プレビュー（DB 非更新）。貼り付けた返信を解析して返す。
+export async function previewOutreachReply(
+  projectId: number,
+  payload: { incoming_body: string; incoming_subject?: string; incoming_from?: string }
+): Promise<ReplyAnalysis> {
+  const res = await fetch(
+    `${API_BASE}/sales/outreach/${projectId}/reply-preview`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.analysis as ReplyAnalysis;
+}
+
+// 返信の確定登録（保存・status→返信あり・CRM/タイムライン反映）。
+export async function confirmOutreachReply(
+  projectId: number,
+  payload: { incoming_body: string; incoming_subject?: string; incoming_from?: string }
+): Promise<{ outreach: Outreach; analysis: ReplyAnalysis }> {
+  const res = await fetch(
+    `${API_BASE}/sales/outreach/${projectId}/reply-confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export type ExecutionTaskItem = {
+  project_id: number;
+  title: string;
+  source_site: string | null;
+  outreach_status: OutreachStatus;
+  recipient: string | null;
+  sent_at: string | null;
+  sent_language: string | null;
+  followup_count: number;
+  followups_remaining: number;
+  followup_due_at: string | null;
+  days_overdue: number | null;
+  reply_intent: string | null;
+  reply_summary: string | null;
+  reply_confidence: string | null;
+  last_reply_at: string | null;
+};
+
+export type ExecutionTasks = {
+  follow_today: ExecutionTaskItem[];
+  overdue: ExecutionTaskItem[];
+  replied: ExecutionTaskItem[];
+  awaiting_reply: ExecutionTaskItem[];
+};
+
+// 送信後の実行タスク（今日フォロー / 期限超過 / 返信対応 / 返信待ち）。読み取り専用。
+export async function fetchExecutionTasks(
+  limit = 50
+): Promise<ExecutionTasks> {
+  const res = await apiFetch(`/sales/execution-tasks?limit=${limit}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
