@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # 商品発掘（Discovery Crawler）ジョブの同時実行上限。Contact Intelligence とは
     # 別枠のセマフォで制限し、収集ジョブと探索ジョブが互いに枠を奪わないようにする。
     discovery_max_concurrent_jobs: int = 1
+    # 1 ジョブのウォールクロック上限（分）。外部 HTTP/Playwright がハングしたまま
+    # ジョブ行が running のまま孤児化し、セマフォ枠を占有して画面表示・新規ジョブを
+    # 巻き込んで固めるのを防ぐ。超過時はワーカーを見捨てて枠を解放し failed にする。
+    # タイムアウトの延長ではなく「ハングの回収」が目的（0 で無効）。
+    ci_job_hard_timeout_minutes: int = 20
 
     # AI 評価：未設定ならモック評価器が使われる
     anthropic_api_key: str = ""

@@ -1057,6 +1057,9 @@ function DeepInvestigationSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
+  // ネットワーク/バックエンド不通で進捗取得が連続失敗したときに true。無限リトライを
+  // 止めて「再取得」ボタンを出す（サーバの過負荷を助長しないため）。job の failed とは別物。
+  const [pollStopped, setPollStopped] = useState(false);
   const [stalled, setStalled] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 同じ current_step が続いた時間の計測（60秒超で「長引いています」表示）
@@ -1081,6 +1084,7 @@ function DeepInvestigationSection({
     failRef.current = 0;
     setStalled(false);
     setPollError(null);
+    setPollStopped(false);
     pollRef.current = setInterval(async () => {
       try {
         const j = await getContactIntelligenceJob(jobId);
@@ -1107,8 +1111,35 @@ function DeepInvestigationSection({
             "進捗の取得に繰り返し失敗しています（ネットワーク/サーバを確認してください）。"
           );
         }
+        // 連続失敗が続く＝バックエンド不通の可能性。無限リトライでサーバ負荷を
+        // 増やさず、ポーリングを停止して「再取得」ボタンに切り替える（job failed
+        // ではなく通信断。復旧後に手動で再開できる）。
+        if (failRef.current >= 5) {
+          stopPolling();
+          setPollStopped(true);
+        }
       }
     }, 2000);
+  }
+
+  // 通信断でポーリングを止めた後の手動再取得。最新ジョブを取り直し、進行中なら再購読。
+  async function refetch() {
+    setPollStopped(false);
+    setPollError(null);
+    try {
+      const j = await getLatestContactIntelligenceJob(
+        projectId,
+        "full_contact_intelligence"
+      );
+      if (j) {
+        setJob(j);
+        if (ACTIVE(j.status)) startPolling(j.id);
+        else if (j.status === "completed") onDone?.();
+      }
+    } catch (e) {
+      setPollError(String(e));
+      setPollStopped(true);
+    }
   }
 
   // 初回：最新の full ジョブを取得。進行中なら購読、完了済みならキャッシュ提示。
@@ -1242,6 +1273,19 @@ function DeepInvestigationSection({
             </p>
           )}
           {pollError && <p className="text-xs text-red-600">{pollError}</p>}
+          {pollStopped && (
+            <div className="flex items-center gap-2 rounded bg-red-50 px-2 py-1">
+              <span className="text-xs text-red-700">
+                進捗の自動取得を停止しました（バックエンドに接続できません）。
+              </span>
+              <button
+                onClick={refetch}
+                className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100"
+              >
+                再取得
+              </button>
+            </div>
+          )}
           {job.status === "failed" && (
             <p className="text-xs text-red-600 break-all">
               失敗：{job.error ?? "原因不明のエラー"}

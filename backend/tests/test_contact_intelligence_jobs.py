@@ -192,12 +192,59 @@ def test_cancel_flag():
     db.close()
 
 
+def test_heavy_active_dedup():
+    """同一 project で active な重い探索が 1 本あれば、重複・並列を作らず既存を返す。"""
+    print("test_heavy_active_dedup")
+    _install_fakes()
+    db = SessionLocal()
+    proj = _mk_project(db)
+    # runner=None のまま（実行しない）＝ queued のまま active
+    full, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    check("full が active(queued)", full.status == CIJobStatus.queued.value)
+    # 同種の再クリック → 新規を作らず同じジョブを返す
+    dup, cached = ci.create_job(db, proj, "full_contact_intelligence", force=True, runner=lambda jid: None)
+    check("同種の重複は既存 active を返す", dup.id == full.id and cached is False)
+    # 子ジョブ v2 → full が active なので相互排他で full を返す（並列増殖しない）
+    v2, cached2 = ci.create_job(db, proj, "contact_discovery_v2", force=True, runner=lambda jid: None)
+    check("full active 中は子ジョブも full を返す", v2.id == full.id and cached2 is False)
+    # 別 project は独立して作成できる
+    proj2 = _mk_project(db)
+    other, _ = ci.create_job(db, proj2, "contact_discovery_v2", runner=lambda jid: None)
+    check("別 project は独立して作成", other.id != full.id)
+    db.close()
+
+
+def test_reap_stale_jobs():
+    """ハード上限を超えて running のまま残るジョブを failed に回収する。"""
+    print("test_reap_stale_jobs")
+    _install_fakes()
+    db = SessionLocal()
+    proj = _mk_project(db)
+    stale = ContactIntelligenceJob(
+        project_id=proj.id, job_type="full_contact_intelligence",
+        status=CIJobStatus.running.value, progress=1,
+        started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    db.add(stale); db.commit(); db.refresh(stale)
+    n = ci.reap_stale_jobs(db, proj.id)
+    db.refresh(stale)
+    check("stale を 1 件回収", n == 1)
+    check("running→failed", stale.status == CIJobStatus.failed.value)
+    check("error にタイムアウト記録", stale.error and "タイムアウト" in stale.error)
+    # 回収後は active が無いので新規作成できる
+    fresh, cached = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    check("回収後は新規作成できる", fresh.id != stale.id and cached is False)
+    db.close()
+
+
 def main():
     test_create_and_run_single()
     test_full_order()
     test_failed_saves_error()
     test_latest_and_cache()
     test_cancel_flag()
+    test_heavy_active_dedup()
+    test_reap_stale_jobs()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

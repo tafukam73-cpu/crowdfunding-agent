@@ -15,7 +15,7 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -46,6 +46,29 @@ _cancel_requested: set[int] = set()
 # DB セッションを開かない（ジョブ行は queued のまま）。
 _MAX_CONCURRENT_JOBS = max(1, int(getattr(settings, "ci_max_concurrent_jobs", 2)))
 _job_semaphore = threading.BoundedSemaphore(_MAX_CONCURRENT_JOBS)
+
+# ブラウザ（Playwright/Chromium）を伴う重い探索ジョブ。これらは同一 project で
+# 並列起動すると Chromium プロセスが増殖して CPU/GIL を飽和させ、uvicorn の
+# イベントループを飢餓状態にして GET すら応答しなくなる（本障害の直接原因）。
+# full は web/recursive/doc/search を内包するため、full と各子ジョブ、および
+# 子ジョブ同士も同一 project では相互排他とし、active は project あたり最大 1 本に絞る。
+_HEAVY_JOB_TYPES = {
+    CIJobType.full_contact_intelligence.value,
+    CIJobType.web_research.value,
+    CIJobType.recursive_crawl.value,
+    CIJobType.document_reader.value,
+    CIJobType.search_agent.value,
+    CIJobType.contact_discovery.value,
+    CIJobType.contact_discovery_v2.value,
+    CIJobType.ai_research.value,
+    CIJobType.zeczec_enrichment.value,
+}
+
+# 1 ジョブのウォールクロック上限（秒）。外部 HTTP/Playwright がハングしたまま
+# 孤児化するのを回収する。0 で無効。
+_HARD_TIMEOUT_SECONDS = max(
+    0, int(getattr(settings, "ci_job_hard_timeout_minutes", 20)) * 60
+)
 
 
 class _JobCancelled(BaseException):
@@ -113,6 +136,46 @@ def recover_orphaned_jobs(db: Session) -> int:
     return len(rows)
 
 
+def reap_stale_jobs(db: Session, project_id: int | None = None) -> int:
+    """ハード上限を超えても running/queued のまま残るジョブを failed に回収する。
+
+    外部 HTTP/Playwright がハングしてワーカースレッドが応答しないと、ジョブ行が
+    running のまま孤児化し、find_active の重複抑止が効いて新規実行を阻む。再起動を
+    待たずに（書き込みパスで）掃除して自己回復させる。ポーリング等の読み取り専用
+    パスからは呼ばない（GET を副作用フリーに保つ）。Returns: 回収した件数。
+    """
+    if _HARD_TIMEOUT_SECONDS <= 0:
+        return 0
+    cutoff = _now() - timedelta(seconds=_HARD_TIMEOUT_SECONDS)
+    stmt = select(ContactIntelligenceJob).where(
+        ContactIntelligenceJob.status.in_(
+            [CIJobStatus.queued.value, CIJobStatus.running.value]
+        ),
+        # started_at が無い（queued のまま）場合は created_at を基準にする。
+        func.coalesce(
+            ContactIntelligenceJob.started_at, ContactIntelligenceJob.created_at
+        )
+        < cutoff,
+    )
+    if project_id is not None:
+        stmt = stmt.where(ContactIntelligenceJob.project_id == project_id)
+    rows = list(db.scalars(stmt))
+    for job in rows:
+        job.status = CIJobStatus.failed.value
+        job.error = (
+            "ハードタイムアウト超過により回収されました"
+            "（外部取得がハングした可能性。再実行してください）"
+        )
+        job.current_step = "タイムアウト回収"
+        job.completed_at = _now()
+        # ハングしたワーカーが境界で気付けるよう中断も要求しておく。
+        _cancel_requested.add(job.id)
+    if rows:
+        db.commit()
+        logger.warning("reaped %d stale CI jobs (hard timeout)", len(rows))
+    return len(rows)
+
+
 def find_active(
     db: Session, project_id: int, job_type: str
 ) -> ContactIntelligenceJob | None:
@@ -122,6 +185,28 @@ def find_active(
         .where(
             ContactIntelligenceJob.project_id == project_id,
             ContactIntelligenceJob.job_type == job_type,
+            ContactIntelligenceJob.status.in_(
+                [CIJobStatus.queued.value, CIJobStatus.running.value]
+            ),
+        )
+        .order_by(desc(ContactIntelligenceJob.id))
+        .limit(1)
+    )
+    return db.scalar(stmt)
+
+
+def find_active_heavy(
+    db: Session, project_id: int
+) -> ContactIntelligenceJob | None:
+    """同一 project で進行中の重い探索ジョブ（ブラウザ系）を 1 本返す。
+
+    full と各子ジョブ・子ジョブ同士の並列起動を抑止するために使う。
+    """
+    stmt = (
+        select(ContactIntelligenceJob)
+        .where(
+            ContactIntelligenceJob.project_id == project_id,
+            ContactIntelligenceJob.job_type.in_(list(_HEAVY_JOB_TYPES)),
             ContactIntelligenceJob.status.in_(
                 [CIJobStatus.queued.value, CIJobStatus.running.value]
             ),
@@ -158,6 +243,22 @@ def create_job(
     """
     if job_type not in {t.value for t in CIJobType}:
         raise ValueError(f"未知の job_type: {job_type}")
+
+    # 実処理起動前に、ハングして孤児化した running/queued を回収する（書き込みパス）。
+    # これで枠を占有したままの stale ジョブが重複抑止・セマフォを永久ロックするのを防ぐ。
+    reap_stale_jobs(db, project.id)
+
+    # 重複・並列増殖の抑止（force でも無視しない。force は 24h キャッシュの無視のみ）。
+    # 同一 project の重い探索は active を最大 1 本に絞る（full と子ジョブ、子ジョブ同士も
+    # 相互排他）。既に進行中なら新規スレッドを起こさずその active ジョブを返す。
+    if job_type in _HEAVY_JOB_TYPES:
+        active = find_active_heavy(db, project.id)
+        if active is not None:
+            return active, False
+    else:
+        active = find_active(db, project.id, job_type)
+        if active is not None:
+            return active, False
 
     if not force:
         cached = _find_cached(db, project.id, job_type)
@@ -370,9 +471,50 @@ def _run_job(job_id: int) -> None:
 
     セマフォ待ちの間は DB セッションを開かない（コネクションを掴んだまま待たない）。
     スロットを取得できるまでジョブ行は queued のまま。
+
+    実処理はワーカースレッドで走らせ、ハード上限まで join で待つ。外部取得が無期限に
+    ハングしても、上限超過でワーカーを見捨てて（daemon なのでプロセス終了を妨げない）
+    セマフォ枠を解放し、ジョブ行を failed にする。これにより 1 本のハングが枠を占有し
+    続けて後続ジョブ・画面表示まで巻き込んで固めるのを防ぐ（タイムアウト延長ではなく
+    ハングの封じ込め）。上限 0 のときは従来どおり直接実行する。
     """
     with _job_semaphore:
-        _run_job_inner(job_id)
+        if _HARD_TIMEOUT_SECONDS <= 0:
+            _run_job_inner(job_id)
+            return
+        worker = threading.Thread(
+            target=_run_job_inner, args=(job_id,), daemon=True
+        )
+        worker.start()
+        worker.join(timeout=_HARD_TIMEOUT_SECONDS)
+        if worker.is_alive():
+            # ハング検出：境界での中断を要求しつつ、行を failed に確定して枠を解放する。
+            _cancel_requested.add(job_id)
+            _mark_timed_out(job_id)
+
+
+def _mark_timed_out(job_id: int) -> None:
+    """ハード上限を超えたジョブを failed にする（まだ running/queued の場合のみ）。"""
+    db = SessionLocal()
+    try:
+        job = db.get(ContactIntelligenceJob, job_id)
+        if job is None:
+            return
+        if job.status in (CIJobStatus.queued.value, CIJobStatus.running.value):
+            job.status = CIJobStatus.failed.value
+            job.error = (
+                "ハードタイムアウト超過により中断されました"
+                "（外部取得がハングした可能性。再実行してください）"
+            )
+            job.current_step = "タイムアウト"
+            job.completed_at = _now()
+            _log(job, "ハードタイムアウトによりジョブを打ち切りました")
+            db.commit()
+            logger.error("CI job %s hit hard timeout; worker abandoned", job_id)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _run_job_inner(job_id: int) -> None:
