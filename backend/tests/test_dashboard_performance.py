@@ -142,30 +142,39 @@ def test_evaluated_card_has_scores_and_grade():
     db.close()
 
 
-def test_semaphore_limits_concurrency():
-    print("test_semaphore_limits_concurrency")
-    # セマフォの上限が設定値で構築されている
-    check("並列上限セマフォが存在", ci._job_semaphore is not None)
-    check("上限は 1 以上", ci._MAX_CONCURRENT_JOBS >= 1)
-
-
-def test_recover_orphaned_jobs():
-    print("test_recover_orphaned_jobs")
+def test_api_enqueue_only_no_thread():
+    print("test_api_enqueue_only_no_thread")
+    # API 分離：create_job は runner を渡さなければ実処理を起動しない（queued のまま）。
+    # 旧セマフォ/スレッド起動は撤去済み。
+    check("旧 in-process セマフォは撤去", not hasattr(ci, "_job_semaphore"))
+    check("旧スレッドランナー _run_job は撤去", not hasattr(ci, "_run_job"))
     db = SessionLocal()
     p = db.query(Project).first()
+    job, cached = ci.create_job(db, p, CIJobType.web_research.value, force=True)
+    check("POST は queued 行を作るだけ", job.status == CIJobStatus.queued.value)
+    check("from_cache False", cached is False)
+    db.close()
+
+
+def test_recover_stale_running_jobs():
+    print("test_recover_stale_running_jobs")
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal()
+    p = db.query(Project).first()
+    # heartbeat が古い running（ワーカー死亡の孤児）→ timed_out に回収。
+    old = datetime.now(timezone.utc) - timedelta(hours=1)
     j1 = ContactIntelligenceJob(project_id=p.id, job_type=CIJobType.web_research.value,
-                                status=CIJobStatus.running.value)
+                                status=CIJobStatus.running.value,
+                                started_at=old, heartbeat_at=old)
+    # queued はワーカー待ちなので回収対象外（潰さない）。
     j2 = ContactIntelligenceJob(project_id=p.id, job_type=CIJobType.japan_sales_check.value,
                                 status=CIJobStatus.queued.value)
     db.add_all([j1, j2]); db.commit()
-    n = ci.recover_orphaned_jobs(db)
-    check("孤児ジョブを回収", n >= 2)
+    n = ci.recover_stale_jobs(db)
+    check("stale running を回収", n >= 1)
     db.refresh(j1); db.refresh(j2)
-    check("running → failed", j1.status == CIJobStatus.failed.value)
-    check("queued → failed", j2.status == CIJobStatus.failed.value)
-    # 回収後は find_active が None（重複抑止が解ける）
-    check("回収後 find_active なし",
-          ci.find_active(db, p.id, CIJobType.japan_sales_check.value) is None)
+    check("stale running → timed_out", j1.status == CIJobStatus.timed_out.value)
+    check("queued は据え置き（潰さない）", j2.status == CIJobStatus.queued.value)
     db.close()
 
 
@@ -195,8 +204,8 @@ if __name__ == "__main__":
     test_dashboard_no_n_plus_one()
     test_unevaluated_returns_not_evaluated()
     test_evaluated_card_has_scores_and_grade()
-    test_semaphore_limits_concurrency()
-    test_recover_orphaned_jobs()
+    test_api_enqueue_only_no_thread()
+    test_recover_stale_running_jobs()
     test_dashboard_no_external_calls()
     print(f"\n{_passed} passed, {_failed} failed")
     sys.exit(1 if _failed else 0)

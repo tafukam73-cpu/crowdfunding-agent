@@ -1,21 +1,26 @@
-"""Contact Intelligence v2：重い探索の非同期ジョブ化。
+"""Contact Intelligence：重い探索ジョブのキューイングと実行ロジック。
 
-AI Web調査 / Document Reader / Search Agent / full を HTTP リクエスト内で完了させると
-タイムアウトするため、別スレッドで実行し、進捗・ログ・結果を contact_intelligence_jobs
-に保存する。UI はポーリングで進捗を取得する。
+重い探索（full / web_research / document_reader / search_agent / ai_research /
+contact_discovery(_v2) 等）を API（uvicorn）プロセス内のスレッドで実行すると、
+外部取得のハングや CPU スピンがイベントループを飢餓状態にして /health すら無応答に
+なる。そこで実行を独立した専用ワーカープロセス（cfagent-ci-worker）へ分離した。
 
-- create_job: 24 時間以内に同 project_id/job_type の completed があれば再利用（force で無視）。
-  無ければ queued 行を作り、デーモンスレッドで実行を開始する。
-- ジョブスレッドは独自 DB セッションを使う（リクエストのセッションと分離）。
-- cancel: 進行中ジョブに中断を要求（各フェーズ境界で確認して cancelled にする）。
+- API 側（create_job）: バリデーション → 重複確認 → queued 行を作って即返すだけ。
+  **API プロセスからスレッド・サブプロセスは一切起動しない。**
+- ワーカー側（app.workers.contact_intelligence_worker）: queued 行を原子的に claim し、
+  ジョブごとにサブプロセス（app.workers.run_single_job）で実行する。ハードタイムアウト／
+  中断時はプロセスツリーごと kill するので、スレッドを「見捨てる」ことはしない。
+- 本モジュールの execute_job() が実際のフェーズ実行本体で、サブプロセス内で呼ばれる。
+- cancel: DB の cancel_requested フラグで行う（プロセス跨ぎ）。queued は即 cancelled、
+  running はワーカーが検知して実行プロセスを終了させる。
 """
 from __future__ import annotations
 
 import logging
-import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -38,20 +43,12 @@ from app.services import (
 logger = logging.getLogger("contact_intelligence")
 
 CACHE_TTL_HOURS = 24
-# 進行中ジョブへの中断要求（同一プロセス内シグナル。単一 uvicorn ワーカー想定）
-_cancel_requested: set[int] = set()
-
-# 重い外部クロール/検索ジョブの同時実行を制限するセマフォ。無制限に並列起動すると
-# CPU/DB コネクションを食い潰して画面表示（GET）が固まるため。スロット待ちの間は
-# DB セッションを開かない（ジョブ行は queued のまま）。
-_MAX_CONCURRENT_JOBS = max(1, int(getattr(settings, "ci_max_concurrent_jobs", 2)))
-_job_semaphore = threading.BoundedSemaphore(_MAX_CONCURRENT_JOBS)
 
 # ブラウザ（Playwright/Chromium）を伴う重い探索ジョブ。これらは同一 project で
-# 並列起動すると Chromium プロセスが増殖して CPU/GIL を飽和させ、uvicorn の
-# イベントループを飢餓状態にして GET すら応答しなくなる（本障害の直接原因）。
-# full は web/recursive/doc/search を内包するため、full と各子ジョブ、および
-# 子ジョブ同士も同一 project では相互排他とし、active は project あたり最大 1 本に絞る。
+# 並列起動すると Chromium プロセスが増殖して CPU/GIL を飽和させ、実行プロセスを
+# 過負荷にする。full は web/recursive/doc/search を内包するため、full と各子ジョブ、
+# および子ジョブ同士も同一 project では相互排他とし、active は project あたり最大 1 本。
+# claim（ワーカー）と create_job（API）双方でこの不変条件を守る。
 _HEAVY_JOB_TYPES = {
     CIJobType.full_contact_intelligence.value,
     CIJobType.web_research.value,
@@ -64,10 +61,23 @@ _HEAVY_JOB_TYPES = {
     CIJobType.zeczec_enrichment.value,
 }
 
-# 1 ジョブのウォールクロック上限（秒）。外部 HTTP/Playwright がハングしたまま
-# 孤児化するのを回収する。0 で無効。
+_TERMINAL_STATUSES = (
+    CIJobStatus.completed.value,
+    CIJobStatus.failed.value,
+    CIJobStatus.cancelled.value,
+    CIJobStatus.timed_out.value,
+)
+
+# 1 ジョブのウォールクロック上限（秒）。ワーカーがこの時間を超えた実行プロセスを
+# ツリーごと kill する。0 で無効。
 _HARD_TIMEOUT_SECONDS = max(
     0, int(getattr(settings, "ci_job_hard_timeout_minutes", 20)) * 60
+)
+# ワーカー生存とみなす heartbeat の鮮度（秒）。これより古い running はワーカー
+# 死亡とみなして stale 回収する。ハードタイムアウトより十分短く、かつワーカーの
+# heartbeat 更新間隔より十分長くする。
+_HEARTBEAT_STALE_SECONDS = max(
+    60, int(getattr(settings, "ci_heartbeat_stale_seconds", 90))
 )
 
 
@@ -112,48 +122,23 @@ def get_job(db: Session, job_id: int) -> ContactIntelligenceJob | None:
     return db.get(ContactIntelligenceJob, job_id)
 
 
-def recover_orphaned_jobs(db: Session) -> int:
-    """起動時に残っている queued/running ジョブを failed に回収する。
+def recover_stale_jobs(db: Session, project_id: int | None = None) -> int:
+    """heartbeat が途絶えた running ジョブを timed_out に回収する（ワーカー死亡回収）。
 
-    バックエンド再起動でデーモンスレッドが失われると、ジョブ行が queued/running の
-    まま孤児化し、find_active が永久に重複作成を抑止してしまう。起動時に一度掃除する。
+    専用ワーカーは実行中サブプロセスがある間 heartbeat_at を更新し続ける。ワーカー／
+    サブプロセスが異常終了して heartbeat が古くなった（または最初から無い）running を
+    「実行主体が消えた孤児」とみなして回収する。再起動を待たず、重複抑止が永久ロック
+    するのを防ぐ。読み取り専用パス（ポーリング GET）からは呼ばない。
+
     Returns: 回収した件数。
     """
+    cutoff = _now() - timedelta(seconds=_HEARTBEAT_STALE_SECONDS)
     stmt = select(ContactIntelligenceJob).where(
-        ContactIntelligenceJob.status.in_(
-            [CIJobStatus.queued.value, CIJobStatus.running.value]
-        )
-    )
-    rows = list(db.scalars(stmt))
-    for job in rows:
-        job.status = CIJobStatus.failed.value
-        job.error = "バックエンド再起動により中断されました（再実行してください）"
-        job.current_step = "中断"
-        job.completed_at = _now()
-    if rows:
-        db.commit()
-        logger.info("recovered %d orphaned CI jobs on startup", len(rows))
-    return len(rows)
-
-
-def reap_stale_jobs(db: Session, project_id: int | None = None) -> int:
-    """ハード上限を超えても running/queued のまま残るジョブを failed に回収する。
-
-    外部 HTTP/Playwright がハングしてワーカースレッドが応答しないと、ジョブ行が
-    running のまま孤児化し、find_active の重複抑止が効いて新規実行を阻む。再起動を
-    待たずに（書き込みパスで）掃除して自己回復させる。ポーリング等の読み取り専用
-    パスからは呼ばない（GET を副作用フリーに保つ）。Returns: 回収した件数。
-    """
-    if _HARD_TIMEOUT_SECONDS <= 0:
-        return 0
-    cutoff = _now() - timedelta(seconds=_HARD_TIMEOUT_SECONDS)
-    stmt = select(ContactIntelligenceJob).where(
-        ContactIntelligenceJob.status.in_(
-            [CIJobStatus.queued.value, CIJobStatus.running.value]
-        ),
-        # started_at が無い（queued のまま）場合は created_at を基準にする。
+        ContactIntelligenceJob.status == CIJobStatus.running.value,
         func.coalesce(
-            ContactIntelligenceJob.started_at, ContactIntelligenceJob.created_at
+            ContactIntelligenceJob.heartbeat_at,
+            ContactIntelligenceJob.started_at,
+            ContactIntelligenceJob.created_at,
         )
         < cutoff,
     )
@@ -161,19 +146,109 @@ def reap_stale_jobs(db: Session, project_id: int | None = None) -> int:
         stmt = stmt.where(ContactIntelligenceJob.project_id == project_id)
     rows = list(db.scalars(stmt))
     for job in rows:
-        job.status = CIJobStatus.failed.value
+        job.status = CIJobStatus.timed_out.value
         job.error = (
-            "ハードタイムアウト超過により回収されました"
-            "（外部取得がハングした可能性。再実行してください）"
+            "実行プロセスの応答が途絶えたため回収されました"
+            "（ワーカー異常終了の可能性。再実行してください）"
         )
-        job.current_step = "タイムアウト回収"
+        job.current_step = "回収（heartbeat 途絶）"
         job.completed_at = _now()
-        # ハングしたワーカーが境界で気付けるよう中断も要求しておく。
-        _cancel_requested.add(job.id)
     if rows:
         db.commit()
-        logger.warning("reaped %d stale CI jobs (hard timeout)", len(rows))
+        logger.warning("recovered %d stale CI jobs (heartbeat lost)", len(rows))
     return len(rows)
+
+
+def claim_next_job(db: Session, worker_id: str) -> tuple[int, str] | None:
+    """queued ジョブを 1 件、原子的に claim して running にする。
+
+    - 古い順に、`FOR UPDATE SKIP LOCKED` で行ロックしながら候補を取り、同一 project に
+      running の重い探索が無いものを選ぶ（heavy は project あたり 1 本の不変条件）。
+    - 選んだ行に status=running / worker_id / 一意 execution_token / started_at /
+      heartbeat_at を書いて commit する。複数ワーカーでも二重実行しない。
+
+    Returns: (job_id, execution_token) または None（対象なし）。
+    """
+    # PostgreSQL では FOR UPDATE SKIP LOCKED で行ロック（複数ワーカーで二重 claim 防止）。
+    # SQLite（テスト）では with_for_update は無視されるが、単一プロセスなので問題ない。
+    stmt = (
+        select(ContactIntelligenceJob)
+        .where(ContactIntelligenceJob.status == CIJobStatus.queued.value)
+        .order_by(ContactIntelligenceJob.id)
+    )
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        stmt = stmt.with_for_update(skip_locked=True)
+    locked = list(db.scalars(stmt))
+    for job in locked:
+        if job.job_type in _HEAVY_JOB_TYPES and _project_has_running_heavy(
+            db, job.project_id
+        ):
+            continue  # 同一 project の重い探索が実行中なのでこのジョブはまだ回さない
+        token = uuid.uuid4().hex
+        now = _now()
+        job.status = CIJobStatus.running.value
+        job.worker_id = worker_id
+        job.execution_token = token
+        job.started_at = now
+        job.heartbeat_at = now
+        job.progress = max(1, job.progress or 1)
+        job.cancel_requested = False
+        db.commit()
+        return job.id, token
+    db.rollback()  # ロックを解放（何も claim しなかった）
+    return None
+
+
+def _project_has_running_heavy(db: Session, project_id: int) -> bool:
+    stmt = (
+        select(ContactIntelligenceJob.id)
+        .where(
+            ContactIntelligenceJob.project_id == project_id,
+            ContactIntelligenceJob.status == CIJobStatus.running.value,
+            ContactIntelligenceJob.job_type.in_(list(_HEAVY_JOB_TYPES)),
+        )
+        .limit(1)
+    )
+    return db.scalar(stmt) is not None
+
+
+def heartbeat(db: Session, job_id: int) -> bool:
+    """ワーカーが実行中ジョブの生存を更新する。running でなければ False（停止合図）。"""
+    job = db.get(ContactIntelligenceJob, job_id)
+    if job is None or job.status != CIJobStatus.running.value:
+        return False
+    job.heartbeat_at = _now()
+    db.commit()
+    return True
+
+
+def is_cancel_requested(db: Session, job_id: int) -> bool:
+    """ワーカーが running ジョブの中断要求を確認する（true なら実行プロセスを kill）。"""
+    return _is_cancelled(db, job_id)
+
+
+def finalize_terminated(
+    db: Session, job_id: int, status: str, message: str
+) -> bool:
+    """実行プロセスを kill／異常終了させた後に、まだ running の行を終端状態に確定する。
+
+    サブプロセスが自分で終端状態を書けたケース（正常完了・自己 failed）は running では
+    ないので上書きしない。Returns: 実際に確定したら True。
+    """
+    job = db.get(ContactIntelligenceJob, job_id)
+    if job is None or job.status != CIJobStatus.running.value:
+        return False
+    job.status = status
+    job.error = message
+    job.current_step = {
+        CIJobStatus.timed_out.value: "タイムアウト（プロセス終了）",
+        CIJobStatus.cancelled.value: "中断されました",
+        CIJobStatus.failed.value: "失敗",
+    }.get(status, status)
+    job.completed_at = _now()
+    _log(job, message)
+    db.commit()
+    return True
 
 
 def find_active(
@@ -244,13 +319,13 @@ def create_job(
     if job_type not in {t.value for t in CIJobType}:
         raise ValueError(f"未知の job_type: {job_type}")
 
-    # 実処理起動前に、ハングして孤児化した running/queued を回収する（書き込みパス）。
-    # これで枠を占有したままの stale ジョブが重複抑止・セマフォを永久ロックするのを防ぐ。
-    reap_stale_jobs(db, project.id)
+    # heartbeat が途絶えた running（ワーカー死亡の孤児）を回収してから重複判定する。
+    # これで dead worker のジョブが重複抑止を永久ロックするのを防ぐ（書き込みパスのみ）。
+    recover_stale_jobs(db, project.id)
 
     # 重複・並列増殖の抑止（force でも無視しない。force は 24h キャッシュの無視のみ）。
     # 同一 project の重い探索は active を最大 1 本に絞る（full と子ジョブ、子ジョブ同士も
-    # 相互排他）。既に進行中なら新規スレッドを起こさずその active ジョブを返す。
+    # 相互排他）。既に進行中なら新規行を作らずその active ジョブを返す。
     if job_type in _HEAVY_JOB_TYPES:
         active = find_active_heavy(db, project.id)
         if active is not None:
@@ -276,10 +351,11 @@ def create_job(
     db.commit()
     db.refresh(job)
 
+    # **API プロセスからは実処理を一切起動しない**（スレッド・サブプロセス禁止）。
+    # queued 行だけ作り、専用ワーカー（cfagent-ci-worker）が claim して実行する。
+    # runner はテスト用の同期実行フック（本番では None）。
     if runner is not None:
-        runner(job.id)  # 同期（テスト）
-    else:
-        threading.Thread(target=_run_job, args=(job.id,), daemon=True).start()
+        runner(job.id)
     return job, False
 
 
@@ -308,20 +384,38 @@ def queue_reassessment(
 
 
 def request_cancel(db: Session, job_id: int) -> ContactIntelligenceJob | None:
-    """進行中ジョブに中断を要求する。queued/running のみ受け付ける。"""
+    """ジョブに中断を要求する（プロセス跨ぎ＝DB フラグで行う）。
+
+    - queued: まだ誰も実行していないので即 cancelled にする。
+    - running: cancel_requested=true を立て、ワーカーが検知して実行プロセスを終了させる。
+    """
     job = db.get(ContactIntelligenceJob, job_id)
     if job is None:
         return None
-    if job.status in (CIJobStatus.queued.value, CIJobStatus.running.value):
-        _cancel_requested.add(job_id)
-        _log(job, "中断が要求されました")
+    if job.status == CIJobStatus.queued.value:
+        job.status = CIJobStatus.cancelled.value
+        job.cancel_requested = True
+        job.current_step = "中断されました"
+        job.completed_at = _now()
+        _log(job, "実行前に中断しました")
+        db.commit()
+        db.refresh(job)
+    elif job.status == CIJobStatus.running.value:
+        job.cancel_requested = True
+        _log(job, "中断が要求されました（実行プロセスを停止します）")
         db.commit()
         db.refresh(job)
     return job
 
 
-def _is_cancelled(job_id: int) -> bool:
-    return job_id in _cancel_requested
+def _is_cancelled(db: Session, job_id: int) -> bool:
+    """DB の cancel_requested を確認する（サブプロセス内での協調的中断判定）。"""
+    val = db.scalar(
+        select(ContactIntelligenceJob.cancel_requested).where(
+            ContactIntelligenceJob.id == job_id
+        )
+    )
+    return bool(val)
 
 
 # ---------------- ジョブ実行（別スレッド／独自セッション） ----------------
@@ -333,7 +427,7 @@ def _phase_progress(
 
     def cb(message: str, pct: float | None = None) -> None:
         # 中断要求があればフェーズを速やかに打ち切る（URL/クエリ境界で確認）。
-        if _is_cancelled(job.id):
+        if _is_cancelled(db, job.id):
             raise _JobCancelled()
         try:
             job.current_step = str(message)[:120]
@@ -466,75 +560,42 @@ _SINGLE_PHASES = {
 }
 
 
-def _run_job(job_id: int) -> None:
-    """ジョブ本体。重い並列ジョブを制限してから実行する。
+def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
+    """ジョブ本体（**専用ワーカーのサブプロセス内で呼ばれる**）。独自セッションで実行し、
+    行を随時更新して、最終ステータス文字列を返す。
 
-    セマフォ待ちの間は DB セッションを開かない（コネクションを掴んだまま待たない）。
-    スロットを取得できるまでジョブ行は queued のまま。
-
-    実処理はワーカースレッドで走らせ、ハード上限まで join で待つ。外部取得が無期限に
-    ハングしても、上限超過でワーカーを見捨てて（daemon なのでプロセス終了を妨げない）
-    セマフォ枠を解放し、ジョブ行を failed にする。これにより 1 本のハングが枠を占有し
-    続けて後続ジョブ・画面表示まで巻き込んで固めるのを防ぐ（タイムアウト延長ではなく
-    ハングの封じ込め）。上限 0 のときは従来どおり直接実行する。
+    - スレッド・セマフォは使わない（1 プロセス = 1 ジョブ）。ハードタイムアウト／中断時は
+      ワーカーがこのプロセスツリーごと kill するため、「見捨てる」処理は無い。
+    - execution_token を渡すと、開始時に DB の execution_token と一致することを確認する
+      （再 claim された stale 実行が結果を書き込むのを防ぐ）。
+    Returns: 終了ステータス（completed/failed/cancelled）。
     """
-    with _job_semaphore:
-        if _HARD_TIMEOUT_SECONDS <= 0:
-            _run_job_inner(job_id)
-            return
-        worker = threading.Thread(
-            target=_run_job_inner, args=(job_id,), daemon=True
-        )
-        worker.start()
-        worker.join(timeout=_HARD_TIMEOUT_SECONDS)
-        if worker.is_alive():
-            # ハング検出：境界での中断を要求しつつ、行を failed に確定して枠を解放する。
-            _cancel_requested.add(job_id)
-            _mark_timed_out(job_id)
-
-
-def _mark_timed_out(job_id: int) -> None:
-    """ハード上限を超えたジョブを failed にする（まだ running/queued の場合のみ）。"""
     db = SessionLocal()
     try:
         job = db.get(ContactIntelligenceJob, job_id)
         if job is None:
-            return
-        if job.status in (CIJobStatus.queued.value, CIJobStatus.running.value):
-            job.status = CIJobStatus.failed.value
-            job.error = (
-                "ハードタイムアウト超過により中断されました"
-                "（外部取得がハングした可能性。再実行してください）"
+            return CIJobStatus.failed.value
+        # 所有権確認：自分がこの claim の実行主体でなければ何もしない。
+        if execution_token is not None and job.execution_token != execution_token:
+            logger.warning(
+                "execute_job %s: token mismatch (job reclaimed); skipping", job_id
             )
-            job.current_step = "タイムアウト"
-            job.completed_at = _now()
-            _log(job, "ハードタイムアウトによりジョブを打ち切りました")
-            db.commit()
-            logger.error("CI job %s hit hard timeout; worker abandoned", job_id)
-    except Exception:  # noqa: BLE001
-        db.rollback()
-    finally:
-        db.close()
-
-
-def _run_job_inner(job_id: int) -> None:
-    """ジョブ本体。独自セッションで実行し、行を随時更新する。"""
-    db = SessionLocal()
-    try:
-        job = db.get(ContactIntelligenceJob, job_id)
-        if job is None:
-            return
+            return job.status
         project = db.get(Project, job.project_id)
         if project is None:
             job.status = CIJobStatus.failed.value
             job.error = "案件が見つかりません"
             job.completed_at = _now()
             db.commit()
-            return
+            return job.status
 
+        # ワーカーの claim で running/started_at は設定済みだが、テスト等の直接呼び出しにも
+        # 対応できるよう冪等に設定する。
         job.status = CIJobStatus.running.value
-        job.started_at = _now()
-        job.progress = 1
+        if job.started_at is None:
+            job.started_at = _now()
+        job.heartbeat_at = _now()
+        job.progress = max(1, job.progress or 1)
         _log(job, "実行を開始しました")
         db.commit()
 
@@ -551,7 +612,7 @@ def _run_job_inner(job_id: int) -> None:
             _log(job, f"{name} が完了しました")
             db.commit()
 
-        if _is_cancelled(job_id):
+        if _is_cancelled(db, job_id):
             job.status = CIJobStatus.cancelled.value
             job.current_step = "中断されました"
             _log(job, "ジョブを中断しました")
@@ -563,6 +624,7 @@ def _run_job_inner(job_id: int) -> None:
             _log(job, "ジョブが完了しました")
         job.completed_at = _now()
         db.commit()
+        return job.status
     except _JobCancelled:
         db.rollback()
         try:
@@ -575,7 +637,8 @@ def _run_job_inner(job_id: int) -> None:
                 db.commit()
         except Exception:  # noqa: BLE001
             db.rollback()
-    except Exception as exc:  # noqa: BLE001  失敗は行に記録（アプリは落とさない）
+        return CIJobStatus.cancelled.value
+    except Exception as exc:  # noqa: BLE001  失敗は行に記録（プロセスは落とさない）
         logger.warning("contact intelligence job %s failed: %s", job_id, exc)
         try:
             job = db.get(ContactIntelligenceJob, job_id)
@@ -588,14 +651,15 @@ def _run_job_inner(job_id: int) -> None:
                 db.commit()
         except Exception:  # noqa: BLE001
             db.rollback()
+        return CIJobStatus.failed.value
     finally:
-        _cancel_requested.discard(job_id)
         db.close()
 
 
 def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> None:
-    """full_contact_intelligence：Web調査 → Document Reader → Search Agent →
-    営業推奨連絡先ランキング更新 を順に実行する。各フェーズ境界で中断を確認する。"""
+    """full_contact_intelligence：Web調査 → 再帰クロール → Document Reader →
+    Search Agent → 営業推奨連絡先ランキング更新 を **1 実行内で直列に** 実行する。
+    個別ジョブを並列起動することはしない。各フェーズ境界で中断を確認する。"""
     # (name, fn, base_pct, span_pct)：各フェーズの進捗帯。
     # Web Research の直後に「公式サイト再帰クロール」を実行する（要件 11）。
     phases = [
@@ -605,7 +669,7 @@ def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> Non
         ("AI Search Agent", _run_agent, 70, 24),
     ]
     for name, fn, base, span in phases:
-        if _is_cancelled(job.id):
+        if _is_cancelled(db, job.id):
             return
         job.current_step = f"{name} 実行中"
         job.progress = max(1, base)
@@ -615,7 +679,7 @@ def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> Non
         _log(job, f"{name} が完了しました")
         db.commit()
 
-    if _is_cancelled(job.id):
+    if _is_cancelled(db, job.id):
         return
     # 営業推奨連絡先ランキング更新（sales_contacts は都度算出のため保存対象なし。
     # ここでは最新行から集計してログ・結果に反映する）。

@@ -9,7 +9,16 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -21,6 +30,9 @@ class CIJobStatus(str, enum.Enum):
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+    # ハードタイムアウト超過でワーカーが実行プロセスツリーごと強制終了した状態。
+    # 単なる失敗（failed）と区別して UI に「処理停止」を明示する。
+    timed_out = "timed_out"
 
 
 class CIJobType(str, enum.Enum):
@@ -78,6 +90,21 @@ class ContactIntelligenceJob(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # --- 専用ワーカープロセス（cfagent-ci-worker）での実行管理 ---
+    # ジョブを claim したワーカー識別子。二重実行防止と所有権確認に使う。
+    worker_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # claim ごとに発行する一意トークン。サブプロセスはこのトークンを提示して自分が
+    # 現在の実行主体であることを確認してから結果を書き込む（stale 実行の書き込み防止）。
+    execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ワーカーの生存更新時刻。古ければ（またはワーカー死亡時）stale として回収する。
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 中断要求フラグ。API が true にし、ワーカーが検知して実行プロセスを終了させる。
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=func.false()
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -405,8 +405,8 @@ def test_reassessment_runner_completes_rule_based():
     try:
         db = SessionLocal()
         p = _mk(db)
-        # runner=ci._run_job で同期実行（本番の実行経路をそのまま通す）。
-        j = ci.queue_reassessment(db, p, runner=ci._run_job)
+        # runner=ci.execute_job で同期実行（本番の実行経路をそのまま通す）。
+        j = ci.queue_reassessment(db, p, runner=ci.execute_job)
         db.expire_all()
         job = db.get(J, j.id)
         check("再評価で run_assessment を実行", ran == [p.id])
@@ -452,7 +452,7 @@ def test_reassessment_failure_keeps_saved_emails():
             raise RuntimeError("reassessment boom")
 
         sa.run_assessment = boom
-        j = ci.queue_reassessment(db, p, runner=ci._run_job)
+        j = ci.queue_reassessment(db, p, runner=ci.execute_job)
         db.expire_all()
         job = db.get(J, j.id)
         p2 = db.get(Project, p.id)

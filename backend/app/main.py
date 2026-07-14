@@ -50,12 +50,13 @@ async def lifespan(app: FastAPI):
         seed_if_empty(db)
     except Exception:  # noqa: BLE001  マイグレーション未適用などでも起動は止めない
         db.rollback()
-    # 再起動でデーモンスレッドが失われた孤児ジョブ（queued/running）を回収する。
-    # これを掃除しないと重複ジョブ抑止が永久に効いて再実行できなくなる。
+    # Contact Intelligence の実行は専用ワーカー（cfagent-ci-worker）が担う。API 起動
+    # （--reload で頻繁に起きる）では running ジョブを潰さない（ワーカーが所有）。
+    # heartbeat が途絶えた孤児（ワーカー異常終了）だけを安全に回収する。
     try:
         from app.services import contact_intelligence_service
 
-        contact_intelligence_service.recover_orphaned_jobs(db)
+        contact_intelligence_service.recover_stale_jobs(db)
     except Exception:  # noqa: BLE001  回収失敗でも起動は止めない
         db.rollback()
     # 発掘ジョブ（discovery_jobs）の孤児も同様に回収する。

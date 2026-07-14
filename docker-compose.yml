@@ -40,6 +40,29 @@ services:
     # 起動時に Alembic マイグレーションを適用してから API を起動
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  # Contact Intelligence 専用ワーカー。重い探索（full/web/document/search/ai/
+  # contact_discovery(_v2) 等）を API プロセスから分離して実行する。ジョブごとに
+  # サブプロセスを起動し、ハングはプロセスツリーごと kill する（API は無応答にならない）。
+  ci-worker:
+    build: ./backend
+    container_name: cfagent-ci-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # backend と同じソースを共有（マイグレーションは backend 側が適用する）。
+      - ./backend:/app
+    # ワーカーは --reload を使わない（本番実行を勝手に再起動させない）。
+    # backend の alembic 適用完了を軽く待ってから起動する。
+    command: sh -c "sleep 5 && python -m app.workers.contact_intelligence_worker"
+    # SIGTERM を受けたら実行中サブプロセスを畳んでから終了する猶予を与える。
+    stop_grace_period: 30s
+
   frontend:
     build: ./frontend
     container_name: cfagent-frontend

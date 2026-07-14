@@ -15,7 +15,7 @@ class ContactIntelligenceJobOut(BaseModel):
     id: int
     project_id: int
     job_type: str
-    status: str                       # queued/running/completed/failed/cancelled
+    status: str            # queued/running/completed/failed/cancelled/timed_out
     progress: int
     current_step: str | None = None
     logs_json: list[CIJobLog] | None = None
@@ -25,6 +25,11 @@ class ContactIntelligenceJobOut(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    # 専用ワーカー実行のメタ情報（UI の「処理停止の可能性」判定・表示に使う）。
+    worker_id: str | None = None
+    heartbeat_at: datetime | None = None
+    cancel_requested: bool = False
 
     # キャッシュ再利用で返したかどうか（API が付与）。
     from_cache: bool = False

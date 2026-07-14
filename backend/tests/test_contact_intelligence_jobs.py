@@ -100,8 +100,8 @@ def test_create_and_run_single():
     job, cached = ci.create_job(db, proj, "web_research", runner=lambda jid: None)
     check("queued で作成", job.status == CIJobStatus.queued.value)
     check("from_cache False", cached is False)
-    # 同期実行
-    ci._run_job(job.id)
+    # 実処理はワーカーのサブプロセスが呼ぶ execute_job。テストでは直接同期実行する。
+    ci.execute_job(job.id)
     db.refresh(job)
     check("completed になる", job.status == CIJobStatus.completed.value)
     check("progress=100", job.progress == 100)
@@ -119,7 +119,7 @@ def test_full_order():
     db = SessionLocal()
     proj = _mk_project(db)
     job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
-    ci._run_job(job.id)
+    ci.execute_job(job.id)
     db.refresh(job)
     check("実行順序 web→recursive→doc→agent",
           _order == ["web", "recursive", "doc", "agent"])
@@ -140,7 +140,7 @@ def test_failed_saves_error():
     db = SessionLocal()
     proj = _mk_project(db)
     job, _ = ci.create_job(db, proj, "web_research", runner=lambda jid: None)
-    ci._run_job(job.id)
+    ci.execute_job(job.id)
     db.refresh(job)
     check("failed になる", job.status == CIJobStatus.failed.value)
     check("error に保存", job.error and "探索失敗X" in job.error)
@@ -153,7 +153,7 @@ def test_latest_and_cache():
     db = SessionLocal()
     proj = _mk_project(db)
     job, cached = ci.create_job(db, proj, "search_agent", runner=lambda jid: None)
-    ci._run_job(job.id)
+    ci.execute_job(job.id)
     db.refresh(job)
     # latest
     latest = ci.get_latest(db, proj.id)
@@ -177,18 +177,35 @@ def test_latest_and_cache():
     db.close()
 
 
-def test_cancel_flag():
-    print("test_cancel_flag")
+def test_cancel_queued_is_immediate():
+    print("test_cancel_queued_is_immediate")
     _install_fakes()
     db = SessionLocal()
     proj = _mk_project(db)
     job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    # queued 中の cancel は実行前に即 cancelled（ワーカー不要）。
     ci.request_cancel(db, job.id)
     db.refresh(job)
-    check("cancel 要求で in-process フラグ", ci._is_cancelled(job.id))
-    ci._run_job(job.id)
+    check("queued cancel は即 cancelled", job.status == CIJobStatus.cancelled.value)
+    check("cancel_requested フラグ", ci.is_cancel_requested(db, job.id))
+    db.close()
+
+
+def test_cancel_running_stops_execution():
+    print("test_cancel_running_stops_execution")
+    _install_fakes()
+    db = SessionLocal()
+    proj = _mk_project(db)
+    job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    # running 相当にしてから cancel_requested を立てる（ワーカーの検知を模擬）。
+    job.status = CIJobStatus.running.value
+    job.cancel_requested = True
+    db.commit()
+    check("_is_cancelled は DB フラグを見る", ci._is_cancelled(db, job.id))
+    # execute_job は各フェーズ境界で cancel を検知して cancelled で終える。
+    ci.execute_job(job.id)
     db.refresh(job)
-    check("中断で cancelled", job.status == CIJobStatus.cancelled.value)
+    check("実行中 cancel で cancelled", job.status == CIJobStatus.cancelled.value)
     db.close()
 
 
@@ -214,26 +231,79 @@ def test_heavy_active_dedup():
     db.close()
 
 
-def test_reap_stale_jobs():
-    """ハード上限を超えて running のまま残るジョブを failed に回収する。"""
-    print("test_reap_stale_jobs")
+def test_recover_stale_heartbeat():
+    """heartbeat が途絶えた running を timed_out に回収し、重複抑止を解く。"""
+    print("test_recover_stale_heartbeat")
     _install_fakes()
     db = SessionLocal()
     proj = _mk_project(db)
+    old = datetime.now(timezone.utc) - timedelta(hours=2)
     stale = ContactIntelligenceJob(
         project_id=proj.id, job_type="full_contact_intelligence",
         status=CIJobStatus.running.value, progress=1,
-        started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        started_at=old, heartbeat_at=old,
     )
     db.add(stale); db.commit(); db.refresh(stale)
-    n = ci.reap_stale_jobs(db, proj.id)
+    n = ci.recover_stale_jobs(db, proj.id)
     db.refresh(stale)
     check("stale を 1 件回収", n == 1)
-    check("running→failed", stale.status == CIJobStatus.failed.value)
-    check("error にタイムアウト記録", stale.error and "タイムアウト" in stale.error)
-    # 回収後は active が無いので新規作成できる
+    check("running→timed_out", stale.status == CIJobStatus.timed_out.value)
+    # 回収後は active が無いので新規作成できる（重複抑止が解ける）
     fresh, cached = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
     check("回収後は新規作成できる", fresh.id != stale.id and cached is False)
+    db.close()
+
+
+def test_claim_atomic_no_double_run():
+    """claim は 1 ジョブを 1 回だけ running にし、同一 project heavy を二重 claim しない。"""
+    print("test_claim_atomic_no_double_run")
+    _install_fakes()
+    db = SessionLocal()
+    # 直前までのテストが残した queued/running を掃除して claim の判定を確定的にする。
+    db.query(ContactIntelligenceJob).delete()
+    db.commit()
+    proj = _mk_project(db)
+    j1, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    # 別 project の queued も用意
+    proj2 = _mk_project(db)
+    j2, _ = ci.create_job(db, proj2, "web_research", runner=lambda jid: None)
+    # 1 回目の claim：どちらか 1 件が running になる
+    c1 = ci.claim_next_job(db, "w1")
+    check("1 回目で claim できる", c1 is not None)
+    jid1, tok1 = c1
+    row1 = db.get(ContactIntelligenceJob, jid1)
+    check("claim したジョブは running", row1.status == CIJobStatus.running.value)
+    check("execution_token 付与", row1.execution_token == tok1)
+    # 2 回目：残り 1 件（別 project）を claim できる。同一 project の重複は起きない。
+    c2 = ci.claim_next_job(db, "w1")
+    check("2 回目で別 project を claim", c2 is not None and c2[0] != jid1)
+    # 3 回目：もう queued は無い
+    c3 = ci.claim_next_job(db, "w1")
+    check("3 回目は claim なし", c3 is None)
+    db.close()
+
+
+def test_claim_skips_project_with_running_heavy():
+    """同一 project に running heavy があれば、その project の queued heavy は claim しない。"""
+    print("test_claim_skips_project_with_running_heavy")
+    _install_fakes()
+    db = SessionLocal()
+    db.query(ContactIntelligenceJob).delete()
+    db.commit()
+    proj = _mk_project(db)
+    running = ContactIntelligenceJob(
+        project_id=proj.id, job_type="full_contact_intelligence",
+        status=CIJobStatus.running.value, heartbeat_at=datetime.now(timezone.utc),
+    )
+    db.add(running); db.commit()
+    # 同 project の queued heavy（本来 create_job で弾かれるが、直挿しで claim 層を検証）
+    queued = ContactIntelligenceJob(
+        project_id=proj.id, job_type="web_research",
+        status=CIJobStatus.queued.value,
+    )
+    db.add(queued); db.commit()
+    c = ci.claim_next_job(db, "w1")
+    check("running heavy がある project の queued は claim しない", c is None)
     db.close()
 
 
@@ -242,9 +312,12 @@ def main():
     test_full_order()
     test_failed_saves_error()
     test_latest_and_cache()
-    test_cancel_flag()
+    test_cancel_queued_is_immediate()
+    test_cancel_running_stops_execution()
     test_heavy_active_dedup()
-    test_reap_stale_jobs()
+    test_recover_stale_heartbeat()
+    test_claim_atomic_no_double_run()
+    test_claim_skips_project_with_running_heavy()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 

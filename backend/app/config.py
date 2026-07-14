@@ -37,11 +37,19 @@ class Settings(BaseSettings):
     # 商品発掘（Discovery Crawler）ジョブの同時実行上限。Contact Intelligence とは
     # 別枠のセマフォで制限し、収集ジョブと探索ジョブが互いに枠を奪わないようにする。
     discovery_max_concurrent_jobs: int = 1
-    # 1 ジョブのウォールクロック上限（分）。外部 HTTP/Playwright がハングしたまま
-    # ジョブ行が running のまま孤児化し、セマフォ枠を占有して画面表示・新規ジョブを
-    # 巻き込んで固めるのを防ぐ。超過時はワーカーを見捨てて枠を解放し failed にする。
-    # タイムアウトの延長ではなく「ハングの回収」が目的（0 で無効）。
+    # 1 ジョブのウォールクロック上限（分）。専用ワーカーがこの時間を超えた実行
+    # サブプロセスをプロセスツリーごと強制終了し、ジョブを timed_out にする。
+    # タイムアウトの延長ではなく「ハングの封じ込め」が目的（0 で無効）。
     ci_job_hard_timeout_minutes: int = 20
+    # --- Contact Intelligence 専用ワーカー（cfagent-ci-worker）の設定 ---
+    # queued ジョブを探すポーリング間隔（秒）。
+    ci_worker_poll_seconds: float = 2.0
+    # 1 ワーカーの同時実行ジョブ数（既定 1＝重い探索を直列化）。
+    ci_worker_concurrency: int = 1
+    # 実行中サブプロセスの heartbeat 更新間隔（秒）。
+    ci_worker_heartbeat_seconds: float = 5.0
+    # running ジョブの heartbeat がこの秒数より古ければワーカー死亡とみなし stale 回収。
+    ci_heartbeat_stale_seconds: int = 90
 
     # AI 評価：未設定ならモック評価器が使われる
     anthropic_api_key: str = ""
