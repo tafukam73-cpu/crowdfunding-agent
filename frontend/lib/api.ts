@@ -1871,7 +1871,8 @@ export type CIJobStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "timed_out";
 
 export type ContactIntelligenceJob = {
   id: number;
@@ -1888,6 +1889,10 @@ export type ContactIntelligenceJob = {
   created_at: string;
   updated_at: string;
   from_cache: boolean;
+  // 専用ワーカー実行のメタ情報（「処理停止の可能性」判定・表示に使う）。
+  worker_id: string | null;
+  heartbeat_at: string | null;
+  cancel_requested: boolean;
 };
 
 // 重い探索をジョブ化して開始（24hキャッシュ再利用。force で再実行）。すぐ返る。

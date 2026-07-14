@@ -1193,6 +1193,13 @@ function DeepInvestigationSection({
     job.completed_at &&
     Date.now() - new Date(job.completed_at).getTime() < 24 * 3600 * 1000;
   const result = (job?.result_json ?? {}) as Record<string, unknown>;
+  // ワーカーの heartbeat が 90 秒以上途絶えた running は「処理停止の可能性」。
+  // 実行は専用ワーカープロセスで動くため、進捗が動かなくてもワーカーが生きていれば
+  // heartbeat は更新され続ける。これが途絶える＝ワーカー異常の兆候。
+  const heartbeatStale =
+    job?.status === "running" &&
+    !!job.heartbeat_at &&
+    Date.now() - new Date(job.heartbeat_at).getTime() > 90 * 1000;
 
   return (
     <div className="rounded-md border-2 border-indigo-300 bg-indigo-50/70 p-4">
@@ -1250,6 +1257,8 @@ function DeepInvestigationSection({
                 className={`h-full rounded-full transition-all ${
                   job.status === "failed"
                     ? "bg-red-500"
+                    : job.status === "timed_out"
+                    ? "bg-orange-500"
                     : job.status === "cancelled"
                     ? "bg-slate-400"
                     : "bg-indigo-600"
@@ -1265,22 +1274,35 @@ function DeepInvestigationSection({
             <span className="font-semibold">状態:</span> {job.status}
             {job.current_step ? ` / ${job.current_step}` : ""}
             {job.from_cache && "（前回結果／キャッシュ）"}
+            {job.heartbeat_at && ACTIVE(job.status) && (
+              <span className="ml-1 text-slate-400">
+                （稼働確認: {new Date(job.heartbeat_at).toLocaleTimeString()}）
+              </span>
+            )}
           </p>
-          {stalled && ACTIVE(job.status) && (
+          {heartbeatStale && (
+            <p className="rounded bg-orange-50 px-2 py-1 text-xs text-orange-700">
+              ⚠️ 実行プロセスの稼働確認が {"90"} 秒以上途絶えています（処理が停止した
+              可能性）。しばらくして状態が変わらなければ「再実行」してください。
+            </p>
+          )}
+          {stalled && ACTIVE(job.status) && !heartbeatStale && (
             <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700">
-              ⏳ 処理が長引いています（重いページの取得中かもしれません）。このまま
-              お待ちいただくか、「中断」できます。
+              ⏳ 処理が長引いています（重いページの取得中かもしれません）。処理は
+              バックグラウンドのワーカーで継続中です。このままお待ちいただくか
+              「中断」できます。
             </p>
           )}
           {pollError && <p className="text-xs text-red-600">{pollError}</p>}
           {pollStopped && (
-            <div className="flex items-center gap-2 rounded bg-red-50 px-2 py-1">
-              <span className="text-xs text-red-700">
+            <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 px-2 py-1">
+              <span className="text-xs text-amber-800">
                 進捗の自動取得を停止しました（バックエンドに接続できません）。
+                処理は専用ワーカーで継続している可能性があります。
               </span>
               <button
                 onClick={refetch}
-                className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                className="rounded border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
               >
                 再取得
               </button>
@@ -1289,6 +1311,12 @@ function DeepInvestigationSection({
           {job.status === "failed" && (
             <p className="text-xs text-red-600 break-all">
               失敗：{job.error ?? "原因不明のエラー"}
+            </p>
+          )}
+          {job.status === "timed_out" && (
+            <p className="text-xs text-orange-700 break-all">
+              タイムアウトで停止しました（実行プロセスを終了済み）：
+              {job.error ?? "処理が制限時間を超過しました"}
             </p>
           )}
           {job.status === "cancelled" && (
