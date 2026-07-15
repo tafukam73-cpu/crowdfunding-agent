@@ -1031,6 +1031,53 @@ _NON_OFFICIAL_LINK_HINTS = (
     "apps.apple.com", "play.google.com",
 )
 
+# 公式サイトとして自動採用してはいけないホスト（要件 Phase B の拒否ルール）。
+# 短縮URL・メッセンジャー・リンク集約・販促/プレッジ管理・EC モール・SNS 単体は、
+# 「メーカー公式サイト」ではなく、外部リンク候補を得るための中間ノードに過ぎない。
+_REJECT_OFFICIAL_HINTS = (
+    # 短縮 URL
+    "reurl.cc", "bit.ly", "t.co", "tinyurl.", "ow.ly", "buff.ly", "cutt.ly",
+    "rebrand.ly", "is.gd", "lnkd.in", "s.id", "han.gl", "vo.la", "pse.is",
+    "reurl.", "goo.gl", "rb.gy",
+    # メッセンジャー / チャット
+    "m.me", "wa.me", "t.me", "line.me", "pf.kakao.com", "open.kakao.com",
+    "instagram.com/direct",
+    # リンク集約プロフィール
+    "linktr.ee", "lnk.bio", "linkin.bio", "campsite.bio", "beacons.ai",
+    "allmylinks.", "taplink.", "solo.to", "linkpop.", "lit.link", "litlink.",
+    "bio.link", "potofu.me", "profile.link",
+    # 販促 / プレッジ管理 / キャンペーンツール
+    "kickbooster.", "backerkit.", "prefinery.", "gleam.io", "viral-loops.",
+    "pledgemanager.", "backercamp.", "crowdox.",
+    # EC モール / マーケットプレイス
+    "amazon.", "ebay.", "etsy.", "aliexpress.", "shopee.", "lazada.",
+    "rakuten.", "qoo10.", "coupang.", "gmarket.", "11st.", "auction.co.kr",
+    "smartstore.naver.com", "shopping.naver.com", "pchome.", "momoshop.",
+    "shopping.",
+    # アプリストア / レビュー / Wiki
+    "apps.apple.com", "play.google.com", "wikipedia.", "crunchbase.",
+)
+
+
+def _host_hits(url: str, hints: tuple[str, ...]) -> str | None:
+    """host がヒントに一致するか（部分文字列でなくラベル境界で判定）。
+
+    - "amazon." のように末尾ドット付き＝ラベル一致（host のいずれかのラベルが "amazon"）。
+      例: www.amazon.com / amazon.co.jp は該当、"form.media" は該当しない。
+    - "m.me" のようにドット付き完全ドメイン＝完全一致 or サブドメイン一致。
+      例: m.me / sub.m.me は該当、"form.media" は該当しない（部分文字列で誤判定しない）。
+    """
+    host = urlparse(url).netloc.lower().split(":")[0]
+    labels = host.split(".")
+    for h in hints:
+        if h.endswith("."):
+            if h[:-1] in labels:
+                return h
+        else:
+            if host == h or host.endswith("." + h):
+                return h
+    return None
+
 # 「公式サイト」を示すアンカーテキスト（英・仏・日）。
 _OFFICIAL_TEXT_HINTS = (
     "official website", "official site", "officialsite", "website", "web site",
@@ -1068,10 +1115,88 @@ def official_site_or_none(url: str | None) -> str | None:
         return None
     if is_platform_url(url):
         return None
+    # 短縮URL・メッセンジャー・リンク集約・販促・EC モール・SNS 単体は公式サイトにしない。
+    # （従来 official_site_or_none はこの拒否リストを適用しておらず、reurl.cc / m.me /
+    #  kickbooster / linktr.ee / marketplace が公式サイトとして通っていた＝誤採用の主因。）
+    if _host_hits(url, _NON_OFFICIAL_LINK_HINTS) or _host_hits(url, _REJECT_OFFICIAL_HINTS):
+        return None
     # example.com / dummy / sample / test / localhost / 127.0.0.1 等は公式サイトにしない
     if not is_valid_business_url(url):
         return None
     return url
+
+
+def confirm_official_site(
+    url: str | None,
+    *,
+    maker_name: str | None = None,
+    product_title: str | None = None,
+    direct_linked: bool = False,
+    jsonld_org: str | None = None,
+    site_company_name: str | None = None,
+) -> dict:
+    """公式サイト候補を「証拠つきで」評価する（単一 URL 即採用をやめる）。
+
+    - 拒否ルール（プラットフォーム/短縮URL/SNS/販促/EC/中間ノード）に該当 → rejected。
+    - 独立した証拠を 2 つ以上集められたら accepted（自動確定）。証拠が 1 つなら uncertain
+      （探索対象には使ってよいが、確定公式サイトとして上書きしない）。
+    独立証拠の例：
+      * ドメイン名が maker_name/product のトークンと一致
+      * サイト内の会社名/JSON-LD Organization 名が maker_name と一致
+      * source campaign から直接リンクされていた（direct_linked）
+    Returns: {url, normalized_domain, score, decision, evidence[], rejection_reasons[]}
+    """
+    reasons: list[str] = []
+    evidence: list[str] = []
+    cleaned = official_site_or_none(url)
+    if cleaned is None:
+        # なぜ弾かれたかを具体化する
+        if not url or not str(url).startswith(("http://", "https://")):
+            reasons.append("not_http_url")
+        elif is_platform_url(url):
+            reasons.append("crowdfunding_platform")
+        else:
+            hit = _host_hits(url, _NON_OFFICIAL_LINK_HINTS) or _host_hits(
+                url, _REJECT_OFFICIAL_HINTS)
+            reasons.append(f"non_official_host:{hit}" if hit else "invalid_business_url")
+        return {"url": url, "normalized_domain": _domain_of(url or ""), "score": 0,
+                "decision": "rejected", "evidence": evidence,
+                "rejection_reasons": reasons}
+
+    dom = _domain_of(cleaned)
+    dom_token = dom.split(".")[0] if dom else ""
+    terms = significant_terms(maker_name or "", product_title or "")
+
+    score = 0
+    if dom_token and any(dom_token in t or t in dom_token for t in terms):
+        score += 40
+        evidence.append(f"domain_matches_maker:{dom_token}")
+    if site_company_name and maker_name and (
+        set(significant_terms(site_company_name)) & set(significant_terms(maker_name))
+    ):
+        score += 35
+        evidence.append("site_company_name_matches")
+    if jsonld_org and maker_name and (
+        set(significant_terms(jsonld_org)) & set(significant_terms(maker_name))
+    ):
+        score += 35
+        evidence.append("jsonld_org_matches")
+    if direct_linked:
+        score += 30
+        evidence.append("linked_from_source_campaign")
+
+    # 独立証拠 2 つ以上（or ドメイン一致＋直リンク等）で自動確定。
+    if len(evidence) >= 2:
+        decision = "accepted"
+    elif len(evidence) == 1:
+        decision = "uncertain"
+        reasons.append("only_one_evidence")
+    else:
+        decision = "uncertain"
+        reasons.append("no_relevance_evidence")  # 例: 無関係大企業ドメイン(lg.com)
+    return {"url": cleaned, "normalized_domain": dom, "score": score,
+            "decision": decision, "evidence": evidence,
+            "rejection_reasons": reasons}
 
 
 def significant_terms(*texts: str) -> set[str]:
