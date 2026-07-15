@@ -690,12 +690,10 @@ def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
     cancel_checker = _make_cancel_checker(job_id)
     try:
         if ctx.job_type == CIJobType.full_contact_intelligence.value:
-            _run_full(job_id, ctx, cancel_checker)
+            phases = _run_full(job_id, ctx, cancel_checker)
         else:
             name, fn = _SINGLE_PHASES[ctx.job_type]
-            _set_step(job_id, f"{name} 実行中", 5)
-            fn(ctx.project_id, _make_progress_cb(job_id, base=5, span=90))
-            _set_step(job_id, f"{name} が完了しました", 95)
+            phases = [_run_phase(job_id, ctx.project_id, name, fn, 5, 90)]
 
         # --- ステージ 3：終端（短命セッション）---
         if cancel_checker():
@@ -703,15 +701,29 @@ def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
                 job_id, CIJobStatus.cancelled.value, "ジョブを中断しました",
                 step="中断されました",
             )
+        # 全フェーズ失敗なら failed（単一フェーズジョブの失敗もここに含まれる）。
+        if phases and all(p.get("status") == "failed" for p in phases):
+            err = next((p.get("error_message") for p in phases
+                        if p.get("error_message")), "全フェーズが失敗しました")
+            return _finalize(
+                job_id, CIJobStatus.failed.value, f"失敗しました: {err}",
+                step="失敗", error=err,
+            )
         with worker_session() as db:
             job = db.get(ContactIntelligenceJob, job_id)
             if job is None:
                 return CIJobStatus.failed.value
+            counts = _signal_counts(db, ctx.project_id)
+            outcome = _classify_outcome(counts, phases)
+            result = _build_result(db, ctx.project_id)
+            result["phases"] = phases
+            result["outcome"] = outcome
+            result["signal_counts"] = counts
             job.status = CIJobStatus.completed.value
             job.progress = 100
-            job.current_step = "完了"
-            job.result_json = _build_result(db, ctx.project_id)
-            _log(job, "ジョブが完了しました")
+            job.current_step = _OUTCOME_LABEL.get(outcome, "完了")
+            job.result_json = result
+            _log(job, f"ジョブが完了しました（{outcome}）")
             job.completed_at = _now()
             db.commit()
             return job.status
@@ -741,24 +753,154 @@ def _run_full(
         ("AI Document Reader", _run_doc, 45, 25),
         ("AI Search Agent", _run_agent, 70, 24),
     ]
+    records: list[dict] = []
     for name, fn, base, span in phases:
         if cancel_checker():
-            return
-        _set_step(job_id, f"{name} 実行中", max(1, base))  # 短命セッション
-        fn(ctx.project_id, _make_progress_cb(job_id, base, span))  # フェーズ内で短命開閉
-        _set_step(job_id, f"{name} が完了しました")  # 短命セッション
+            break
+        rec = _run_phase(job_id, ctx.project_id, name, fn, base, span)
+        records.append(rec)
+        # **1 フェーズの失敗で全体を止めない**：記録して次フェーズへ進む。
 
-    if cancel_checker():
-        return
-    # 営業推奨連絡先ランキング更新（都度算出。最新行から集計してログに反映）。
-    _set_step(job_id, "営業推奨連絡先ランキングを更新中", 95)
-    with worker_session() as db:
-        row = contact_discovery_service.get_latest(db, ctx.project_id)
-        ranked = contact_discovery_service.build_sales_contacts(row) if row else []
-        job = db.get(ContactIntelligenceJob, job_id)
-        if job is not None:
-            _log(job, f"営業推奨連絡先ランキングを更新しました（{len(ranked)} 件）")
-        db.commit()
+    if not cancel_checker():
+        # 結果統合（ランキング更新）。ここまでで得た成果を集計する。
+        _set_step(job_id, "営業推奨連絡先ランキングを更新中", 95)
+        with worker_session() as db:
+            row = contact_discovery_service.get_latest(db, ctx.project_id)
+            ranked = (
+                contact_discovery_service.build_sales_contacts(row) if row else []
+            )
+            job = db.get(ContactIntelligenceJob, job_id)
+            if job is not None:
+                _log(job, f"営業推奨連絡先ランキングを更新しました（{len(ranked)} 件）")
+            db.commit()
+    return records
+
+
+def _run_phase(job_id, project_id, name, fn, base, span) -> dict:
+    """1 フェーズを実行し、成否・所要時間・発見数・エラーを記録して返す。
+
+    フェーズの失敗はここで捕捉し、上位（_run_full）には伝播させない
+    （1 フェーズの失敗で全体を停止させないため）。中断（_JobCancelled）は伝播させる。
+    """
+    started = _now()
+    _set_step(job_id, f"{name} 実行中", max(1, base))
+    error_code = error_message = None
+    status = "success"
+    try:
+        with worker_session() as db:
+            before = _signal_counts(db, project_id)
+        fn(project_id, _make_progress_cb(job_id, base, span))
+        with worker_session() as db:
+            after = _signal_counts(db, project_id)
+    except _JobCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001  フェーズ失敗は記録して継続
+        status = "failed"
+        error_code = type(exc).__name__
+        error_message = str(exc)[:500]
+        logger.warning("CI phase '%s' failed (project=%s): %s", name, project_id, exc)
+        with worker_session() as db:
+            after = before = _signal_counts(db, project_id)
+    finished = _now()
+    delta = {k: max(0, after.get(k, 0) - before.get(k, 0)) for k in after}
+    rec = {
+        "phase": name,
+        "status": status,
+        "started_at": started.isoformat(),
+        "finished_at": finished.isoformat(),
+        "duration_s": round((finished - started).total_seconds(), 1),
+        "emails_found": delta.get("emails", 0),
+        "forms_found": delta.get("forms", 0),
+        "socials_found": delta.get("socials", 0),
+        "people_found": delta.get("people", 0),
+        "totals": after,
+        "error_code": error_code,
+        "error_message": error_message,
+        "retryable": status == "failed" and error_code in (
+            "TimeoutException", "ConnectError", "ReadTimeout", "HTTPStatusError",
+        ),
+    }
+    _set_step(job_id, f"{name} が完了しました" if status == "success"
+              else f"{name} は失敗（継続）")
+    return rec
+
+
+# --- 成果（実連絡先／チャネル）の集計と完了アウトカム分類 ---
+# 「completed だが成果 0 件」を正直に区別するための状態。status は completed のままだが、
+# result_json.outcome に以下を入れ、UI はこれで表示を切り替える。
+OUTCOME_WITH_CONTACTS = "completed_with_contacts"   # 実メール or 公開担当者あり
+OUTCOME_WITH_CHANNELS = "completed_with_channels"   # フォーム/公式SNS/公式サイト等
+OUTCOME_NO_CONTACTS = "completed_no_contacts"       # 何も見つからない
+OUTCOME_PARTIAL = "partial_success"                 # 一部フェーズ失敗＋何か発見
+
+_OUTCOME_LABEL = {
+    OUTCOME_WITH_CONTACTS: "完了：実連絡先あり",
+    OUTCOME_WITH_CHANNELS: "完了：連絡チャネルのみ",
+    OUTCOME_NO_CONTACTS: "完了：成果なし",
+    OUTCOME_PARTIAL: "完了：一部成功",
+}
+
+
+def _signal_counts(db: Session, project_id: int) -> dict:
+    """保存済みの実成果シグナル数（メール/フォーム/SNS/公式サイト/担当者）。"""
+    from app.models.contact_person import ContactPerson
+
+    people = (
+        db.query(ContactPerson)
+        .filter(ContactPerson.project_id == project_id, ContactPerson.name.isnot(None))
+        .count()
+    )
+    row = contact_discovery_service.get_latest(db, project_id)
+    if row is None:
+        return {"emails": 0, "forms": 0, "socials": 0, "official_sites": 0,
+                "people": people}
+    # メール：build_sales_contacts は営業可能メールのランキング（各要素に email を持つ）。
+    ranked = contact_discovery_service.build_sales_contacts(row)
+    emails = sum(1 for c in ranked if (c.get("email") or "").strip())
+    # フォーム：ContactDiscovery 行の各レイヤーのフォームカラムから数える
+    # （build_sales_contacts はフォームを返さないため、行から直接集計する）。
+    forms = 0
+    for f in ("primary_contact_form_url", "web_primary_contact_form_url",
+              "ai_contact_form_url"):
+        if getattr(row, f, None):
+            forms += 1
+    for f in ("discovered_forms", "web_discovered_forms", "v2_forms",
+              "doc_reader_contact_forms", "search_agent_contact_forms",
+              "recursive_forms"):
+        v = getattr(row, f, None)
+        if v:
+            forms += len(v) if isinstance(v, (list, dict)) else 1
+    official = 1 if contact_discovery_service.official_site_or_none(
+        row.official_site_url
+    ) or contact_discovery_service.official_site_or_none(
+        getattr(row, "v2_official_site_url", None)
+    ) else 0
+    socials = 0
+    for src in (row.web_discovered_socials, getattr(row, "v2_socials", None),
+                getattr(row, "recursive_socials", None)):
+        if src:
+            socials += len(src) if isinstance(src, (list, dict)) else 1
+    for f in ("instagram_url", "facebook_url", "linkedin_url", "youtube_url"):
+        if getattr(row, f, None):
+            socials += 1
+    return {"emails": emails, "forms": forms, "socials": socials,
+            "official_sites": official, "people": people}
+
+
+def _classify_outcome(counts: dict, phases: list[dict]) -> str:
+    """成果シグナルとフェーズ結果から完了アウトカムを決める。"""
+    any_failed = any(p.get("status") == "failed" for p in phases)
+    has_contacts = counts.get("emails", 0) > 0 or counts.get("people", 0) > 0
+    # チャネル＝フォーム or 公式SNS。公式サイトは「そこから連絡先を探す起点」であって
+    # それ自体は送信チャネルではない（要件の定義に合わせ channels には含めない）。
+    has_channels = counts.get("forms", 0) > 0 or counts.get("socials", 0) > 0
+    if any_failed and (has_contacts or has_channels):
+        return OUTCOME_PARTIAL
+    if has_contacts:
+        return OUTCOME_WITH_CONTACTS
+    if has_channels:
+        return OUTCOME_WITH_CHANNELS
+    return OUTCOME_NO_CONTACTS
 
 
 def _build_result(db: Session, project_id: int) -> dict:
