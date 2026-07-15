@@ -16,8 +16,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
+
+# DB エンジン生成（app.db.session の import）より前に application_name を確定させる。
+# pg_stat_activity で「このジョブ実行プロセスの接続」を識別できるようにする。
+os.environ.setdefault("APP_COMPONENT", "cfagent-ci-job")
 
 logging.basicConfig(
     level=logging.INFO,

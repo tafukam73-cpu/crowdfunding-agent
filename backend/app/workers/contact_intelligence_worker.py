@@ -28,10 +28,13 @@ import sys
 import threading
 import time
 
-from app.config import settings
-from app.db.session import SessionLocal
-from app.models.contact_intelligence_job import CIJobStatus
-from app.services import contact_intelligence_service as ci
+# DB エンジン生成（app.db.session の import）より前に application_name を確定させる。
+os.environ.setdefault("APP_COMPONENT", "cfagent-ci-worker")
+
+from app.config import settings  # noqa: E402
+from app.db.session import SessionLocal  # noqa: E402
+from app.models.contact_intelligence_job import CIJobStatus  # noqa: E402
+from app.services import contact_intelligence_service as ci  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

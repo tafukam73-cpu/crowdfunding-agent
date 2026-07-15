@@ -59,21 +59,21 @@ def _mk_project(db) -> Project:
 _order = []
 
 
-def _fake_web(db, project, cb=None):
+def _fake_web(project_id, cb=None):
     _order.append("web")
     if cb:
         cb("巡回中: https://example.com/1", pct=0.5)
 
 
-def _fake_doc(db, project, cb=None):
+def _fake_doc(project_id, cb=None):
     _order.append("doc")
 
 
-def _fake_agent(db, project, cb=None):
+def _fake_agent(project_id, cb=None):
     _order.append("agent")
 
 
-def _fake_recursive(db, project, cb=None):
+def _fake_recursive(project_id, cb=None):
     _order.append("recursive")
     if cb:
         cb("巡回中 (1/50): https://example.com/contact", pct=0.5)
@@ -132,7 +132,7 @@ def test_failed_saves_error():
     print("test_failed_saves_error")
     _install_fakes()
 
-    def boom(db, project, cb=None):
+    def boom(project_id, cb=None):
         raise RuntimeError("探索失敗X")
 
     ci._run_web = boom

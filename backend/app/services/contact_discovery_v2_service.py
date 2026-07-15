@@ -717,6 +717,8 @@ def run_contact_discovery_v2(
         row = cds.run_discovery(db, project)
 
     now = datetime.now(timezone.utc)
+    # read が済んだので接続を解放してから外部処理（v2 探索＝HTTP/Playwright）へ入る。
+    cds.release_connection(db)
     try:
         result = discover_v2(
             project, research, fetch_fn=fetch_fn, search_fn=search_fn,

@@ -966,6 +966,8 @@ def run_recursive_crawl(
 
     official = _resolve_official(row, project)
     now = datetime.now(timezone.utc)
+    # read が済んだので接続を解放してから外部処理（再帰クロール＝HTTP/Playwright）へ入る。
+    cds.release_connection(db)
     try:
         result = recursive_crawl(
             official, project,

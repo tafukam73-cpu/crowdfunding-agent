@@ -1670,6 +1670,9 @@ def run_web_research(
         row = cds.run_discovery(db, project)
 
     now = datetime.now(timezone.utc)
+    # read が済んだので接続をプールへ返却してから外部処理へ入る（外部処理中は
+    # トランザクションを保持しない）。以降 project/research/row は既ロード値のみ参照。
+    cds.release_connection(db)
     try:
         if progress_cb:
             progress_cb("検索エンジンで候補を収集中…", pct=0.0)

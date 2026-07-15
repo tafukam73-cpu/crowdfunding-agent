@@ -18,19 +18,43 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.session import SessionLocal
+from app.db.session import worker_session
 from app.models.contact_intelligence_job import (
     CIJobStatus,
     CIJobType,
     ContactIntelligenceJob,
 )
 from app.models.project import Project
+
+
+@dataclass(frozen=True)
+class ProjectContext:
+    """フェーズ実行の入口で必要になる案件のスカラー値だけを持つ DTO。
+
+    外部処理（HTTP/Playwright/Claude）中に ORM や DB セッションを保持しないための
+    受け渡し用。ORM の Project を外部処理へ直接引き回さない起点になる。
+    """
+
+    project_id: int
+    job_type: str
+    title: str | None = None
+    source_site: str | None = None
+
+    @classmethod
+    def of(cls, job: "ContactIntelligenceJob", project: Project) -> "ProjectContext":
+        return cls(
+            project_id=project.id,
+            job_type=job.job_type,
+            title=getattr(project, "title", None),
+            source_site=getattr(project, "source_site", None),
+        )
 from app.services import (
     contact_discovery_service,
     contact_discovery_v2_service,
@@ -418,115 +442,161 @@ def _is_cancelled(db: Session, job_id: int) -> bool:
     return bool(val)
 
 
-# ---------------- ジョブ実行（別スレッド／独自セッション） ----------------
-def _phase_progress(
-    db: Session, job: ContactIntelligenceJob, base: int, span: int
-):
-    """フェーズ内の進捗コールバックを作る。各 URL/ステップで current_step・log・
-    progress を更新し、DB へ即 commit（flush）する（UI が固まって見えないように）。"""
+# ---------------- ジョブ実行（専用ワーカーのサブプロセス内） ----------------
+# 進捗・中断・ステップ更新はすべて **短命セッション**（worker_session）で行う。
+# フェーズ本体（外部処理）実行中は DB セッション／トランザクションを保持しない。
+
+
+def _make_progress_cb(job_id: int, base: int, span: int):
+    """フェーズ内の進捗コールバックを作る。呼ばれるたびに **新しい短命セッション** で
+    current_step / progress / heartbeat を更新して即 commit・close する。フェーズが
+    保持する長寿命セッションには一切触れない（外部処理中の接続保持を避ける）。"""
 
     def cb(message: str, pct: float | None = None) -> None:
-        # 中断要求があればフェーズを速やかに打ち切る（URL/クエリ境界で確認）。
-        if _is_cancelled(db, job.id):
-            raise _JobCancelled()
-        try:
+        with worker_session() as db:
+            job = db.get(ContactIntelligenceJob, job_id)
+            if job is None:
+                return
+            # 中断要求があればフェーズを速やかに打ち切る（URL/クエリ境界で確認）。
+            if job.cancel_requested:
+                raise _JobCancelled()
             job.current_step = str(message)[:120]
             _log(job, message)
             if pct is not None:
                 p = max(0.0, min(1.0, pct))
                 job.progress = min(99, int(base + span * p))
-            job.updated_at = _now()
+            # 進捗があるうちは heartbeat も更新（ワーカー監視と二重で生存を示す）。
+            job.heartbeat_at = _now()
             db.commit()
-        except _JobCancelled:
-            raise
-        except Exception:  # noqa: BLE001  進捗更新失敗で本体は止めない
-            db.rollback()
 
     return cb
 
 
-def _run_web(db, project, cb=None) -> None:
-    web_research_service.run_web_research(db, project, progress_cb=cb)
+def _make_cancel_checker(job_id: int):
+    """中断確認用のクロージャ。呼ぶたびに短命セッションで cancel_requested を読む。"""
+
+    def check() -> bool:
+        with worker_session() as db:
+            return _is_cancelled(db, job_id)
+
+    return check
 
 
-def _run_doc(db, project, cb=None) -> None:
-    document_reader_service.run_document_reader(db, project, progress_cb=cb)
+def _set_step(job_id: int, step: str, progress: int | None = None) -> None:
+    """フェーズ境界のステップ/進捗更新（短命セッション）。"""
+    with worker_session() as db:
+        job = db.get(ContactIntelligenceJob, job_id)
+        if job is None:
+            return
+        job.current_step = step[:120]
+        if progress is not None:
+            job.progress = progress
+        _log(job, step)
+        job.heartbeat_at = _now()
+        db.commit()
 
 
-def _run_agent(db, project, cb=None) -> None:
-    search_agent_service.run_search_agent(db, project, progress_cb=cb)
+# 各フェーズ本体（外部処理）。**引数は project_id と cb だけ**。DB セッションはフェーズ
+# 内で短命に開閉し、外部処理中は保持しない（各 run_* サービス側で read→commit→external
+# →save の順に接続を解放する）。ここでは project を短命セッションでロードして渡すが、
+# run_* は expire_on_commit=False 前提で外部処理前にトランザクションを解放する。
+def _run_web(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        web_research_service.run_web_research(db, project, progress_cb=cb)
 
 
-def _run_recursive(db, project, cb=None) -> None:
-    recursive_crawl_service.run_recursive_crawl(db, project, progress_cb=cb)
+def _run_doc(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        document_reader_service.run_document_reader(db, project, progress_cb=cb)
 
 
-def _run_auto(db, project, cb=None) -> None:
-    # 自動抽出（公式サイト再帰クロールを含む重い探索）。run_discovery は progress_cb を
-    # 取らないため cb は使わない（ジョブ境界の進捗のみ）。
-    contact_discovery_service.run_discovery(db, project)
+def _run_agent(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        search_agent_service.run_search_agent(db, project, progress_cb=cb)
 
 
-def _run_v2(db, project, cb=None) -> None:
-    contact_discovery_v2_service.run_contact_discovery_v2(db, project, progress_cb=cb)
+def _run_recursive(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        recursive_crawl_service.run_recursive_crawl(db, project, progress_cb=cb)
 
 
-def _run_ai(db, project, cb=None) -> None:
-    # AI連絡先リサーチ。run_ai_research は progress_cb を取らない。
-    contact_discovery_service.run_ai_research(db, project)
+def _run_auto(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        contact_discovery_service.run_discovery(db, project)
 
 
-def _run_japan_sales_check(db, project, cb=None) -> None:
-    # 日本販売状況チェックを実行し、完了後に営業適性アセスメントを再計算する。
+def _run_v2(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        contact_discovery_v2_service.run_contact_discovery_v2(
+            db, project, progress_cb=cb
+        )
+
+
+def _run_ai(project_id: int, cb=None) -> None:
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        contact_discovery_service.run_ai_research(db, project)
+
+
+def _run_japan_sales_check(project_id: int, cb=None) -> None:
     from app.services import japan_sales_service, sales_assessment_service
 
     if cb:
         cb("日本販売状況をチェック中", 0.1)
-    japan_sales_service.run_check(db, project)
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        japan_sales_service.run_check(db, project)
     if cb:
         cb("営業適性を再計算中（独占販売可能性の確度を更新）", 0.8)
-    # 日本販売チェックの結果を反映して再評価（新しい行として保存＝履歴保持）。
-    sales_assessment_service.run_assessment(db, project)
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        sales_assessment_service.run_assessment(db, project)
 
 
-def _run_outreach_generation(db, project, cb=None) -> None:
-    # 営業実行パイプライン：4 言語の営業メールを生成し sales_outreach に保存、
-    # CRM（sales_opportunities）へ反映する。外部 Claude 呼び出しはここ（背景）で行う。
+def _run_outreach_generation(project_id: int, cb=None) -> None:
     from app.services import sales_outreach_service
 
-    sales_outreach_service.run_generation(db, project, progress_cb=cb)
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        sales_outreach_service.run_generation(db, project, progress_cb=cb)
 
 
-def _run_followup_generation(db, project, cb=None) -> None:
-    # 送信後フォローアップメールを生成し、sales_outreach の下書きを差し替える。
-    # 決定的（ルールベース）だが既存の初回生成と同じく背景ジョブ化する。
+def _run_followup_generation(project_id: int, cb=None) -> None:
     from app.services import sales_outreach_service
 
-    sales_outreach_service.run_followup_generation(db, project, progress_cb=cb)
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        sales_outreach_service.run_followup_generation(db, project, progress_cb=cb)
 
 
-def _run_wadiz_reassessment(db, project, cb=None) -> None:
-    # Wadiz 取り込み後の営業適性再評価。ルールベース・外部HTTPなし・軽量。
-    # confirm のレスポンス後に非同期で実行し、v1/v2 Sales Copilot に反映させる。
+def _run_wadiz_reassessment(project_id: int, cb=None) -> None:
     from app.services import sales_assessment_service
 
     if cb:
         cb("営業適性を再計算中（Wadiz 連絡先を反映）", 0.3)
-    sales_assessment_service.run_assessment(db, project)
+    with worker_session() as db:
+        project = db.get(Project, project_id)
+        sales_assessment_service.run_assessment(db, project)
     if cb:
         cb("再評価が完了しました", 0.95)
 
 
-def _run_zeczec_enrichment(db, project, cb=None) -> None:
-    # Zeczec 詳細補完（Playwright で詳細ページを取得しメーカー名/カテゴリ/説明/公式
-    # サイト候補を非破壊で書き戻す）。公式サイト候補の検索補完も行う。
+def _run_zeczec_enrichment(project_id: int, cb=None) -> None:
     from app.services import zeczec_enrichment_service
     from app.services.search_providers import get_search_fn
 
     search = get_search_fn()
     try:
-        zeczec_enrichment_service.enrich_project(
-            db, project, search_fn=search, progress_cb=cb
+        with worker_session() as db:
+            project = db.get(Project, project_id)
+            zeczec_enrichment_service.enrich_project(
+                db, project, search_fn=search, progress_cb=cb
         )
     finally:
         try:
@@ -560,22 +630,41 @@ _SINGLE_PHASES = {
 }
 
 
-def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
-    """ジョブ本体（**専用ワーカーのサブプロセス内で呼ばれる**）。独自セッションで実行し、
-    行を随時更新して、最終ステータス文字列を返す。
+def _finalize(
+    job_id: int, status: str, log_msg: str, *, step: str, error: str | None = None
+) -> str:
+    """終端状態を短命セッションで確定する。"""
+    with worker_session() as db:
+        job = db.get(ContactIntelligenceJob, job_id)
+        if job is not None:
+            job.status = status
+            job.current_step = step
+            if error is not None:
+                job.error = error
+            _log(job, log_msg)
+            job.completed_at = _now()
+            db.commit()
+    return status
 
-    - スレッド・セマフォは使わない（1 プロセス = 1 ジョブ）。ハードタイムアウト／中断時は
-      ワーカーがこのプロセスツリーごと kill するため、「見捨てる」処理は無い。
-    - execution_token を渡すと、開始時に DB の execution_token と一致することを確認する
+
+def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
+    """ジョブ本体（**専用ワーカーのサブプロセス内で呼ばれる**）。
+
+    各ステージ（開始・各フェーズ・進捗・終端）を **短命セッション** で実行し、外部処理
+    （HTTP/Playwright/Claude）中は DB セッション／トランザクションを一切保持しない。
+    ジョブ全体を覆う 1 本のセッションは作らない。
+
+    - execution_token を渡すと開始時に DB の execution_token と一致することを確認する
       （再 claim された stale 実行が結果を書き込むのを防ぐ）。
-    Returns: 終了ステータス（completed/failed/cancelled）。
+    - スレッド・セマフォは使わない。ハードタイムアウト／中断時はワーカーがこのプロセス
+      ツリーごと kill する（見捨て無し）。
+    Returns: 終了ステータス（completed/failed/cancelled/timed_out）。
     """
-    db = SessionLocal()
-    try:
+    # --- ステージ 1：所有権確認 + running 設定 + DTO 化（短命セッション）---
+    with worker_session() as db:
         job = db.get(ContactIntelligenceJob, job_id)
         if job is None:
             return CIJobStatus.failed.value
-        # 所有権確認：自分がこの claim の実行主体でなければ何もしない。
         if execution_token is not None and job.execution_token != execution_token:
             logger.warning(
                 "execute_job %s: token mismatch (job reclaimed); skipping", job_id
@@ -588,9 +677,6 @@ def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
             job.completed_at = _now()
             db.commit()
             return job.status
-
-        # ワーカーの claim で running/started_at は設定済みだが、テスト等の直接呼び出しにも
-        # 対応できるよう冪等に設定する。
         job.status = CIJobStatus.running.value
         if job.started_at is None:
             job.started_at = _now()
@@ -598,70 +684,57 @@ def execute_job(job_id: int, *, execution_token: str | None = None) -> str:
         job.progress = max(1, job.progress or 1)
         _log(job, "実行を開始しました")
         db.commit()
+        ctx = ProjectContext.of(job, project)  # 以降 ORM/セッションを持ち回らない
 
-        if job.job_type == CIJobType.full_contact_intelligence.value:
-            _run_full(db, job, project)
+    # --- ステージ 2：フェーズ実行（セッション非保持。各フェーズが短命セッションを開閉）---
+    cancel_checker = _make_cancel_checker(job_id)
+    try:
+        if ctx.job_type == CIJobType.full_contact_intelligence.value:
+            _run_full(job_id, ctx, cancel_checker)
         else:
-            name, fn = _SINGLE_PHASES[job.job_type]
-            job.current_step = f"{name} 実行中"
-            job.progress = 5
-            _log(job, f"{name} を実行します")
-            db.commit()
-            fn(db, project, _phase_progress(db, job, base=5, span=90))
-            job.progress = 95
-            _log(job, f"{name} が完了しました")
-            db.commit()
+            name, fn = _SINGLE_PHASES[ctx.job_type]
+            _set_step(job_id, f"{name} 実行中", 5)
+            fn(ctx.project_id, _make_progress_cb(job_id, base=5, span=90))
+            _set_step(job_id, f"{name} が完了しました", 95)
 
-        if _is_cancelled(db, job_id):
-            job.status = CIJobStatus.cancelled.value
-            job.current_step = "中断されました"
-            _log(job, "ジョブを中断しました")
-        else:
+        # --- ステージ 3：終端（短命セッション）---
+        if cancel_checker():
+            return _finalize(
+                job_id, CIJobStatus.cancelled.value, "ジョブを中断しました",
+                step="中断されました",
+            )
+        with worker_session() as db:
+            job = db.get(ContactIntelligenceJob, job_id)
+            if job is None:
+                return CIJobStatus.failed.value
             job.status = CIJobStatus.completed.value
             job.progress = 100
             job.current_step = "完了"
-            job.result_json = _build_result(db, project)
+            job.result_json = _build_result(db, ctx.project_id)
             _log(job, "ジョブが完了しました")
-        job.completed_at = _now()
-        db.commit()
-        return job.status
+            job.completed_at = _now()
+            db.commit()
+            return job.status
     except _JobCancelled:
-        db.rollback()
-        try:
-            job = db.get(ContactIntelligenceJob, job_id)
-            if job is not None:
-                job.status = CIJobStatus.cancelled.value
-                job.current_step = "中断されました"
-                _log(job, "ジョブを中断しました")
-                job.completed_at = _now()
-                db.commit()
-        except Exception:  # noqa: BLE001
-            db.rollback()
-        return CIJobStatus.cancelled.value
+        return _finalize(
+            job_id, CIJobStatus.cancelled.value, "ジョブを中断しました",
+            step="中断されました",
+        )
     except Exception as exc:  # noqa: BLE001  失敗は行に記録（プロセスは落とさない）
         logger.warning("contact intelligence job %s failed: %s", job_id, exc)
-        try:
-            job = db.get(ContactIntelligenceJob, job_id)
-            if job is not None:
-                job.status = CIJobStatus.failed.value
-                job.error = str(exc)[:4000]
-                job.current_step = "失敗"
-                _log(job, f"失敗しました: {exc}")
-                job.completed_at = _now()
-                db.commit()
-        except Exception:  # noqa: BLE001
-            db.rollback()
-        return CIJobStatus.failed.value
-    finally:
-        db.close()
+        return _finalize(
+            job_id, CIJobStatus.failed.value, f"失敗しました: {exc}",
+            step="失敗", error=str(exc)[:4000],
+        )
 
 
-def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> None:
+def _run_full(
+    job_id: int, ctx: ProjectContext, cancel_checker
+) -> None:
     """full_contact_intelligence：Web調査 → 再帰クロール → Document Reader →
     Search Agent → 営業推奨連絡先ランキング更新 を **1 実行内で直列に** 実行する。
+    **各フェーズ間でセッションを完全に切る**（1 本のセッションを使い回さない）。
     個別ジョブを並列起動することはしない。各フェーズ境界で中断を確認する。"""
-    # (name, fn, base_pct, span_pct)：各フェーズの進捗帯。
-    # Web Research の直後に「公式サイト再帰クロール」を実行する（要件 11）。
     phases = [
         ("Web Research", _run_web, 0, 25),
         ("公式サイト再帰クロール", _run_recursive, 25, 20),
@@ -669,32 +742,28 @@ def _run_full(db: Session, job: ContactIntelligenceJob, project: Project) -> Non
         ("AI Search Agent", _run_agent, 70, 24),
     ]
     for name, fn, base, span in phases:
-        if _is_cancelled(db, job.id):
+        if cancel_checker():
             return
-        job.current_step = f"{name} 実行中"
-        job.progress = max(1, base)
-        _log(job, f"{name} を実行します")
-        db.commit()
-        fn(db, project, _phase_progress(db, job, base=base, span=span))
-        _log(job, f"{name} が完了しました")
-        db.commit()
+        _set_step(job_id, f"{name} 実行中", max(1, base))  # 短命セッション
+        fn(ctx.project_id, _make_progress_cb(job_id, base, span))  # フェーズ内で短命開閉
+        _set_step(job_id, f"{name} が完了しました")  # 短命セッション
 
-    if _is_cancelled(db, job.id):
+    if cancel_checker():
         return
-    # 営業推奨連絡先ランキング更新（sales_contacts は都度算出のため保存対象なし。
-    # ここでは最新行から集計してログ・結果に反映する）。
-    job.current_step = "営業推奨連絡先ランキングを更新中"
-    job.progress = 95
-    db.commit()
-    row = contact_discovery_service.get_latest(db, project.id)
-    ranked = contact_discovery_service.build_sales_contacts(row) if row else []
-    _log(job, f"営業推奨連絡先ランキングを更新しました（{len(ranked)} 件）")
-    db.commit()
+    # 営業推奨連絡先ランキング更新（都度算出。最新行から集計してログに反映）。
+    _set_step(job_id, "営業推奨連絡先ランキングを更新中", 95)
+    with worker_session() as db:
+        row = contact_discovery_service.get_latest(db, ctx.project_id)
+        ranked = contact_discovery_service.build_sales_contacts(row) if row else []
+        job = db.get(ContactIntelligenceJob, job_id)
+        if job is not None:
+            _log(job, f"営業推奨連絡先ランキングを更新しました（{len(ranked)} 件）")
+        db.commit()
 
 
-def _build_result(db: Session, project: Project) -> dict:
+def _build_result(db: Session, project_id: int) -> dict:
     """完了時の結果サマリ（UI 表示・キャッシュ用）。最新の探索結果から集計する。"""
-    row = contact_discovery_service.get_latest(db, project.id)
+    row = contact_discovery_service.get_latest(db, project_id)
     if row is None:
         return {"summary": "探索結果がありません。"}
     ranked = contact_discovery_service.build_sales_contacts(row)

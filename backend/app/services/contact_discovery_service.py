@@ -1862,18 +1862,39 @@ def _latest_research(db: Session, project_id: int) -> CompanyResearch | None:
 def run_discovery(
     db: Session, project: Project, fetch_fn=None
 ) -> ContactDiscovery:
-    """探索を実行して保存する（実行のたびに履歴を追加）。失敗は failed で保存。"""
+    """探索を実行して保存する（実行のたびに履歴を追加）。失敗は failed で保存。
+
+    セッション運用：外部探索（discover=HTTP/Playwright）の前に read を確定して接続を
+    解放し、外部処理中は DB トランザクションを保持しない。行の作成・保存は外部処理の
+    **後** に短いトランザクションで行う（従来は先に INSERT していたため、外部処理中ずっと
+    未コミットのトランザクションを開いたままになっていた）。
+    """
     research = _latest_research(db, project.id)
-    row = ContactDiscovery(
-        project_id=project.id,
-        maker_id=project.maker_id,
-        status=DiscoveryStatus.pending.value,
-        # プラットフォーム URL（kickstarter/profile 等）は公式として保存しない
-        official_site_url=official_site_or_none(project.maker_url),
-    )
-    db.add(row)
+    # 外部処理で使う project のスカラーを先に確保（外部処理中の lazy load を避ける）。
+    project_id = project.id
+    maker_id = project.maker_id
+    maker_url = project.maker_url
+    # read を確定し接続をプールへ返却してから外部処理へ入る。
+    release_connection(db)
+
+    result: dict | None = None
+    error: str | None = None
     try:
         result = discover(project, research, fetch_fn=fetch_fn)
+    except Exception as exc:  # noqa: BLE001  失敗は failed として保存
+        logger.warning("contact discovery failed (project=%s): %s", project_id, exc)
+        error = str(exc)[:4000]
+
+    # 外部処理の後、短いトランザクションで行を作成・保存する。
+    row = ContactDiscovery(
+        project_id=project_id,
+        maker_id=maker_id,
+        status=DiscoveryStatus.pending.value,
+        # プラットフォーム URL（kickstarter/profile 等）は公式として保存しない
+        official_site_url=official_site_or_none(maker_url),
+    )
+    db.add(row)
+    if result is not None:
         row.status = DiscoveryStatus.completed.value
         row.primary_email = result["primary_email"]
         row.primary_contact_form_url = result["primary_contact_form_url"]
@@ -1898,10 +1919,9 @@ def run_discovery(
         row.search_queries = result["search_queries"] or None
         row.evidence_summary = result["evidence_summary"]
         row.notes = result["notes"]
-    except Exception as exc:  # noqa: BLE001  失敗は failed として保存
-        logger.warning("contact discovery failed (project=%s): %s", project.id, exc)
+    else:
         row.status = DiscoveryStatus.failed.value
-        row.error = str(exc)[:4000]
+        row.error = error
 
     db.commit()
     db.refresh(row)
@@ -1916,6 +1936,19 @@ def get_latest(db: Session, project_id: int) -> ContactDiscovery | None:
         .limit(1)
     )
     return db.scalar(stmt)
+
+
+def release_connection(db: Session) -> None:
+    """外部処理（HTTP/Playwright/Claude）の前にトランザクションを commit して、
+    DB 接続をプールへ返却する（＝外部処理中は idle in transaction を発生させない）。
+
+    併せて `expire_on_commit=False` にして、commit 後も既ロードの ORM カラム値へ
+    アクセスできるようにする（外部処理中の lazy load＝DB アクセスを避けるため）。
+    フェーズは「短時間 read →（この関数で）解放 → 外部処理 → 短時間 save/commit」の
+    順で書くこと。read が無く未変更でも commit は安全（no-op）。
+    """
+    db.expire_on_commit = False
+    db.commit()
 
 
 # ---------------- AI 連絡先リサーチ ----------------
@@ -2064,6 +2097,8 @@ def run_ai_research(
     site_domain = source_site_email_domain(getattr(project, "source_site", None))
 
     ctx = _build_research_context(project, research, row)
+    # read（context 構築）が済んだので接続を解放してから外部（Claude）を呼ぶ。
+    release_connection(db)
     try:
         result = researcher.research(ctx)
 

@@ -284,6 +284,8 @@ def run_document_reader(
     )
     site_domain = cds.source_site_email_domain(getattr(project, "source_site", None))
     now = datetime.now(timezone.utc)
+    # read が済んだので接続を解放してから外部処理（ページ取得＋AI 読解）へ入る。
+    cds.release_connection(db)
     try:
         pages = _gather_pages(project, row, fetch_fn, progress_cb)
         if progress_cb:

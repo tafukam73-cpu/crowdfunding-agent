@@ -378,6 +378,8 @@ def run_search_agent(
     ran: list[str] = []
     stop_reason = "最大ステップ数に到達したため終了しました。"
     pid = getattr(project, "id", "?")
+    # read が済んだので接続を解放してから反復探索（外部 HTTP/検索）へ入る。
+    cds.release_connection(db)
     try:
         state = _initial_state(project, row)
         for step_i in range(max_steps):
