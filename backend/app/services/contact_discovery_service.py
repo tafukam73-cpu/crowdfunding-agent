@@ -13,7 +13,7 @@ import html as _html
 import logging
 import re
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -137,6 +137,24 @@ _OBF_EMAIL_RE = re.compile(
 _OBF_AT_SUB = re.compile(_OBF_AT, re.IGNORECASE)
 _OBF_DOT_SUB = re.compile(_OBF_DOT, re.IGNORECASE)
 
+# ゼロ幅文字（スパム避けに local/domain の間へ挿入される不可視文字）。抽出前に除去する。
+_ZERO_WIDTH = dict.fromkeys([0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF], None)
+
+# span/タグ分割メール：`user</span>@<span>brand.io` のように local と @、@ と domain の
+# 間に HTML タグ・エンティティ・空白が挟まる難読化を復元する（実サイトで頻出）。
+# タグ列は短く上限し、無関係テキストの誤結合を避ける。
+_SPLIT_EMAIL_RE = re.compile(
+    r"([A-Za-z0-9._%+\-]+)"
+    r"(?:<[^>]{0,60}>|&[a-zA-Z]+;|&#0*(?:64|46);|\s){0,8}"
+    r"@"
+    r"(?:<[^>]{0,60}>|\s){0,8}"
+    r"([A-Za-z0-9.\-]+\.[A-Za-z]{2,})"
+)
+
+
+def _strip_zero_width(s: str) -> str:
+    return (s or "").translate(_ZERO_WIDTH)
+
 
 def _cf_decode(hexstr: str) -> str:
     """Cloudflare Email Protection の 16 進文字列を復号する（先頭バイトが XOR 鍵）。"""
@@ -179,7 +197,7 @@ def deobfuscate_emails(html: str) -> list[str]:
     妥当性は呼び出し側（extract_emails）で EMAIL_RE + 除外フィルタにより最終検証する。
     """
     out: list[str] = []
-    text = html or ""
+    text = _strip_zero_width(html or "")
     for hx in _CF_ATTR_RE.findall(text) + _CF_HREF_RE.findall(text):
         dec = _cf_decode(hx)
         if dec:
@@ -188,6 +206,9 @@ def deobfuscate_emails(html: str) -> list[str]:
         cand = local + "@" + _OBF_DOT_SUB.sub(".", domain)
         cand = re.sub(r"\s+", "", cand)
         out.append(cand)
+    # span/タグ分割メールの復元（local と domain を直結する）。
+    for local, domain in _SPLIT_EMAIL_RE.findall(text):
+        out.append(local + "@" + domain)
     out.extend(_js_concat_emails(text))
     return out
 
@@ -729,8 +750,10 @@ def extract_emails(html: str, source_site_domain: str | None = None) -> list[str
     """
     found: list[str] = []
     seen: set[str] = set()
-    for m in MAILTO_RE.findall(html or ""):
-        addr = m.split("?", 1)[0].strip()
+    html = _strip_zero_width(html or "")
+    for m in MAILTO_RE.findall(html):
+        # URL エンコードされた mailto（enc%40brand.io / %20 等）を復号する。
+        addr = unquote(m.split("?", 1)[0]).strip()
         key = addr.lower()
         if "@" not in addr or key in seen:
             continue
@@ -761,6 +784,46 @@ def extract_emails(html: str, source_site_domain: str | None = None) -> list[str
             continue
         found.append(addr)
     return found
+
+
+def extract_emails_with_reasons(
+    html: str, source_site_domain: str | None = None
+) -> tuple[list[str], list[dict]]:
+    """(accepted, excluded) を返す監査用の抽出。
+
+    excluded は [{"email": ..., "reason": ...}]。除外理由（excluded_reason）を追跡可能に
+    して、正規のメーカーメールが誤って落ちていないかを検証レポート/UI で確認できるようにする。
+    accepted は extract_emails と同じ集合。
+    """
+    html = _strip_zero_width(html or "")
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        addr = raw.strip().strip(".")
+        key = addr.lower()
+        if "@" in addr and key not in seen:
+            seen.add(key)
+            candidates.append(addr)
+
+    for m in MAILTO_RE.findall(html):
+        add(unquote(m.split("?", 1)[0]))
+    for m in EMAIL_RE.findall(html):
+        add(m)
+    for dec in deobfuscate_emails(html):
+        mm = EMAIL_RE.search(dec)
+        if mm:
+            add(mm.group(0))
+
+    accepted: list[str] = []
+    excluded: list[dict] = []
+    for addr in candidates:
+        reason = email_exclusion_reason(addr, source_site_domain)
+        if reason:
+            excluded.append({"email": addr, "reason": reason})
+        else:
+            accepted.append(addr)
+    return accepted, excluded
 
 
 def extract_links(html: str, base_url: str) -> list[str]:
