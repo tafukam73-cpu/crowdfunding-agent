@@ -1347,6 +1347,50 @@ function DeepInvestigationSection({
             </div>
           )}
 
+          {/* 結果別の次アクション（outcome と発見件数から提示。単なる「完了」で終わらせない） */}
+          {job.status === "completed" &&
+            (() => {
+              const outcome = String(result.outcome ?? "");
+              const c = (result.signal_counts as Record<string, number>) ?? {};
+              const NEXT: Record<string, { label: string; action: string }> = {
+                completed_with_contacts: {
+                  label: "実連絡先あり",
+                  action: "営業メールを作成（担当者がいれば担当者宛に送信）",
+                },
+                completed_with_channels: {
+                  label: "連絡チャネルのみ（メール未発見）",
+                  action:
+                    "問い合わせフォームを開く / 公式SNSにDM文面を作成して接触",
+                },
+                completed_no_contacts: {
+                  label: "連絡経路なし",
+                  action: "公式サイトの Contact/About を再調査、または手動確認",
+                },
+                partial_success: {
+                  label: "一部成功",
+                  action: "成功した経路（メール/フォーム/SNS）を使って営業を開始",
+                },
+              };
+              const n = NEXT[outcome] ?? {
+                label: outcome || "完了",
+                action: "結果を確認してください",
+              };
+              return (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-2 text-xs">
+                  <p className="font-semibold text-emerald-900">
+                    結果: {n.label}
+                  </p>
+                  <p className="mt-0.5 text-slate-700">
+                    メール {c.emails ?? 0} / フォーム {c.forms ?? 0} / SNS{" "}
+                    {c.socials ?? 0} / 担当者 {c.people ?? 0}
+                  </p>
+                  <p className="mt-1 font-medium text-emerald-800">
+                    ▶ 次のアクション: {n.action}
+                  </p>
+                </div>
+              );
+            })()}
+
           {/* ログ（最新6件） */}
           {job.logs_json && job.logs_json.length > 0 && (
             <details className="text-xs text-slate-500">

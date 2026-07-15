@@ -296,9 +296,12 @@ def run_document_reader(
         emails = _validate_emails(result.emails, official_domain or None, site_domain)
         socials = _validate_socials(result.socials)
         people = _validate_people(result.people, site_domain)
-        official = cds.official_site_or_none(result.official_site_url) or (
-            cds.official_site_or_none(row.official_site_url)
-        )
+        # AI が抽出した公式サイト候補も共通 vet を通す（無関係大企業ドメイン等を確定しない）。
+        # 既存の確定 official_site_url があればそれを尊重（非破壊）。
+        official, _ = cds.vet_official_site(
+            result.official_site_url, maker_name=getattr(project, "maker_name", None),
+            product_title=getattr(project, "title", None),
+            current=row.official_site_url)
         forms = [
             {"url": f.get("url"), "confidence": int(f.get("confidence", 0) or 0),
              "source_url": f.get("source_url", "")}

@@ -1226,10 +1226,14 @@ def vet_official_site(
     if official_site_or_none(current):
         return current, info  # 既存の正当な公式サイトを尊重（非破壊）
     # 既存が無い or 既存が FP（強化ゲートで弾かれる stale 値）の場合：
-    #   候補が rejected なら None を返す（FP を残さず除去。既存 FP へフォールバックしない）。
-    #   accepted/uncertain なら候補を採用。呼び出し側は返り値をそのまま代入すればよい
-    #   （＝再実行で stale な誤採用公式サイトが解消される。メール等は別カラムなので不変）。
+    #   - rejected（プラットフォーム/短縮URL/SNS/販促/EC）→ None（FP を残さない）。
+    #   - relevance 証拠ゼロ（例: Vitesy 案件の lg.com のような無関係大企業ドメイン）→ None。
+    #     確定保存はせず candidate 止まりにする（他候補が無いという理由だけで確定しない）。
+    #   - accepted / uncertain かつ証拠が 1 つ以上 → 採用（確定 official として保存可）。
     if info["decision"] == "rejected":
+        return None, info
+    if not info["evidence"]:
+        info.setdefault("rejection_reasons", []).append("insufficient_evidence")
         return None, info
     return info["url"], info
 

@@ -478,7 +478,13 @@ def run_search_agent(
         row.search_agent_steps = steps or None
         row.search_agent_searched_queries = ran or None
         row.search_agent_searched_urls = visited or None
-        row.search_agent_official_site_url = result["official_site_url"]
+        # Search Agent が見つけた公式サイト候補も共通 vet を通す（誤採用を残さない）。
+        _sa_official, _ = cds.vet_official_site(
+            result["official_site_url"],
+            maker_name=getattr(project, "maker_name", None),
+            product_title=getattr(project, "title", None),
+            current=row.official_site_url)
+        row.search_agent_official_site_url = _sa_official
         row.search_agent_emails = result["emails"] or None
         row.search_agent_contact_forms = result["contact_forms"] or None
         row.search_agent_socials = result["socials"] or None

@@ -74,6 +74,16 @@ def test_confirm_requires_evidence():
     check("lg.com は accepted にしない", r["decision"] != "accepted")
     check("lg.com に relevance 証拠なし",
           "no_relevance_evidence" in r["rejection_reasons"])
+    # vet：証拠不足の無関係ドメインは confirmed 保存しない（None）＝ candidate 止まり
+    vu, vi = cds.vet_official_site(
+        "https://www.lg.com/tw/projectors/x", maker_name="Vitesy",
+        product_title="Fruit Bowl")
+    check("lg.com は vet で確定しない（None）",
+          vu is None and "insufficient_evidence" in vi["rejection_reasons"])
+    # direct-linked の既知公式は証拠1つで確定採用
+    du, _ = cds.vet_official_site("https://nocfree.kr", maker_name="Maker",
+                                  direct_linked=True)
+    check("direct-linked 既知公式は確定採用", du == "https://nocfree.kr")
 
     # 短縮URLは rejected（理由付き）
     r2 = cds.confirm_official_site("https://reurl.cc/x", maker_name="Foo")
