@@ -326,6 +326,7 @@ def discover_v2(
     fetch_fn=None,
     search_fn=None,
     progress_cb=None,
+    known_official: str | None = None,
 ) -> dict:
     """人間の検索手順に近い連絡先探索を実行して結果を返す（DB 非依存）。
 
@@ -385,13 +386,20 @@ def discover_v2(
     official_url: str | None = None
     official_source: str | None = None
 
-    # 優先度 1: project.website（maker_url）
-    proj_site = cds.official_site_or_none(project.maker_url)
-    if proj_site:
-        candidates.append({
-            "url": _root_url(proj_site), "score": 100, "source": "project_website",
-            "adopted": False, "reason": "案件に登録された公式サイト",
-        })
+    # 優先度 1: project.website（maker_url）＋ 既に確定済みの公式サイト（known_official）。
+    # 既知の公式サイトを候補に含めることで、検索が失敗しても既知サイトを直接クロールして
+    # 連絡先を再取得できる（検索依存で「既知サイトを巡回しない」取りこぼしを防ぐ）。
+    _seeded: set[str] = set()
+    for seed_url, seed_reason in (
+        (cds.official_site_or_none(project.maker_url), "案件に登録された公式サイト"),
+        (cds.official_site_or_none(known_official), "既に確定済みの公式サイト"),
+    ):
+        if seed_url and _root_url(seed_url) not in _seeded:
+            _seeded.add(_root_url(seed_url))
+            candidates.append({
+                "url": _root_url(seed_url), "score": 100, "source": "project_website",
+                "adopted": False, "reason": seed_reason,
+            })
 
     # 優先度 2〜4: 会社サイト / Google / Bing 検索
     def run_search(query: str) -> list[dict]:
@@ -449,6 +457,18 @@ def discover_v2(
     )
     root_html: str | None = None
     for c in candidates:
+        # 共通の公式サイト検証を通す。プラットフォーム/短縮URL/SNS/販促/EC/中間ノードは
+        # ここで除外し、そもそもクロール対象にしない（誤サイトを巡回して誤連絡先を拾わない）。
+        vetted, info = cds.vet_official_site(
+            c["url"], maker_name=company_name, product_title=product_name,
+            direct_linked=(c["source"] == "project_website"))
+        c["decision"] = info["decision"]
+        c["evidence"] = info["evidence"]
+        c["rejection_reasons"] = info["rejection_reasons"]
+        if vetted is None:
+            c["reason"] = (c.get("reason") or "") + (
+                f"（除外: {','.join(info['rejection_reasons']) or 'rejected'}）")
+            continue
         html = fetch(c["url"])
         if html:
             official_url = c["url"]
@@ -715,6 +735,8 @@ def run_contact_discovery_v2(
     row = cds.get_latest(db, project.id)
     if row is None:
         row = cds.run_discovery(db, project)
+    # 既知の確定公式サイトを控えておき、検索が失敗しても直接クロールできるようにする。
+    known_official = cds.official_site_or_none(row.official_site_url) if row else None
 
     now = datetime.now(timezone.utc)
     # read が済んだので接続を解放してから外部処理（v2 探索＝HTTP/Playwright）へ入る。
@@ -722,7 +744,7 @@ def run_contact_discovery_v2(
     try:
         result = discover_v2(
             project, research, fetch_fn=fetch_fn, search_fn=search_fn,
-            progress_cb=progress_cb,
+            progress_cb=progress_cb, known_official=known_official,
         )
         row.v2_researched = True
         row.v2_researched_at = now
@@ -731,7 +753,12 @@ def run_contact_discovery_v2(
         row.v2_company_name = result["company_name"]
         row.v2_product_name = result["product_name"]
         row.v2_campaign_url = result["campaign_url"]
-        row.v2_official_site_url = result["official_site_url"]
+        # v2 が確定した公式サイトも共通検証を通してから保存（誤採用を残さない）。
+        v2_official, _v2_info = cds.vet_official_site(
+            result["official_site_url"], maker_name=project.maker_name,
+            product_title=project.title,
+            direct_linked=(result["official_site_source"] == "project_website"))
+        row.v2_official_site_url = v2_official
         row.v2_official_site_source = result["official_site_source"]
         row.v2_official_site_candidates = result["official_site_candidates"]
         row.v2_crawled_pages = result["crawled_pages"]
@@ -750,11 +777,16 @@ def run_contact_discovery_v2(
         row.v2_recommended_channel = result["recommended_channel"]
         row.v2_steps = result["steps"]
         row.v2_summary = result["summary"]
-        # 表示用の公式サイトが未設定/プラットフォームのままなら v2 の結果で更新する
-        if not cds.official_site_or_none(row.official_site_url) and result[
-            "official_site_url"
-        ]:
-            row.official_site_url = result["official_site_url"]
+        # 表示用（共有）公式サイトも共通検証を通して非破壊更新する。既存の正当な確定値は
+        # 上書きせず、rejected 候補（短縮URL/SNS/platform 等）は採用しない。
+        shared_official, _ = cds.vet_official_site(
+            result["official_site_url"], maker_name=project.maker_name,
+            product_title=project.title,
+            direct_linked=(result["official_site_source"] == "project_website"),
+            current=row.official_site_url)
+        # 検証済み値で置換（正当な既存は維持、stale な誤採用は除去）。メール/フォーム/
+        # SNS は別カラムなので消えない。
+        row.official_site_url = shared_official
     except Exception as exc:  # noqa: BLE001  失敗してもアプリは落とさない
         logger.warning("contact discovery v2 failed (project=%s): %s", project.id, exc)
         row.v2_researched = True

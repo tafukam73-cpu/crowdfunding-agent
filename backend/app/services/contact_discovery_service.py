@@ -1199,6 +1199,41 @@ def confirm_official_site(
             "rejection_reasons": reasons}
 
 
+def vet_official_site(
+    candidate: str | None,
+    *,
+    maker_name: str | None = None,
+    product_title: str | None = None,
+    direct_linked: bool = False,
+    jsonld_org: str | None = None,
+    current: str | None = None,
+) -> tuple[str | None, dict]:
+    """公式サイト候補を **共通ロジックで** 検証し、(保存すべき URL, 判定情報) を返す。
+
+    全 production 保存経路（v2 / Web Research / run_discovery / Search Agent 等）がこれを
+    通すことで、経路ごとにバラバラの基準で公式サイトを保存しないようにする。
+
+    - 既に正当な確定公式サイト（current）があれば上書きしない（非破壊）。
+    - confirm_official_site が rejected（プラットフォーム/短縮URL/SNS/販促/EC/無関係大企業）
+      なら採用しない（None を返す）。
+    - accepted（証拠2つ以上）/ uncertain（証拠1つ）は working official site として採用する
+      （uncertain は「確定」ではなく候補扱いだが、探索の起点には使う）。
+    判定情報は provenance（decision/evidence/rejection_reasons/score）として保存できる。
+    """
+    info = confirm_official_site(
+        candidate, maker_name=maker_name, product_title=product_title,
+        direct_linked=direct_linked, jsonld_org=jsonld_org)
+    if official_site_or_none(current):
+        return current, info  # 既存の正当な公式サイトを尊重（非破壊）
+    # 既存が無い or 既存が FP（強化ゲートで弾かれる stale 値）の場合：
+    #   候補が rejected なら None を返す（FP を残さず除去。既存 FP へフォールバックしない）。
+    #   accepted/uncertain なら候補を採用。呼び出し側は返り値をそのまま代入すればよい
+    #   （＝再実行で stale な誤採用公式サイトが解消される。メール等は別カラムなので不変）。
+    if info["decision"] == "rejected":
+        return None, info
+    return info["url"], info
+
+
 def significant_terms(*texts: str) -> set[str]:
     """ドメイン照合用の有意トークン（3 文字以上の英数字）。"""
     terms: set[str] = set()
@@ -2062,6 +2097,8 @@ def run_discovery(
     project_id = project.id
     maker_id = project.maker_id
     maker_url = project.maker_url
+    maker_name = project.maker_name
+    product_title = project.title
     # read を確定し接続をプールへ返却してから外部処理へ入る。
     release_connection(db)
 
@@ -2086,7 +2123,11 @@ def run_discovery(
         row.status = DiscoveryStatus.completed.value
         row.primary_email = result["primary_email"]
         row.primary_contact_form_url = result["primary_contact_form_url"]
-        row.official_site_url = result["official_site_url"]
+        # 公式サイトは共通検証を通す（誤採用を残さない・既存の maker_url 由来を尊重）。
+        vetted_official, _ = vet_official_site(
+            result["official_site_url"], maker_name=maker_name,
+            product_title=product_title, current=row.official_site_url)
+        row.official_site_url = vetted_official
         row.instagram_url = result["instagram_url"]
         row.facebook_url = result["facebook_url"]
         row.twitter_url = result["twitter_url"]

@@ -91,10 +91,27 @@ def test_confirm_requires_evidence():
     check("証拠1つは uncertain", r4["decision"] == "uncertain")
 
 
+def test_vet_official_site_merge():
+    print("test_vet_official_site_merge")
+    # 正当な既存は非破壊で維持
+    u, _ = cds.vet_official_site("https://sharge.com", current="https://greenlab.com",
+                                 maker_name="Sharge")
+    check("正当な既存を維持（非破壊）", u == "https://greenlab.com")
+    # stale な誤採用(current=reurl.cc)＋候補も rejected → None（FP を残さない）
+    u2, info2 = cds.vet_official_site("https://reurl.cc/x", current="https://reurl.cc",
+                                      maker_name="X")
+    check("stale FP は除去（None）", u2 is None and info2["decision"] == "rejected")
+    # stale FP ＋ 正当候補（ドメイン一致＋直リンク）→ 候補で置換
+    u3, _ = cds.vet_official_site("https://sharge.com", current="https://reurl.cc",
+                                  maker_name="Sharge", direct_linked=True)
+    check("stale FP を正当候補で置換", u3 == "https://sharge.com")
+
+
 def main():
     test_reject_known_false_positives()
     test_accept_valid_maker_domains()
     test_confirm_requires_evidence()
+    test_vet_official_site_merge()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 
