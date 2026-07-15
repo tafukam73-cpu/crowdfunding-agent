@@ -1205,11 +1205,11 @@ function DeepInvestigationSection({
     <div className="rounded-md border-2 border-indigo-300 bg-indigo-50/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-bold text-indigo-900">🔎 じっくり調査（推奨）</p>
+          <p className="text-sm font-bold text-indigo-900">🔎 じっくり調査（総合探索）</p>
           <p className="mt-0.5 text-xs text-indigo-700">
-            Web調査 → Document Reader → Search Agent →
-            営業推奨ランキング更新を、バックグラウンドでまとめて実行します（重い探索でも
-            タイムアウトしません。進捗はここに表示されます）。
+            Web調査 → 公式サイト巡回 → Document Reader → Search Agent →
+            連絡先ランキング更新をまとめて実行します。1フェーズが失敗しても後続は継続し、
+            結果は「実連絡先あり／連絡チャネルのみ／成果なし／一部成功」で正直に表示します。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -2466,12 +2466,15 @@ function ContactHunterSection({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-rose-900">
-            👤 Contact Hunter（営業担当者の発見）
+            👤 Contact Hunter（担当者抽出・実験的）
+            <span className="ml-2 rounded bg-rose-200 px-1.5 py-0.5 text-[10px] font-bold text-rose-800">
+              実験的
+            </span>
           </p>
           <p className="mt-0.5 text-xs text-rose-700">
-            会社ではなく「誰に送るか」を特定します。Business Development / Partnership /
-            Export / Sales / Founder などを、公式サイトのTeam・About・Leadership・
-            LinkedInから出典付きで探します（推測の人名は作りません）。
+            公開情報に実在担当者が掲載されている場合のみ、氏名・役職・根拠URLを抽出します
+            （推測の人名は作りません）。見つからない場合は会社の問い合わせ窓口（メール／
+            フォーム／SNS）を提示します。担当者の発見は営業の必須条件ではありません。
           </p>
         </div>
         <button
