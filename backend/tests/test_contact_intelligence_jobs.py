@@ -307,6 +307,64 @@ def test_claim_skips_project_with_running_heavy():
     db.close()
 
 
+def test_full_phase_failure_does_not_halt():
+    """full：1 フェーズ失敗でも後続フェーズを継続し、job は failed にしない。"""
+    print("test_full_phase_failure_does_not_halt")
+    _install_fakes()
+    _order.clear()
+
+    def boom_recursive(project_id, cb=None):
+        _order.append("recursive")
+        raise RuntimeError("recursive boom")
+
+    ci._run_recursive = boom_recursive
+    db = SessionLocal()
+    proj = _mk_project(db)
+    job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    ci.execute_job(job.id)
+    db.refresh(job)
+    check("recursive 失敗でも後続 doc/agent が実行", "doc" in _order and "agent" in _order)
+    check("1 フェーズ失敗で job は failed にしない", job.status == CIJobStatus.completed.value)
+    phases = (job.result_json or {}).get("phases") or []
+    check("フェーズ結果を記録", any(p.get("status") == "failed" for p in phases))
+    check("outcome を保存", (job.result_json or {}).get("outcome") is not None)
+    ci._run_recursive = _fake_recursive
+    db.close()
+
+
+def test_full_all_phases_failed_is_failed():
+    """full：全フェーズ失敗なら job は failed。"""
+    print("test_full_all_phases_failed_is_failed")
+    _install_fakes()
+
+    def boom(project_id, cb=None):
+        raise RuntimeError("boom")
+
+    ci._run_web = ci._run_recursive = ci._run_doc = ci._run_agent = boom
+    db = SessionLocal()
+    proj = _mk_project(db)
+    job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    ci.execute_job(job.id)
+    db.refresh(job)
+    check("全フェーズ失敗で failed", job.status == CIJobStatus.failed.value)
+    db.close()
+
+
+def test_completed_no_contacts_outcome():
+    """成果 0 件の完了は completed_no_contacts（単なる completed にしない）。"""
+    print("test_completed_no_contacts_outcome")
+    _install_fakes()  # フェイクは DB に何も保存しない＝成果 0
+    db = SessionLocal()
+    proj = _mk_project(db)
+    job, _ = ci.create_job(db, proj, "full_contact_intelligence", runner=lambda jid: None)
+    ci.execute_job(job.id)
+    db.refresh(job)
+    check("status は completed", job.status == CIJobStatus.completed.value)
+    check("outcome は completed_no_contacts",
+          (job.result_json or {}).get("outcome") == ci.OUTCOME_NO_CONTACTS)
+    db.close()
+
+
 def main():
     test_create_and_run_single()
     test_full_order()
@@ -318,6 +376,9 @@ def main():
     test_recover_stale_heartbeat()
     test_claim_atomic_no_double_run()
     test_claim_skips_project_with_running_heavy()
+    test_full_phase_failure_does_not_halt()
+    test_full_all_phases_failed_is_failed()
+    test_completed_no_contacts_outcome()
     print(f"\n{_passed} passed, {_failed} failed")
     return 1 if _failed else 0
 
