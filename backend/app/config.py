@@ -129,3 +129,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# --- テスト DB 安全ガード（本番実行では no-op） ---
+# 設定 singleton を読み込んだ時点で、テスト文脈（TESTING=true / pytest 実行中）にも
+# かかわらず接続先が本番 DB（crowdfunding / host db=cfagent-db）を指していれば、
+# ここでプロセスを即時終了する。「本番設定 singleton の読み込みでも安全側に停止」。
+from app import db_safety as _db_safety  # noqa: E402
+
+_db_safety.guard_or_abort(settings.database_url)

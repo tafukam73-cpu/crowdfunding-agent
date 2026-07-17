@@ -6,7 +6,12 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import db_safety
 from app.config import settings
+
+# テスト文脈で本番 DB を指したままエンジンを生成しようとした場合、接続前に停止する。
+# 本番実行（TESTING 未設定・pytest 非実行）では no-op。config.py と二重の防御。
+db_safety.guard_or_abort(settings.database_url)
 
 # このプロセスの種別（pg_stat_activity.application_name に出す。API/worker/job の
 # 接続を区別して idle in transaction の発生源を特定できるようにする）。

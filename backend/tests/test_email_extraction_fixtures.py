@@ -100,16 +100,34 @@ def test_real_wadiz_capture():
         # ため、無ければこのセクションはスキップ（合成の難読化テストは別途カバー）。
         print("  skip - wadiz 実データ fixture 不在（build_gold_candidates で生成）")
         return
+    from app.services import source_ownership as so
+
     records = json.loads(fx.read_text(encoding="utf-8"))
     site_domain = cds.source_site_email_domain("wadiz")
-    # evidence テキストごとに、その value（実メール）が抽出でき、support@wadiz.kr は出ない
+    # evidence テキストごとに value（実メール）を所有者分類で検証する。maker 直通は direct
+    # に出て運営(support@wadiz.kr)は出ない。代理店(brand-kr.com 等)は maker 正式メールに
+    # せず、fallback として保持されること（＝完全消去しない）を確認する。
     for r in records:
         ev = r.get("evidence") or ""
         val = (r.get("value") or "").lower()
         if not ev or not val:
             continue
         got = extracted(ev, site_domain)
-        check(f"実Wadiz抽出 p{r['project_id']}: {val}", val in got)
+        cls = cds.extract_emails_classified(ev, source_site_domain=site_domain)
+        direct = {d["email"] for d in cls["direct"]}
+        fallback = {d["email"] for d in cls["fallback"]}
+        own = so.classify_domain(val).ownership_class
+        if own in ("agency", "distributor"):
+            # 代理店/販売窓口: maker 正式メールにしない（direct 非採用）が fallback で保持。
+            check(f"実Wadiz代理店 direct非採用 p{r['project_id']}: {val}", val not in got)
+            check(f"実Wadiz代理店 fallback保持 p{r['project_id']}: {val}", val in fallback)
+        elif own in ("crowdfunding_platform", "crowdfunding_marketing_service",
+                     "url_shortener", "messenger", "retailer", "unrelated_company"):
+            # 運営/販促/短縮/小売等: direct にも fallback にも入れない。
+            check(f"実Wadiz第三者除外 p{r['project_id']}: {val}", val not in got and val not in fallback)
+        else:
+            # maker 直通/個人/unknown: 従来どおり抽出（direct 側で拾う）。
+            check(f"実Wadiz抽出 p{r['project_id']}: {val}", val in got)
         check(f"実Wadiz運営除外 p{r['project_id']}", "support@wadiz.kr" not in got)
 
 
