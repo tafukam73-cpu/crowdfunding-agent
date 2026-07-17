@@ -28,7 +28,7 @@ from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
 from app.models.crm import ActivityKind, Contact, SalesActivity
 from app.models.project import Project
-from app.services import crm_service, usage_service
+from app.services import crm_service, source_ownership, usage_service
 from app.services.email_validation import (
     business_email_reason,
     email_confidence,
@@ -106,7 +106,16 @@ PDF_KEYWORDS = (
     "factsheet", "fact-sheet", "onepager", "one-pager",
 )
 
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# ReDoS 対策：local-part は RFC 5321 の 64 文字上限で量指定子を閉じ、直前に
+# 「local-part 文字でない」ことを要求する negative lookbehind を置く。これにより
+# ①各開始位置の後戻りが定数（≤64）に収まり ②巨大な連続トークン（base64 sourcemap 等、
+# 215k 文字）でも lookbehind がトークン途中の開始を即座に弾くため findall が O(n) になる
+# （従来は開始位置ごとに全長を舐め直して O(n^2) → 60 秒以上 CPU を占有していた）。
+# ドメインも 253 文字・TLD 24 文字で上限し、後戻りを有界化する。
+EMAIL_RE = re.compile(
+    r"(?<![A-Za-z0-9._%+\-])"
+    r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,24}"
+)
 MAILTO_RE = re.compile(r"""mailto:([^"'>?\s]+)""", re.IGNORECASE)
 HREF_RE = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 
@@ -128,10 +137,11 @@ _OBF_DOT = (
     r"|\s+dot\s+)"
 )
 _OBF_EMAIL_RE = re.compile(
-    r"([A-Za-z0-9._%+\-]+)"
+    r"(?<![A-Za-z0-9._%+\-])"
+    r"([A-Za-z0-9._%+\-]{1,64})"
     + _OBF_AT
-    + r"([A-Za-z0-9.\-]+(?:" + _OBF_DOT + r"[A-Za-z0-9.\-]+)*"
-    + r"(?:" + _OBF_DOT + r"|\.)[A-Za-z]{2,})",
+    + r"([A-Za-z0-9.\-]{1,63}(?:" + _OBF_DOT + r"[A-Za-z0-9.\-]{1,63}){0,10}"
+    + r"(?:" + _OBF_DOT + r"|\.)[A-Za-z]{2,24})",
     re.IGNORECASE,
 )
 _OBF_AT_SUB = re.compile(_OBF_AT, re.IGNORECASE)
@@ -144,16 +154,43 @@ _ZERO_WIDTH = dict.fromkeys([0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF], None)
 # 間に HTML タグ・エンティティ・空白が挟まる難読化を復元する（実サイトで頻出）。
 # タグ列は短く上限し、無関係テキストの誤結合を避ける。
 _SPLIT_EMAIL_RE = re.compile(
-    r"([A-Za-z0-9._%+\-]+)"
-    r"(?:<[^>]{0,60}>|&[a-zA-Z]+;|&#0*(?:64|46);|\s){0,8}"
+    r"(?<![A-Za-z0-9._%+\-])"
+    r"([A-Za-z0-9._%+\-]{1,64})"
+    r"(?:<[^>]{0,60}>|&[a-zA-Z]{1,10};|&#0*(?:64|46);|\s){0,8}"
     r"@"
     r"(?:<[^>]{0,60}>|\s){0,8}"
-    r"([A-Za-z0-9.\-]+\.[A-Za-z]{2,})"
+    r"([A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,24})"
 )
 
 
 def _strip_zero_width(s: str) -> str:
     return (s or "").translate(_ZERO_WIDTH)
+
+
+# 1 回のメール抽出で正規表現に渡す入力の絶対上限（文字数）。実ページ HTML は通常
+# 数十万文字。base64 を含む巨大ページでも走査コストを有界化するための最終防波堤。
+MAX_EMAIL_SCAN_CHARS = 2_000_000
+# メールになり得ない「巨大トークン塊」。区切り（'.' '@' 空白等）を含まない
+# [A-Za-z0-9+/=]（base64 / hex / 連続英数字）が 80 文字以上連続する塊は、RFC 上限
+# （local-part 64・ドメインラベル 63）を超えるため決してメールにならない。事前に
+# 空白へ潰して sourcemap / インライン base64 の走査コストを消す（正規メールは無傷）。
+_LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=]{80,}")
+
+
+def prescrub_for_email(text: str) -> str:
+    """メール抽出用に入力を整える：巨大 base64/hex/連続トークン塊を除去し長さを上限。
+
+    メールは局所的（local ≤64・label ≤63・'@' と '.' で区切られる）。区切りを含まない
+    80 文字以上の連続塊はメールになり得ないので空白へ潰す。これで Indiegogo 実ページの
+    215k 文字 base64 sourcemap のような入力でも regex の走査が爆発しない。正規メールは
+    '@' と '.' を含むため塊にならず、この処理の影響を受けない。
+    """
+    if not text:
+        return ""
+    text = _LONG_TOKEN_RE.sub(" ", text)
+    if len(text) > MAX_EMAIL_SCAN_CHARS:
+        text = text[:MAX_EMAIL_SCAN_CHARS]
+    return text
 
 
 def _cf_decode(hexstr: str) -> str:
@@ -170,7 +207,7 @@ def _cf_decode(hexstr: str) -> str:
 # JavaScript の文字列連結でメールを組み立てる難読化（"info" + "@" + "brand.com" /
 # 'info' + '@' + 'brand' + '.' + 'com' 等）。連結された引用符列を検出して結合する。
 _JS_CONCAT_SEQ_RE = re.compile(
-    r"""(['"][^'"]{0,64}['"](?:\s*\+\s*['"][^'"]{0,64}['"])+)"""
+    r"""(['"][^'"]{0,64}['"](?:\s*\+\s*['"][^'"]{0,64}['"]){1,50})"""
 )
 # 引用符閉じ + 連結演算子 + 引用符開き（"..." + "..." の“のり”部分）
 _JS_CONCAT_GLUE_RE = re.compile(r"""['"]\s*\+\s*['"]""")
@@ -197,7 +234,7 @@ def deobfuscate_emails(html: str) -> list[str]:
     妥当性は呼び出し側（extract_emails）で EMAIL_RE + 除外フィルタにより最終検証する。
     """
     out: list[str] = []
-    text = _strip_zero_width(html or "")
+    text = prescrub_for_email(_strip_zero_width(html or ""))
     for hx in _CF_ATTR_RE.findall(text) + _CF_HREF_RE.findall(text):
         dec = _cf_decode(hx)
         if dec:
@@ -252,6 +289,19 @@ SOURCE_SITE_DOMAINS = {
     "greenfunding": "greenfunding.jp",
     "wadiz": "wadiz.kr",
 }
+
+
+# source_ownership の分類のうち「ドメインだけで常に第三者と確定でき、maker の営業
+# メールになり得ない」クラス。email_exclusion_reason で一括除外する（unknown /
+# personal_email / maker_* は含めない＝ドメイン名だけで全消ししない）。
+_THIRD_PARTY_EMAIL_CLASSES = frozenset({
+    "crowdfunding_platform",
+    "crowdfunding_marketing_service",
+    "agency",
+    "url_shortener",
+    "messenger",
+    "retailer",
+})
 
 
 def _domain_matches(domain: str, target: str) -> bool:
@@ -331,6 +381,14 @@ def email_exclusion_reason(
     # source_site と一致するプラットフォーム（静的リストに無くても除外）
     if source_site_domain and _domain_matches(domain, source_site_domain):
         return f"platform_domain:{source_site_domain}"
+
+    # 第三者ドメイン（運営/販促支援/代理店/短縮URL/メッセンジャー/小売）は maker の
+    # 営業メールになり得ない。source_ownership の deny-list 分類で一括除外する。
+    # ここでは ctx を渡さない＝「ドメインだけで常に第三者と確定できるクラス」のみを
+    # 対象にし、maker になり得る unknown / personal は消さない（無条件全消しを避ける）。
+    third_party = source_ownership.classify_domain(addr)
+    if third_party.ownership_class in _THIRD_PARTY_EMAIL_CLASSES:
+        return f"third_party_owner:{third_party.ownership_class}:{domain}"
 
     # 除外ドメイン（完全一致 / サブドメイン）
     for d in EXCLUDED_EMAIL_DOMAINS:
@@ -750,7 +808,7 @@ def extract_emails(html: str, source_site_domain: str | None = None) -> list[str
     """
     found: list[str] = []
     seen: set[str] = set()
-    html = _strip_zero_width(html or "")
+    html = prescrub_for_email(_strip_zero_width(html or ""))
     for m in MAILTO_RE.findall(html):
         # URL エンコードされた mailto（enc%40brand.io / %20 等）を復号する。
         addr = unquote(m.split("?", 1)[0]).strip()
@@ -795,7 +853,7 @@ def extract_emails_with_reasons(
     して、正規のメーカーメールが誤って落ちていないかを検証レポート/UI で確認できるようにする。
     accepted は extract_emails と同じ集合。
     """
-    html = _strip_zero_width(html or "")
+    html = prescrub_for_email(_strip_zero_width(html or ""))
     candidates: list[str] = []
     seen: set[str] = set()
 
@@ -826,6 +884,71 @@ def extract_emails_with_reasons(
     return accepted, excluded
 
 
+def _email_candidates(html: str) -> list[str]:
+    """HTML からメール候補（mailto / 素の文字列 / 難読化復元）を重複排除して集める。"""
+    html = prescrub_for_email(_strip_zero_width(html or ""))
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        addr = raw.strip().strip(".")
+        key = addr.lower()
+        if "@" in addr and key not in seen:
+            seen.add(key)
+            candidates.append(addr)
+
+    for m in MAILTO_RE.findall(html):
+        add(unquote(m.split("?", 1)[0]))
+    for m in EMAIL_RE.findall(html):
+        add(m)
+    for dec in deobfuscate_emails(html):
+        mm = EMAIL_RE.search(dec)
+        if mm:
+            add(mm.group(0))
+    return candidates
+
+
+def extract_emails_classified(
+    html: str,
+    ctx: source_ownership.Ctx | None = None,
+    source_site_domain: str | None = None,
+    person_names: set[str] | None = None,
+) -> dict[str, list[dict]]:
+    """メール候補を所有者分類し direct / fallback / rejected / unknown に振り分ける。
+
+    無条件全消しを避け、営業価値のある連絡先を段階的に保持する（要件 Phase 1）:
+      - direct   : maker 公式ドメイン / 公式ページ掲載の人物メール（正式連絡先）。
+      - fallback : 代理店（agency）・正規販売窓口（distributor）。maker 直通ではないが
+                   営業チャネルとして保持（accepted_as_fallback_contact / contact_route 付き）。
+      - rejected : 運営(platform)/販促支援(marketing)/短縮URL/メッセンジャー/小売/
+                   無関係企業/機能アドレス（noreply 等）/UI 片。fallback にも入れない。
+      - unknown  : 所有者証拠が無い候補。低 confidence で保留（削除しない）。
+    各要素は source_ownership.classify_email の dict（rejection_reason / evidence 付き）。
+    """
+    direct: list[dict] = []
+    fallback: list[dict] = []
+    rejected: list[dict] = []
+    unknown: list[dict] = []
+    # agency/distributor を指す除外理由は「maker 直通でない」印であり、fallback 保持の
+    # 妨げにはしない。それ以外の pre 理由（アセット/ハッシュ/運営/UI 片等）は真の除外。
+    _route_pre = ("third_party_owner:agency", "third_party_owner:distributor")
+    for addr in _email_candidates(html):
+        pre = email_exclusion_reason(addr, source_site_domain)
+        info = source_ownership.classify_email(addr, ctx, person_names)
+        hard_pre = pre if (pre and not pre.startswith(_route_pre)) else None
+        if info["accepted_as_maker_contact"] and not hard_pre:
+            direct.append(info)
+        elif info["accepted_as_fallback_contact"] and not hard_pre:
+            fallback.append(info)
+        elif info["ownership_class"] == "unknown" and not hard_pre:
+            unknown.append(info)
+        else:
+            if hard_pre and not info["rejection_reason"]:
+                info = {**info, "rejection_reason": hard_pre}
+            rejected.append(info)
+    return {"direct": direct, "fallback": fallback, "rejected": rejected, "unknown": unknown}
+
+
 def extract_links(html: str, base_url: str) -> list[str]:
     """HTML の href を絶対 URL 化して返す（http/https のみ・重複排除）。"""
     out: list[str] = []
@@ -845,11 +968,17 @@ def extract_links(html: str, base_url: str) -> list[str]:
 
 
 def extract_socials(html: str, base_url: str) -> dict[str, str]:
-    """HTML から SNS リンク（各 1 つ目）を抽出する。"""
+    """HTML から SNS リンク（各 1 つ目）を抽出する。
+
+    クラウドファンディング運営自身の公式アカウント（facebook.com/kickstarter,
+    instagram.com/zeczec_com 等）は maker の SNS ではないため採用しない（Phase 6）。
+    """
     socials: dict[str, str] = {}
     for link in extract_links(html, base_url):
         if _SOCIAL_EXCLUDE.search(link):
             continue
+        if source_ownership.is_platform_self_social(link):
+            continue  # 運営（KS/Indiegogo/Zeczec/Wadiz）自身のアカウント＝FP
         for platform, pat in SOCIAL_PATTERNS.items():
             if platform in socials:
                 continue

@@ -306,7 +306,9 @@ def test_browser_capture_confirm_source_type():
     print("test_browser_capture_confirm_source_type")
     db = SessionLocal()
     p = _mk(db)
-    pv = w.preview(db, p, content="<div>메이커 문의 real@makerz.co.kr</div>",
+    # サンプルは maker 公式ドメイン（makerz.co.kr は既知代理店で正しく除外されるため使わない。
+    # このテストの意図は browser-capture 保存フローと source_type の検証でメール分類ではない）。
+    pv = w.preview(db, p, content="<div>메이커 문의 real@makerbrand.co.kr</div>",
                    content_type="html", source_url=SRC, source_type="wadiz_browser_capture")
     out = w.confirm(db, p, content_hash_value=pv["content_hash"], emails=pv["emails"],
                     source_url=SRC, source_type="wadiz_browser_capture")
