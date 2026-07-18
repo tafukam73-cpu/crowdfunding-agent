@@ -333,6 +333,34 @@ _PLATFORM_HANDLE_RE = re.compile(
 )
 
 
+# --- 人物出典の maker 所有判定（Phase 2 人物抽出）---
+# 人物の出典 URL として不適格な第三者クラス（運営/販促支援/短縮/メッセンジャー/小売/代理店）。
+# これらのページに書かれた人名は maker 本人の連絡先ではない（運営 UI・第三者記事等）。
+PERSON_SOURCE_DENY_CLASSES = frozenset({
+    "crowdfunding_platform", "crowdfunding_marketing_service", "agency",
+    "url_shortener", "messenger", "retailer",
+})
+
+
+def is_maker_owned_person_source(url: str, official_domain: str | None = None) -> bool:
+    """人物の出典 URL が maker 所有ページか（platform/第三者ページなら False）。
+
+    - official_domain が与えられれば「同一登録ドメインのみ」True（厳格。公式サイト由来だけ採用）。
+    - 与えられなければ、deny-list クラス（運営/販促/短縮/メッセンジャー/小売/代理店）で
+      ないことのみ要求（unknown/maker は許容）。
+    無条件で全ドメインを弾くのではなく、第三者と確定できるクラスのみを排除する。
+    """
+    if not url:
+        return False
+    own = classify_domain(url)
+    if own.ownership_class in PERSON_SOURCE_DENY_CLASSES:
+        return False
+    if official_domain:
+        off = registrable_domain(official_domain)
+        return bool(off) and registrable_domain(url) == off
+    return True
+
+
 def is_platform_self_social(url: str) -> bool:
     """SNS URL がクラファン運営自身の公式アカウントか（facebook.com/kickstarter 等）。
 

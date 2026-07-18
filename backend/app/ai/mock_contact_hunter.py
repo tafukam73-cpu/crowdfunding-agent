@@ -29,6 +29,7 @@ from app.ai.contact_hunter import (
     title_to_priority,
 )
 from app.services import contact_discovery_service as cds
+from app.services import source_ownership as so
 from app.services import web_research_service as wrs
 
 logger = logging.getLogger("ai.mock_contact_hunter")
@@ -281,8 +282,14 @@ def _find_email_for(name: str, mailtos: list[str]) -> str | None:
 
 
 def extract_people_from_html(html: str, page_url: str) -> list[PersonResult]:
-    """1 ページの HTML から担当者候補を抽出する（出典 = page_url）。"""
+    """1 ページの HTML から担当者候補を抽出する（出典 = page_url）。
+
+    クラファン運営/販促/短縮/メッセンジャー/小売/代理店ページ由来の人物は採用しない
+    （運営 UI 断片＝Open Calls / Combined Shape 等の FP 源。Phase 2 Step A）。
+    """
     if not html:
+        return []
+    if not so.is_maker_owned_person_source(page_url):
         return []
 
     raw: list[dict] = []
