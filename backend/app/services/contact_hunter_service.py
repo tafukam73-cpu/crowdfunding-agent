@@ -21,6 +21,7 @@ from app.services import (
     company_research_service,
     contact_discovery_service as cds,
     crm_service,
+    source_ownership,
     usage_service,
 )
 from app.services.email_validation import is_valid_business_email
@@ -70,11 +71,16 @@ def run_hunt(
     # 既存行を置き換える（最新の発見結果を保持）
     db.execute(delete(ContactPerson).where(ContactPerson.project_id == project.id))
 
+    official_domain = cds._domain_of(getattr(project, "maker_url", None)) or None
     rows: list[ContactPerson] = []
     seen: set[str] = set()
     for p in result.people:
         # 出典 URL が無い人物は採用しない（捏造防止）
         if not p.source_url:
+            continue
+        # 出典が maker 所有ページでない（運営/販促/第三者ドメイン）人物は保存しない
+        # （platform ページ上に代表者名が書かれていても、人物保存元には使わない。Phase 2 Step A）。
+        if not source_ownership.is_maker_owned_person_source(p.source_url, official_domain):
             continue
         name = (p.name or "").strip()
         if not name:

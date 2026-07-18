@@ -27,6 +27,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 BACKEND = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BACKEND))
 
+from app.ai.contact_hunter import looks_like_person_name  # noqa: E402
 from app.services import contact_discovery_service as cds  # noqa: E402
 from app.services import source_ownership as so  # noqa: E402
 
@@ -281,24 +282,97 @@ def _names(xs):
     return out
 
 
-def eval_people():
+def _pnorm(name):
+    return " ".join(str(name or "").split()).strip().lower()
+
+
+# 役職互換グループ（compatible role match 用。CEO≒代表 等。Creator は Founder と同一視しない）。
+_ROLE_GROUPS = [
+    {"ceo", "chief executive", "代表", "대표", "president", "managing director", "社長"},
+    {"founder", "co-founder", "cofounder", "創業者", "创始人", "창업자", "owner"},
+    {"sales", "sales director", "head of sales", "営業", "business development"},
+    {"marketing", "marketing director", "cmo", "brand", "brand designer"},
+    {"pr", "press", "media", "communications", "publicity", "広報"},
+]
+
+
+def _role_group(role):
+    low = _pnorm(role)
+    hits = set()
+    for i, grp in enumerate(_ROLE_GROUPS):
+        if any(k in low for k in grp):
+            hits.add(i)
+    return hits
+
+
+def _role_relation(pred_role, exp_role):
+    """exact / compatible / mismatch / missing を返す。"""
+    pr, er = _pnorm(pred_role), _pnorm(exp_role)
+    if not pr:
+        return "missing"
+    if pr == er or (er and (er in pr or pr in er)):
+        return "exact"
+    if _role_group(pred_role) & _role_group(exp_role):
+        return "compatible"
+    return "mismatch"
+
+
+def people_before(pid):
+    return PRED[pid].get("saved_people") or []
+
+
+def people_after(pid):
+    """Step A フィルタ適用: 非maker/第三者 source と UI 片名を除去。"""
+    off = GT[pid]["expected_official_site"]
+    offdom = so.registrable_domain(off) if off else None
+    out = []
+    for p in PRED[pid].get("saved_people") or []:
+        src = p.get("source_url") if isinstance(p, dict) else None
+        nm = p.get("name") if isinstance(p, dict) else (p[0] if isinstance(p, (list, tuple)) else p)
+        if src is not None and not so.is_maker_owned_person_source(src, offdom):
+            continue
+        if not looks_like_person_name(nm):
+            continue
+        out.append(p)
+    return out
+
+
+def _pred_pairs(people):
+    """[(name_lower, role_str)] を返す（dict / [name,role] 両対応）。"""
+    out = []
+    for p in people or []:
+        if isinstance(p, dict):
+            out.append((_pnorm(p.get("name")), p.get("title") or ""))
+        elif isinstance(p, (list, tuple)) and p:
+            out.append((_pnorm(p[0]), p[1] if len(p) > 1 else ""))
+    return out
+
+
+def eval_people(pred_of, label):
     tp = fp = fn = 0
     n = 0
+    role_stats = {"exact": 0, "compatible": 0, "mismatch": 0, "missing": 0}
     for pid in IDS:
         g = GT[pid]
         if g["verification_status"] not in STRICT:
             continue
-        exp = _names(g["expected_people"])
-        pred = _names(PRED[pid].get("saved_people"))
-        if not exp and not pred:
+        exp_pairs = {name: role for name, role in _pred_pairs(
+            [[p[0], p[1] if len(p) > 1 else ""] for p in g["expected_people"]])}
+        pred_pairs = dict(_pred_pairs(pred_of(pid)))
+        if not exp_pairs and not pred_pairs:
             continue
         n += 1
-        tp += len(exp & pred)
-        fp += len(pred - exp)
-        fn += len(exp - pred)
+        exp_n, pred_n = set(exp_pairs), set(pred_pairs)
+        tp += len(exp_n & pred_n)
+        fp += len(pred_n - exp_n)
+        fn += len(exp_n - pred_n)
+        for nm in (exp_n & pred_n):
+            role_stats[_role_relation(pred_pairs[nm], exp_pairs[nm])] += 1
     p, r, f = prf(tp, fp, fn)
-    print(f"  N(verified で people 期待 or 予測ありの案件)={n}  "
-          f"TP={tp} FP={fp} FN={fn}  P={pct(p)} R={pct(r)} F1={pct(f)}")
+    print(f"  [{label}] N={n}  TP={tp} FP={fp} FN={fn}  P={pct(p)} R={pct(r)} F1={pct(f)}")
+    print(f"    role(TP人物の役職一致): exact={role_stats['exact']} "
+          f"compatible={role_stats['compatible']} mismatch={role_stats['mismatch']} "
+          f"missing={role_stats['missing']}")
 
 
 def main():
@@ -348,8 +422,9 @@ def main():
     eval_sns(sns_before, "BEFORE saved")
     eval_sns(sns_after, "AFTER  自己SNS除外")
 
-    print("\n■ 人物（name 正規化 / entity）")
-    eval_people()
+    print("\n■ 人物（name 正規化 / entity）  Phase2 Step A before→after")
+    eval_people(people_before, "BEFORE saved")
+    eval_people(people_after, "AFTER  Step A(非maker/UI除去)")
 
     print("\n注: partially_verified(2) と blocked/unresolved(8) は上記 strict 分母から除外。")
     print("    plausible_unconfirmed_emails は TP/FP どちらにも数えていない。")

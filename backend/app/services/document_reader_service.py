@@ -33,6 +33,7 @@ from app.ai.document_reader import (
 from app.models.contact_discovery import ContactDiscovery
 from app.models.project import Project
 from app.services import contact_discovery_service as cds
+from app.services import source_ownership
 from app.services import web_research_service as wr
 
 logger = logging.getLogger("document_reader")
@@ -232,6 +233,9 @@ def _validate_people(people, site_domain) -> list[dict]:
     for p in people:
         name = (p.name or "").strip()
         if not name or not (p.source_url or "").strip():
+            continue
+        # 運営/販促/第三者ドメイン由来の人物は採用しない（UI 断片・第三者記事の除去。Phase 2 Step A）。
+        if not source_ownership.is_maker_owned_person_source(p.source_url):
             continue
         email = (p.email or "").strip() or None
         if email and cds.email_exclusion_reason(email, site_domain):

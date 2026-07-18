@@ -66,6 +66,11 @@ _NON_NAME_WORDS = frozenset(
         "instagram", "twitter", "youtube", "follow", "more", "read", "learn",
         "privacy", "terms", "policy", "all", "rights", "reserved", "copyright",
         "newsletter", "subscribe", "email", "click", "here",
+        # UI/nav/ボタン片（クラファン運営 UI で人名に誤認されやすいもの。Phase 2）
+        "open", "calls", "call", "combined", "shape", "copy", "close", "toggle",
+        "skip", "loading", "accept", "cookie", "cookies", "settings", "share",
+        "save", "submit", "cancel", "next", "back", "show", "hide", "quest",
+        "zine", "make", "micro", "kiss", "tell", "witchstarter", "long", "short",
     }
 )
 
