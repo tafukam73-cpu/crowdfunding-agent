@@ -71,6 +71,10 @@ _NON_NAME_WORDS = frozenset(
         "skip", "loading", "accept", "cookie", "cookies", "settings", "share",
         "save", "submit", "cancel", "next", "back", "show", "hide", "quest",
         "zine", "make", "micro", "kiss", "tell", "witchstarter", "long", "short",
+        # EC/配送/言語切替などの nav・commerce 片（"Shipping To" 等の誤検出を防ぐ）
+        "shipping", "to", "from", "order", "orders", "checkout", "delivery",
+        "currency", "language", "country", "region", "worldwide", "free", "add",
+        "wishlist", "account", "sale", "sales", "new", "collection", "collections",
     }
 )
 
@@ -85,6 +89,36 @@ _TITLE_WORDS = frozenset(
 )
 
 _PERSON_NAME_RE = re.compile(r"^[A-Z][A-Za-zÀ-ÿ.'\-]+(?:\s+[A-Z][A-Za-zÀ-ÿ.'\-]+){1,3}$")
+# 単名（ラテン 1 語）: Kumi / Amie 等。role 文脈がある時のみ人名として許容する。
+_MONONYM_RE = re.compile(r"^[A-Z][A-Za-zÀ-ÿ.'\-]{1,20}$")
+# CJK 名（ひらがな/カタカナ/漢字/ハングル 2〜6 文字）: 김미정 / 田中 等。role 文脈必須。
+_CJK_NAME_RE = re.compile(
+    r"^[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]{2,6}$"
+)
+
+
+def is_supported_person_name(text: str | None, *, has_role_context: bool = False) -> bool:
+    """人名として採用可能か（Phase 2 Step B）。
+
+    - 多語ラテン名（looks_like_person_name）は常に可。
+    - 単名（ラテン 1 語）・CJK 名は **role/title の文脈がある時のみ**可。単に大文字語や
+      CJK 文字列であるだけでは採用しない（UI 片・断片の誤採用を防ぐ）。
+    """
+    if not text:
+        return False
+    name = " ".join(text.split()).strip(" .,-")
+    if not name or len(name) > 60:
+        return False
+    if looks_like_person_name(name):
+        return True
+    if not has_role_context:
+        return False
+    if _MONONYM_RE.match(name):
+        low = name.lower().strip(".,'-")
+        return low not in _NON_NAME_WORDS and low not in _TITLE_WORDS
+    if _CJK_NAME_RE.match(name):
+        return True
+    return False
 
 
 class PersonResult(BaseModel):

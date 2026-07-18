@@ -25,6 +25,7 @@ from app.ai.contact_hunter import (
     ContactHuntResult,
     PersonResult,
     compute_confidence,
+    is_supported_person_name,
     looks_like_person_name,
     title_to_priority,
 )
@@ -62,6 +63,12 @@ _TITLE_HINTS = (
     "vice president", "chief", "marketing", "sales", "partnership", "partnerships",
     "business development", "export", "press", "communications", "owner",
     "international", "wholesale", "distribution",
+    # 追加 role（Phase 2 Step B: creator/designer/specialist と CJK 役職）
+    "creator", "designer", "specialist", "engineer", "producer", "maker",
+    "representative", "co-ceo", "managing", "general manager", "brand",
+    "代表", "代表取締役", "社長", "創業", "創業者", "取締役",  # 日本語
+    "대표", "대표이사", "창업", "창업자", "이사",  # 韓国語
+    "创始人", "创办人", "总经理", "首席",  # 中国語
 )
 
 _LINKEDIN_IN_RE = re.compile(
@@ -229,9 +236,16 @@ def _match_linkedin_by_name(name: str, slug_links: list[tuple[str, str]]) -> str
 
 
 def _extract_text_people(lines: list[str]) -> list[dict]:
-    """「氏名, 役職」/ 2 行ペア（氏名→役職）から人物を抽出する。"""
+    """氏名と役職を近接（同一行/隣接行）で紐付けて人物を抽出する（Phase 2 Step B）。
+
+    対応パターン（役職の近接がある時のみ単名/CJK 名も許容。遠く離れた名前と役職は紐付けない）:
+      - "Name, Role" / "Name - Role" / "Name | Role"（氏名→役職）
+      - "Role: Name" / "Founder: Name"（役職→氏名）
+      - 2 行ペア（氏名行→役職行、または役職行→氏名行）
+    """
     out: list[dict] = []
     seen: set[str] = set()
+    used: set[int] = set()  # ペアで消費した行 index（二重紐付けを防ぐ）
 
     def add(name: str, title: str | None) -> None:
         key = name.lower()
@@ -241,22 +255,39 @@ def _extract_text_people(lines: list[str]) -> list[dict]:
         out.append({"name": name, "title": title})
 
     for i, line in enumerate(lines):
-        # インライン "Name, Title" / "Name - Title" / "Name | Title"
-        m = re.match(r"^(.+?)\s*[,\-–—|]\s*(.+)$", line)
+        if i in used:
+            continue
+        # インライン: 区切りで name/role を分ける（": " は役職→氏名の順もある）
+        m = re.match(r"^(.+?)\s*[,\-–—|:：]\s*(.+)$", line)
         if m:
-            cand_name, cand_title = m.group(1).strip(), m.group(2).strip()
-            if (
-                looks_like_person_name(cand_name)
-                and _has_title_hint(cand_title)
-                and len(cand_title) <= 80
-            ):
-                add(cand_name, cand_title)
+            left, right = m.group(1).strip(), m.group(2).strip()
+            # 氏名→役職
+            if (_has_title_hint(right) and len(right) <= 80
+                    and is_supported_person_name(left, has_role_context=True)):
+                add(left, right)
                 continue
-        # 2 行ペア（氏名→次行が役職）
-        if looks_like_person_name(line) and i + 1 < len(lines):
+            # 役職→氏名（"Founder: Name" / "代表: 氏名"）
+            if (_has_title_hint(left) and len(left) <= 40
+                    and is_supported_person_name(right, has_role_context=True)):
+                add(right, left)
+                continue
+        # 2 行ペア（氏名行 → 次行が役職）
+        if i + 1 < len(lines) and (i + 1) not in used:
             nxt = lines[i + 1]
-            if _has_title_hint(nxt) and len(nxt) <= 80 and not looks_like_person_name(nxt):
+            if (is_supported_person_name(line, has_role_context=True)
+                    and _has_title_hint(nxt) and len(nxt) <= 80
+                    and not is_supported_person_name(nxt, has_role_context=False)):
                 add(line, nxt)
+                used.add(i)
+                used.add(i + 1)  # 役職行を次の name の役職に再利用しない
+                continue
+            # 役職行 → 次行が氏名（team カードで "Role" の下に "Name" が来る構造）
+            if (_has_title_hint(line) and len(line) <= 40
+                    and not _has_title_hint(nxt)
+                    and is_supported_person_name(nxt, has_role_context=True)):
+                add(nxt, line)
+                used.add(i)
+                used.add(i + 1)
     return out
 
 
@@ -307,11 +338,15 @@ def extract_people_from_html(html: str, page_url: str) -> list[PersonResult]:
             seen_mail.add(addr.lower())
             mailtos.append(addr)
 
-    # 氏名でマージ（LinkedIn / メール / 役職を補完）
+    # 氏名でマージ（LinkedIn / メール / 役職を補完）。多語ラテン名は常に、単名/CJK 名は
+    # role(title) or LinkedIn の裏付けがある時のみ採用（Step B）。
     merged: dict[str, dict] = {}
     for r in raw:
         name = (r.get("name") or "").strip()
-        if not name or not looks_like_person_name(name):
+        if not name:
+            continue
+        has_ctx = bool(r.get("title") or r.get("linkedin_url"))
+        if not is_supported_person_name(name, has_role_context=has_ctx):
             continue
         key = name.lower()
         cur = merged.setdefault(
