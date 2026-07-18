@@ -1709,6 +1709,30 @@ def tokens_from_identity(ident: dict) -> set[str]:
     return out
 
 
+def _verified_official_or_none(
+    candidate: str | None,
+    html: str | None,
+    maker_name: str | None,
+    terms: set[str] | None,
+    campaign_url: str | None = None,
+    source_type: str | None = None,
+) -> str | None:
+    """候補を verify_official_candidate に通し、collision でなければ candidate を返す（Phase 3 Step B）。
+
+    primary と fallback（本文推定）の両方で同じ検証を使うための共通ヘルパ。
+    collision（第三者/大企業/同名別業種）なら None を返す（fallback を verify なしで採用しない）。
+    """
+    if not candidate:
+        return None
+    v = verify_official_candidate(candidate, html, candidate, maker_name, terms,
+                                  campaign_url=campaign_url, source_type=source_type)
+    if v["collision_detected"]:
+        logger.info("official rejected (%s): %s [evidence=%s]",
+                    v["reason"], candidate, v.get("evidence"))
+        return None
+    return candidate
+
+
 def _is_excluded_official_host(url: str) -> bool:
     """公式サイト候補から除外すべきホスト（プラットフォーム/SNS/CDN/解析）か。"""
     host = urlparse(url).netloc.lower()
@@ -2367,12 +2391,15 @@ def discover(
                     pdf_seen.add(p["url"])
                     pdfs.append(p)
 
-            # 公式サイト未確定なら、このページ（クラファン/プロフィール）本文から推定
-            if not official and inferred_official is None:
+            # 本文（クラファン/プロフィール）から公式サイト候補を推定する。primary の有無に
+            # 関わらず候補として保持し、primary が Step A で拒否された場合の fallback に使う
+            # （Step B）。primary が無い時だけ、従来どおり巡回対象ドメインにも反映する。
+            if inferred_official is None:
                 cand = extract_official_link(html, url, terms)
                 if cand:
                     inferred_official = cand
-                    official_domain = _domain_of(cand)
+                    if not official:
+                        official_domain = _domain_of(cand)
 
         # --- second-pass：発見済み maker 自ドメイン contact/about/support を上限付きで追跡 ---
         # 公式サイトがロケール別ページ（/us/contact 等）にメールを置くケースを拾う。追加は
@@ -2416,20 +2443,27 @@ def discover(
     primary_form = forms[0] if forms else None
     # 公式サイト：maker_url（非プラットフォーム）または本文から推定した外部ドメイン。
     # プラットフォーム URL（kickstarter/profile 等）は公式として採用しない。
-    official_site_url = official or inferred_official or None
     # 公式候補の identity 照合（Phase 3 Step A）：明確な collision（大企業/同名別業種/第三者）
     # のみ拒否する。identity 不足時は既存動作を維持。判定は既取得 HTML のみ（新規 fetch なし）。
-    if official_site_url:
-        _v = verify_official_candidate(
-            official_site_url, official_html, official_site_url,
-            project.maker_name, terms,
-            campaign_url=getattr(project, "source_url", None),
-            source_type=getattr(project, "source_site", None),
-        )
-        if _v["collision_detected"]:
-            logger.info("official rejected (%s): %s [evidence=%s]",
-                        _v["reason"], official_site_url, _v.get("evidence"))
-            official_site_url = None
+    _camp = getattr(project, "source_url", None)
+    _stype = getattr(project, "source_site", None)
+    # 1) primary（maker_url 等）を検証。accept ならそのまま採用。
+    official_site_url = _verified_official_or_none(
+        official or None, official_html, project.maker_name, terms, _camp, _stype)
+    # 2) primary が拒否され、本文推定の候補があれば fallback として検証・採用する（Step B）。
+    #    fallback も必ず verify を通す。primary と同一 URL / 登録ドメインなら再検証しない。
+    if not official_site_url and inferred_official:
+        _dup = bool(official) and (
+            inferred_official == official
+            or source_ownership.registrable_domain(inferred_official)
+            == source_ownership.registrable_domain(official))
+        if not _dup:
+            # fallback の HTML は新規 fetch しない。primary と同一ドメインの時だけ official_html を
+            # 流用し、それ以外は None（＝ドメインベースの collision 判定のみ適用）。
+            _fb_html = official_html if (
+                official_domain and _same_domain(inferred_official, official_domain)) else None
+            official_site_url = _verified_official_or_none(
+                inferred_official, _fb_html, project.maker_name, terms, _camp, _stype)
     has_official_site = bool(official_site_url)
 
     # confidence（後方互換）: メールが最有力。なければフォーム/SNS の有無で段階評価。

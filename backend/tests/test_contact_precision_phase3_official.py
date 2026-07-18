@@ -163,6 +163,119 @@ def test_email_form_person_unchanged():
     check("person 抽出は従来どおり", any(p.name == "John Smith" for p in ppl))
 
 
+# ---- Step B: primary 拒否時の verified fallback ----
+import types  # noqa: E402
+
+
+def _discover(maker_url, source_url, maker, title, pages):
+    """合成 HTML（pages: url部分文字列 -> html）で discover() を走らせ結果を返す。ライブ非接続。"""
+    def fetch_fn(u):
+        for frag, html in pages.items():
+            if frag in u:
+                return html
+        return None
+    proj = types.SimpleNamespace(maker_url=maker_url, source_url=source_url,
+                                 title=title, maker_name=maker, source_site="indiegogo", id=0)
+    return cds.discover(proj, None, fetch_fn=fetch_fn)
+
+
+_COMEDY = "<html><head><title>Stardome Comedy Club</title></head><body>stand-up comedy</body></html>"
+
+
+def test_stepb_primary_reject_fallback_success():
+    print("test_stepb_primary_reject_fallback_success")
+    # primary=stardome.com は collision で拒否。campaign 本文に本物 maker リンクあり → fallback 採用。
+    pages = {
+        "stardome.com": _COMEDY,
+        "indiegogo.com": '<html><body><a href="https://stardomepod.com/">Official Website</a></body></html>',
+    }
+    res = _discover("https://stardome.com",
+                    "https://www.indiegogo.com/en/projects/stardome-pod",
+                    "StarDome", "StarDome Pod", pages)
+    off = res.get("official_site_url")
+    check("collision primary は不採用", not (off and "stardome.com" in off and "pod" not in off))
+    check("本物 fallback stardomepod.com を採用", off == "https://stardomepod.com")
+
+
+def test_stepb_primary_reject_no_fallback():
+    print("test_stepb_primary_reject_no_fallback")
+    # primary 拒否・本文に有効な maker リンクなし → official=None を維持。
+    pages = {
+        "stardome.com": _COMEDY,
+        "indiegogo.com": "<html><body>no official link here</body></html>",
+    }
+    res = _discover("https://stardome.com",
+                    "https://www.indiegogo.com/en/projects/stardome-pod",
+                    "StarDome", "StarDome Pod", pages)
+    check("有効 fallback なし → official=None", res.get("official_site_url") is None)
+
+
+def test_stepb_fallback_also_collision():
+    print("test_stepb_fallback_also_collision")
+    # primary 拒否・本文 fallback が大企業(lg.com) → fallback も verify で拒否 → None。
+    pages = {
+        "stardome.com": _COMEDY,
+        "indiegogo.com": '<html><body><a href="https://www.lg.com/">Official Website</a></body></html>',
+    }
+    res = _discover("https://stardome.com",
+                    "https://www.indiegogo.com/en/projects/stardome-pod",
+                    "StarDome", "StarDome Pod", pages)
+    check("collision fallback は verify で拒否 → None", res.get("official_site_url") is None)
+
+
+def test_stepb_primary_ok_not_overwritten():
+    print("test_stepb_primary_ok_not_overwritten")
+    # primary=sharge.com が accept。本文に別候補があっても primary を維持。
+    pages = {
+        "sharge.com": "<html><head><title>SHARGE | Fast Charging Power Bank</title></head></html>",
+        "indiegogo.com": '<html><body><a href="https://otherbrand.com/">Official Website</a></body></html>',
+    }
+    res = _discover("https://sharge.com",
+                    "https://www.indiegogo.com/en/projects/sharge",
+                    "Sharge", "Sharge Power Bank", pages)
+    off = res.get("official_site_url")
+    check("primary accept を維持", off == "https://sharge.com")
+    check("fallback で上書きしない", off != "https://otherbrand.com")
+
+
+def test_stepb_dup_domain_no_refetch():
+    print("test_stepb_dup_domain_no_refetch")
+    # primary=stardome.com は collision 拒否。本文推定 fallback は www.stardome.com（表記URLは
+    # 違うが同一 registered domain）。_dup 判定で fallback を再検証せず official=None を維持し、
+    # fallback 検証のための追加 fetch も発生しないことを確認する。
+    from urllib.parse import urlparse
+    pages = {
+        "stardome.com": _COMEDY,
+        "indiegogo.com": '<html><body><a href="https://www.stardome.com/">Official Website</a></body></html>',
+    }
+    fetched = []
+
+    def fetch_fn(u):
+        fetched.append(u)
+        for frag, html in pages.items():
+            if frag in u:
+                return html
+        return None
+
+    proj = types.SimpleNamespace(maker_url="https://stardome.com",
+                                 source_url="https://www.indiegogo.com/en/projects/stardome-pod",
+                                 title="StarDome Pod", maker_name="StarDome",
+                                 source_site="indiegogo", id=0)
+    res = cds.discover(proj, None, fetch_fn=fetch_fn)
+    check("同一registered domain fallback → official=None 維持",
+          res.get("official_site_url") is None)
+    # 同一登録ドメインの fallback 候補（www.stardome.com）を復活させない
+    check("rejected primary と同一 domain の fallback を採用しない",
+          res.get("official_site_url") != "https://www.stardome.com")
+    # fallback 検証のための追加 fetch が発生しない（www.stardome.com は fetch されない）
+    check("fallback 用 www.stardome.com への追加 fetch なし",
+          not any("www.stardome.com" in u for u in fetched))
+    # 想定外/外部 URL への fetch が無い（primary domain と campaign のみ）
+    hosts = {urlparse(u).netloc for u in fetched}
+    check("fetch は primary domain と campaign のみ",
+          hosts <= {"stardome.com", "www.indiegogo.com"})
+
+
 def main():
     test_reject_stardome_collision()
     test_reject_lg_major_brand()
@@ -178,6 +291,11 @@ def main():
     test_redirect_final_domain_used()
     test_reject_platform_shortener_retailer_agency()
     test_email_form_person_unchanged()
+    test_stepb_primary_reject_fallback_success()
+    test_stepb_primary_reject_no_fallback()
+    test_stepb_fallback_also_collision()
+    test_stepb_primary_ok_not_overwritten()
+    test_stepb_dup_domain_no_refetch()
     print(f"\n{_p} passed / {_f} failed")
     return 1 if _f else 0
 
