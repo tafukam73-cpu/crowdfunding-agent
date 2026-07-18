@@ -109,12 +109,26 @@ GROUND_TRUTH = [
        plausible=["hello@leewayworld.com"],
        evidence=["https://www.leewayworld.com/contact"],
        snippets=["公式にメール掲載なし・フォーム/LINE/Messenger。hello@leewayworld.com は未掲載=採点対象外"]),
+    # GT補正(2026-07-18): 当初 GOLD_B は「公式にメール掲載なし」としていたが、深掘りクロール
+    # ＋GT監査で maker 公式ドメイン hanboost.com 上に営業メール3件が実在することを HTML 証拠で
+    # 確認したため expected_direct_emails へ昇格（人手検証・第三者ではなく maker_official）。
+    # 証拠:
+    #   sales@hanboost.com    @ https://www.hanboost.com/pages/contact
+    #       "<strong>Business Collboration</strong>:sales@hanboost.com"
+    #   support@hanboost.com  @ https://www.hanboost.com/pages/contact
+    #       "<strong>General Inquiry: </strong>support@hanboost.com"
+    #   marketing@hanboost.com @ https://www.hanboost.com/
+    #       "feel free to contact marketing@hanboost.com , or submit your Maker..."
     _c(118, "indiegogo", "Hanboost", official="https://www.hanboost.com",
+       direct=["sales@hanboost.com", "support@hanboost.com", "marketing@hanboost.com"],
        forms=["https://www.hanboost.com/pages/contact"],
        socials=["https://www.facebook.com/hanboost", "https://instagram.com/hanboostshop/",
                 "https://linkedin.com/company/hanboost", "https://tiktok.com/@hanboostshop"],
-       evidence=["https://www.hanboost.com/pages/contact"],
-       snippets=["公式 hanboost.com を確認(T1 Laser Engraver＋KS リンク一致)。公式にメール掲載なし。"
+       evidence=["https://www.hanboost.com/pages/contact", "https://www.hanboost.com/"],
+       snippets=["公式 hanboost.com を確認(T1 Laser Engraver＋KS リンク一致)。",
+                 "GT補正: /pages/contact に 'Business Collboration: sales@hanboost.com' / "
+                 "'General Inquiry: support@hanboost.com'、ホームに 'contact marketing@hanboost.com' "
+                 "を掲載(平文)。maker_official のため direct へ昇格。",
                  "kickbooster.me は販促サービスで maker フォームではない"]),
     _c(8, "kickstarter", "alltimelab", official="https://alltimelab.com",
        socials=["https://www.instagram.com/alltime_universe/",
