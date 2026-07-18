@@ -987,6 +987,80 @@ def extract_socials(html: str, base_url: str) -> dict[str, str]:
     return socials
 
 
+# フォームのユーティリティ/非連絡パス（営業に使えない）。login/検索/購読/カート等。
+_NON_CONTACT_FORM_HINTS = (
+    "/login", "/signin", "/sign-in", "/register", "/signup", "/sign-up",
+    "/account", "/cart", "/checkout", "/search", "/newsletter", "/subscribe",
+    "/password", "/wishlist", "/basket", "/my-account", "/auth/",
+)
+# フォーム候補の canonical 優先順位（同一 intent 内で代表 1 本に畳むため）。短く一般的な
+# パスを上位に。ここに無いパスは末尾（rank 大）に回す。
+_FORM_PATH_RANK = (
+    "/contact", "/pages/contact", "/contact-us", "/pages/contact-us",
+    "/contactus", "/wholesale", "/pages/wholesale", "/stockists", "/retailers",
+    "/distributors", "/support", "/pages/support", "/help",
+)
+
+
+def _form_intent(url: str) -> str:
+    """フォームの営業 intent を返す（同一ドメイン内で intent 単位に集約するためのキー）。"""
+    p = urlparse(url).path.lower()
+    if any(h in p for h in ("wholesale", "stockist", "retailer", "distributor",
+                            "reseller", "b2b", "partner")):
+        return "wholesale"
+    if any(h in p for h in ("support", "/help", "service", "faq")):
+        return "support"
+    if any(h in p for h in ("contact", "inquiry", "enquir", "about", "reach")):
+        return "contact"
+    return "other"
+
+
+def _is_utility_form(url: str) -> bool:
+    return any(h in urlparse(url).path.lower() for h in _NON_CONTACT_FORM_HINTS)
+
+
+def _form_rank_key(url: str, official_domain: str | None) -> tuple:
+    path = urlparse(url).path.lower().rstrip("/")
+    try:
+        prank = _FORM_PATH_RANK.index(path)
+    except ValueError:
+        prank = len(_FORM_PATH_RANK)
+    official_first = 0 if (official_domain and _same_domain(url, official_domain)) else 1
+    return (official_first, prank, len(url), url)
+
+
+def select_maker_forms(
+    forms: list[str], official_domain: str | None = None, limit: int = 4
+) -> list[str]:
+    """フォーム候補から maker 自身の実フォームだけを選ぶ（Phase 2: フォーム precision）。
+
+    除外:
+      - クラファン運営(platform)/販促支援(marketing)/短縮URL/メッセンジャー/小売/代理店の
+        ドメイン（source_ownership 分類 + is_platform_url）。maker の問い合わせ窓口でない。
+      - login/register/search/newsletter/cart 等のユーティリティフォーム（営業に使えない）。
+    集約:
+      - soft-404/catch-all 200 で量産される /contact, /contact-us, /pages/contact… の重複を、
+        (登録ドメイン × intent) 単位で canonical 1 本に畳む（8 本→contact/support 各1 等）。
+    公式ドメインのフォームを優先し、最大 limit 本を返す（先頭が primary 候補）。
+    """
+    kept: dict[tuple[str, str], str] = {}
+    for f in forms or []:
+        if not f or "@" in f:
+            continue
+        if is_platform_url(f) or _is_utility_form(f):
+            continue
+        cls = source_ownership.classify_domain(f).ownership_class
+        if cls in ("crowdfunding_platform", "crowdfunding_marketing_service",
+                   "url_shortener", "messenger", "retailer", "agency"):
+            continue
+        key = (source_ownership.registrable_domain(f), _form_intent(f))
+        cur = kept.get(key)
+        if cur is None or _form_rank_key(f, official_domain) < _form_rank_key(cur, official_domain):
+            kept[key] = f
+    ordered = sorted(kept.values(), key=lambda u: _form_rank_key(u, official_domain))
+    return ordered[:limit]
+
+
 def extract_pdf_links(html: str, base_url: str) -> list[dict]:
     """HTML から PDF リンクを抽出する（営業に有用そうなものを優先ラベル付け）。
 
@@ -2107,6 +2181,8 @@ def discover(
     pdfs = pdfs[:6]
     emails = sorted(email_map.values(), key=lambda e: e["score"], reverse=True)
     primary_email = emails[0]["email"] if emails else None
+    # 第三者フォーム除去＋ドメイン×intent 単位の canonical 集約（Phase 2 フォーム precision）。
+    forms = select_maker_forms(forms, official_domain)
     primary_form = forms[0] if forms else None
     # 公式サイト：maker_url（非プラットフォーム）または本文から推定した外部ドメイン。
     # プラットフォーム URL（kickstarter/profile 等）は公式として採用しない。
