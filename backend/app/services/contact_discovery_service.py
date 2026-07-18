@@ -42,6 +42,19 @@ MAX_URLS = 20               # 最大探索 URL 数（既定 20）
 FETCH_TIMEOUT = 8.0         # 1 ページのタイムアウト（秒）
 FETCH_RETRIES = 0           # 失敗時のレスポンスを速くするためリトライしない
 RATE_LIMIT_SECONDS = 1.0    # ページ間隔（過度なアクセスを避ける）
+# second-pass（発見済み maker 自ドメインの contact/about/support リンクの追跡）上限。
+# 公式サイトがロケール別ページ（/us/contact 等）にメールを置くケースを拾うための追加取得。
+# 総 MAX_URLS も別途尊重するので実際の追加はこれと残枠の小さい方。
+MAX_SECOND_PASS_URLS = 5
+# second-pass で追跡するパス種別（contact/support に加え about も対象）。
+_SECOND_PASS_HINTS = ("contact", "support", "inquiry", "inquiries",
+                      "customer-service", "about")
+
+
+def _is_second_pass_url(url: str) -> bool:
+    """second-pass で追跡すべき maker 自ドメインの contact/about/support リンクか。"""
+    path = urlparse(url).path.lower()
+    return any(h in path for h in _SECOND_PASS_HINTS)
 
 # 公式サイト内で当たりにいく代表パス（Contact Intelligence で拡張）
 KNOWN_PATHS = [
@@ -2093,6 +2106,28 @@ def discover(
     press_page: str | None = None
     wholesale_page: str | None = None
     official_checked = False
+    # second-pass frontier（発見済み maker 自ドメインの contact/about/support リンク）。
+    second_pass: list[str] = []
+    second_seen: set[str] = set()
+
+    def _ingest_emails(html: str, url: str) -> None:
+        """1 ページから抽出したメールを email_map へ取り込む（既存の抽出・スコア・
+        所有者分類・除外をそのまま利用。メイン loop と second-pass で共通化）。"""
+        for addr in extract_emails(html, site_domain):
+            score, tier = score_email(addr, official_domain)
+            owner = classify_email_owner(addr, official_domain, site_domain)
+            key = addr.lower()
+            rec = email_map.get(key)
+            if rec is None:
+                email_map[key] = {
+                    "email": addr, "score": score, "tier": tier,
+                    "email_owner": owner, "sources": [url],
+                }
+            else:
+                if url not in rec["sources"]:
+                    rec["sources"].append(url)
+                if score > rec["score"]:
+                    rec["score"], rec["tier"] = score, tier
     # maker_url がプラットフォームで公式が未確定なら、クラファン/プロフィールページの
     # 本文リンクから外部公式サイトを推定する（要件）。
     terms = significant_terms(project.title, project.maker_name)
@@ -2105,9 +2140,13 @@ def discover(
         if wholesale_page is None and _matches_hints(u, WHOLESALE_HINTS):
             wholesale_page = u
 
+    # メイン探索は MAX_URLS のうち second-pass 用の枠を残して打ち切る（総数は MAX_URLS を
+    # 超えない）。発見済み contact リンクの追跡（targeted）を盲目的 KNOWN_PATHS 探索より
+    # 優先するための予約。second_pass が空なら残枠は使わない（総取得は減るが無駄打ちを避ける）。
+    primary_budget = max(1, MAX_URLS - MAX_SECOND_PASS_URLS)
     try:
         for url in urls:
-            if len(searched) >= MAX_URLS:
+            if len(searched) >= primary_budget:
                 break
             if _blocked(url):
                 logger.info("skip by robots: %s", url)
@@ -2124,24 +2163,7 @@ def discover(
                 continue
 
             # メール（プラットフォーム/運営会社のメールは extract_emails で除外済み）
-            for addr in extract_emails(html, site_domain):
-                score, tier = score_email(addr, official_domain)
-                owner = classify_email_owner(addr, official_domain, site_domain)
-                key = addr.lower()
-                rec = email_map.get(key)
-                if rec is None:
-                    email_map[key] = {
-                        "email": addr,
-                        "score": score,
-                        "tier": tier,
-                        "email_owner": owner,
-                        "sources": [url],
-                    }
-                else:
-                    if url not in rec["sources"]:
-                        rec["sources"].append(url)
-                    if score > rec["score"]:
-                        rec["score"], rec["tier"] = score, tier
+            _ingest_emails(html, url)
 
             # SNS（最初に見つかったものを優先）
             for platform, link in extract_socials(html, url).items():
@@ -2159,6 +2181,12 @@ def discover(
                     if _is_contact_url(link) and link not in forms:
                         forms.append(link)
                     _consider_page_category(link)
+                    # second-pass frontier：未取得の maker 自ドメイン contact/about/support
+                    # を追加（例: ホームからリンクされた /us/contact）。ここでは取得しない。
+                    if (_is_second_pass_url(link) and link not in searched
+                            and link not in second_seen):
+                        second_seen.add(link)
+                        second_pass.append(link)
 
             # PDF リンク
             for p in extract_pdf_links(html, url):
@@ -2172,6 +2200,35 @@ def discover(
                 if cand:
                     inferred_official = cand
                     official_domain = _domain_of(cand)
+
+        # --- second-pass：発見済み maker 自ドメイン contact/about/support を上限付きで追跡 ---
+        # 公式サイトがロケール別ページ（/us/contact 等）にメールを置くケースを拾う。追加は
+        # 同一登録ドメイン・非第三者・robots 尊重・dedup・最大 MAX_SECOND_PASS_URLS 件かつ
+        # 総 MAX_URLS を超えない。second-pass ページのリンクは再帰的に辿らない（無限再帰禁止）。
+        added = 0
+        for link in second_pass:
+            if added >= MAX_SECOND_PASS_URLS or len(searched) >= MAX_URLS:
+                break
+            if link in searched or _blocked(link) or is_dummy_domain(urlparse(link).netloc):
+                continue
+            # 念のため：official と同一登録ドメインのみ・第三者ドメインは対象外。
+            if not (official_domain and _same_domain(link, official_domain)):
+                continue
+            if source_ownership.classify_domain(link).ownership_class in (
+                "crowdfunding_platform", "crowdfunding_marketing_service",
+                "url_shortener", "messenger", "retailer", "agency",
+            ):
+                continue
+            html = fetch(link)
+            searched.append(link)
+            added += 1
+            if not html:
+                continue
+            _ingest_emails(html, link)  # 既存の抽出・除外・所有者分類をそのまま適用
+            if _is_contact_url(link) and link not in forms:
+                forms.append(link)
+            for platform, slink in extract_socials(html, link).items():
+                socials.setdefault(platform, slink)
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)
