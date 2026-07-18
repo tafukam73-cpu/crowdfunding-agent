@@ -1,3 +1,5 @@
 # 実 DB から再生成される評価データ（実案件の公開連絡先を含むため git には入れない）。
-# スクリプト（build_gold_candidates.py / baseline.py / harness.py）で再生成する。
+# スクリプト（build_gold_candidates.py / baseline.py / harness.py /
+# build_real100_sample.py）で再生成する。
 *.json
+*.csv
