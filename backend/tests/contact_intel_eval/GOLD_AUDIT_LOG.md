@@ -50,6 +50,25 @@
   - p108 `info@mediafol.io` → `expected_direct_emails` から除外（証拠文に第三者と明記）。
   - p105 `moreshop07@gmail.com` → `plausible_unconfirmed_emails`（採点対象外）へ。
 
+### 2.4 GT補正 2026-07-18（p118 Hanboost・direct email 3件を昇格）
+- 契機: Phase 2 second-pass crawl 導入後の GT 監査で、当初「公式にメール掲載なし」とした
+  p118 の maker 公式ドメイン(hanboost.com)上に営業メール3件が実在すると判明。
+- 追加した expected_direct_emails（**人手検証・maker_official・第三者ではない**）:
+
+| email | 証拠URL | HTML断片 | ownership | role |
+|---|---|---|---|---|
+| sales@hanboost.com | https://www.hanboost.com/pages/contact | `<strong>Business Collboration</strong>:sales@hanboost.com` | maker_official | high |
+| support@hanboost.com | https://www.hanboost.com/pages/contact | `<strong>General Inquiry: </strong>support@hanboost.com` | maker_official | support |
+| marketing@hanboost.com | https://www.hanboost.com/ | `feel free to contact marketing@hanboost.com , or submit your Maker…` | maker_official | person |
+
+- 変更ファイル: `build_ground_truth.py`（p118 の direct/evidence/snippets）→ `gold_ground_truth.json` を再生成。
+- 修正種別: **手動検証（証拠URL＋HTML断片）**。auto-label ではない。数値目的の改変ではない。
+- **変更しなかった真のFP（GTは正しい・追加せず）**:
+  - p108 `info@mediafol.io` — 別ドメイン(mediafol.io≠singlestep.com)・Web/技術支援の第三者。
+  - p111 `parenting@cw.com.tw` — 親会社/小売グループ(天下)・非メーカー。
+  - p111 `support@zeczec.com` — crowdfunding_platform 運営メール。
+- 精度影響（verified direct・entity）: TP 6→9 / FP 6→3 / FN 0、P 50.0%→75.0% / R 100% / F1 66.7%→85.7%。
+
 ### 2.3 数値の作り方
 - **expected を数値改善目的で改変していない**。gold ラベルはシステム出力から自動生成しない。
 - ドメイン一致だが公式ページ未掲載のメールは `plausible_unconfirmed_emails` として
