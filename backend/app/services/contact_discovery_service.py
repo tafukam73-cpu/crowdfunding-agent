@@ -10,6 +10,7 @@ HTML を与えればネットワーク無しで検証できるようにしてい
 from __future__ import annotations
 
 import html as _html
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -1540,6 +1541,174 @@ _WEBSITES_ARRAY_RE = re.compile(r'"websites"\s*:\s*\[(.*?)\]', re.DOTALL)
 _URL_IN_JSON_RE = re.compile(r'https?://[^\s"\'\\<>]+')
 
 
+# --- 公式サイト候補の identity 照合（Phase 3 Step A: over-judgment FP 抑制）---
+# 「同名だが別業種」を判別するための業種語（クラファンのハードウェア/雑貨メーカーが
+# これらの業態である可能性は低い）。同名一致のみで product 語が無く、これらを含む場合は
+# 別法人と判断する（例: stardome.com = "Stardome Comedy Club"）。固定リストのみに依存せず、
+# maker/brand/product 語との一致・不一致と組み合わせて判定する。
+_OFFICIAL_CATEGORY_CONFLICT = frozenset({
+    "comedy", "club", "nightclub", "restaurant", "cafe", "bar", "pub", "bistro",
+    "hotel", "motel", "resort", "church", "temple", "mosque", "school", "academy",
+    "university", "college", "clinic", "hospital", "dental", "dentist", "law",
+    "attorney", "lawyer", "realty", "realtor", "insurance", "casino", "theatre",
+    "theater", "cinema", "museum", "gym", "fitness", "salon", "spa", "bakery",
+    "brewery", "winery", "farm", "ranch", "records", "florist", "plumbing",
+})
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_OG_SITE_NAME_RE = re.compile(
+    r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)', re.IGNORECASE)
+_CANONICAL_RE = re.compile(
+    r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)', re.IGNORECASE)
+_LDJSON_BLOCK_RE = re.compile(
+    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL)
+
+
+def _walk_org_website(node, out: dict) -> None:
+    """JSON-LD を再帰走査し Organization / WebSite の name / url を集める。"""
+    if isinstance(node, list):
+        for it in node:
+            _walk_org_website(it, out)
+        return
+    if not isinstance(node, dict):
+        return
+    types = node.get("@type")
+    tset = {types} if isinstance(types, str) else set(types or [])
+    if {"Organization", "Corporation", "LocalBusiness", "Brand"} & tset:
+        nm = node.get("name")
+        if isinstance(nm, str) and nm.strip():
+            out["organization_names"].append(nm.strip())
+        u = node.get("url")
+        if isinstance(u, str) and u.strip():
+            out["urls"].append(u.strip())
+    if "WebSite" in tset:
+        nm = node.get("name")
+        if isinstance(nm, str) and nm.strip():
+            out["names"].append(nm.strip())
+        u = node.get("url")
+        if isinstance(u, str) and u.strip():
+            out["urls"].append(u.strip())
+    for k in ("@graph", "publisher", "author", "brand", "mainEntity"):
+        if k in node:
+            _walk_org_website(node[k], out)
+
+
+def extract_site_identity(html: str | None, final_url: str | None = None) -> dict:
+    """公式サイト候補ページから identity を安全に抽出する（Phase 3 Step A）。
+
+    Returns: {names, organization_names, urls, canonical_url, registered_domain,
+              final_url}。JSON-LD が壊れていても例外で全体を止めない。
+    """
+    out = {"names": [], "organization_names": [], "urls": [],
+           "canonical_url": None, "registered_domain": None, "final_url": final_url}
+    html = html or ""
+    t = _TITLE_RE.search(html)
+    if t:
+        title = _html.unescape(re.sub(r"\s+", " ", _TAGSTRIP_RE.sub("", t.group(1)))).strip()
+        if title:
+            out["names"].append(title)
+    for og in _OG_SITE_NAME_RE.findall(html):
+        og = _html.unescape(og).strip()
+        if og:
+            out["names"].append(og)
+    canon = _CANONICAL_RE.search(html)
+    if canon:
+        out["canonical_url"] = canon.group(1).strip()
+        out["urls"].append(canon.group(1).strip())
+    for block in _LDJSON_BLOCK_RE.findall(html):
+        try:
+            data = json.loads(block.strip())
+        except (ValueError, TypeError):
+            continue  # 壊れた JSON-LD は無視（全体を止めない）
+        try:
+            _walk_org_website(data, out)
+        except Exception:  # noqa: BLE001  想定外の構造も無視
+            continue
+    ref = out["canonical_url"] or final_url
+    if ref:
+        try:
+            from app.services import source_ownership as _so
+            out["registered_domain"] = _so.registrable_domain(ref)
+        except Exception:  # noqa: BLE001
+            out["registered_domain"] = None
+    return out
+
+
+def verify_official_candidate(
+    candidate_url: str,
+    html: str | None,
+    final_url: str | None,
+    maker_name: str | None,
+    terms: set[str] | None,
+    campaign_url: str | None = None,
+    source_type: str | None = None,
+) -> dict:
+    """公式サイト候補が maker のものとして妥当か検証する（内部ヘルパ・Phase 3 Step A）。
+
+    **保守的**：明確な不一致（大企業collision / 同名別業種）がある時のみ collision として
+    拒否する。identity が不足する場合は既存動作を維持（accept）。
+
+    Returns: {accepted, reason, evidence, collision_detected, confidence}
+    """
+    from app.services import source_ownership as _so
+
+    reg = _so.registrable_domain(final_url or candidate_url or "")
+    terms = set(terms or set())
+    name_terms = significant_terms(maker_name or "")
+    result = {"accepted": True, "reason": "insufficient_identity_or_ok",
+              "evidence": [], "collision_detected": False, "confidence": 50}
+
+    if not reg:
+        return result
+
+    # Rule 1: 明確な第三者ドメイン（運営/販促/短縮/メッセンジャー/小売/代理店）は公式でない。
+    own = _so.classify_domain(final_url or candidate_url)
+    if own.ownership_class in _so.PERSON_SOURCE_DENY_CLASSES:
+        return {"accepted": False, "reason": f"third_party:{own.ownership_class}",
+                "evidence": [reg], "collision_detected": True, "confidence": 95}
+
+    # Rule 2: 無関係な大企業ドメイン（lg.com / samsung.com 等）は小型メーカー公式でない。
+    if reg in _so.MAJOR_UNRELATED_BRANDS:
+        return {"accepted": False, "reason": f"major_unrelated_brand:{reg}",
+                "evidence": [reg], "collision_detected": True, "confidence": 90}
+
+    # identity 照合（あれば）。無ければ既存動作維持。
+    ident = extract_site_identity(html, final_url)
+    id_tokens = tokens_from_identity(ident)
+    if not id_tokens:
+        return result  # identity 不足 → 過剰拒否しない
+
+    shared_name = id_tokens & name_terms
+    product_terms = terms - name_terms
+    shared_product = id_tokens & product_terms
+
+    # 注: 「identity が maker と一切一致しない → 別法人」という規則は **採用しない**。
+    # エラー/チャレンジページ（"Something Went Wrong" / "Access Denied" / "Just a moment"）を
+    # 誤って別法人と判定し正規 official を落とす FP 源になるため。拒否は positive-evidence
+    # （大企業ドメイン / 同名かつ別業種語）に限定する。identity 不足・弱一致は既存動作を維持。
+
+    # Rule 3: 名前は一致するが product 語が無く、別業種語（comedy/club/restaurant 等）を含む
+    # → 同名別法人（例: stardome.com = "Stardome Comedy Club"）。name 一致を必須にするため
+    # エラーページ（名前非一致）では発火しない。
+    if shared_name and not shared_product and (id_tokens & _OFFICIAL_CATEGORY_CONFLICT):
+        return {"accepted": False, "reason": "same_name_different_business",
+                "evidence": sorted(id_tokens & _OFFICIAL_CATEGORY_CONFLICT),
+                "collision_detected": True, "confidence": 75}
+
+    result["reason"] = "identity_match"
+    result["confidence"] = 70 if shared_product else 60
+    result["evidence"] = sorted(id_tokens & terms)[:6]
+    return result
+
+
+def tokens_from_identity(ident: dict) -> set[str]:
+    """identity dict の names/organization_names を有意トークン集合にする。"""
+    out: set[str] = set()
+    for nm in (ident.get("names") or []) + (ident.get("organization_names") or []):
+        out |= significant_terms(nm)
+    return out
+
+
 def _is_excluded_official_host(url: str) -> bool:
     """公式サイト候補から除外すべきホスト（プラットフォーム/SNS/CDN/解析）か。"""
     host = urlparse(url).netloc.lower()
@@ -2132,6 +2301,7 @@ def discover(
     # 本文リンクから外部公式サイトを推定する（要件）。
     terms = significant_terms(project.title, project.maker_name)
     inferred_official: str | None = None
+    official_html: str | None = None  # 公式候補 root ページの HTML（identity 照合用）
 
     def _consider_page_category(u: str) -> None:
         nonlocal press_page, wholesale_page
@@ -2159,6 +2329,9 @@ def discover(
             searched.append(url)
             if official_domain and _same_domain(url, official_domain):
                 official_checked = True
+                # 公式候補の identity 照合用に root ページ HTML を 1 度だけ保持（Phase 3）。
+                if official_html is None and html:
+                    official_html = html
             if not html:
                 continue
 
@@ -2244,6 +2417,19 @@ def discover(
     # 公式サイト：maker_url（非プラットフォーム）または本文から推定した外部ドメイン。
     # プラットフォーム URL（kickstarter/profile 等）は公式として採用しない。
     official_site_url = official or inferred_official or None
+    # 公式候補の identity 照合（Phase 3 Step A）：明確な collision（大企業/同名別業種/第三者）
+    # のみ拒否する。identity 不足時は既存動作を維持。判定は既取得 HTML のみ（新規 fetch なし）。
+    if official_site_url:
+        _v = verify_official_candidate(
+            official_site_url, official_html, official_site_url,
+            project.maker_name, terms,
+            campaign_url=getattr(project, "source_url", None),
+            source_type=getattr(project, "source_site", None),
+        )
+        if _v["collision_detected"]:
+            logger.info("official rejected (%s): %s [evidence=%s]",
+                        _v["reason"], official_site_url, _v.get("evidence"))
+            official_site_url = None
     has_official_site = bool(official_site_url)
 
     # confidence（後方互換）: メールが最有力。なければフォーム/SNS の有無で段階評価。
