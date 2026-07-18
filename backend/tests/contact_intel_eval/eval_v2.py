@@ -178,42 +178,61 @@ def eval_official():
 
 
 # =================== FORMS ===================
-_NON_MAKER_FORM = ("zeczec.com", "kickstarter.com", "indiegogo.com", "kickbooster",
-                   "m.me/", "wa.me/", "/login", "/signin", "newsletter", "/search")
+# チャネル単位（登録ドメイン × intent）で採点する。exact URL slug ではなく「maker の
+# どの窓口に到達できるか」を測るのが営業上意味がある粒度。
+def form_channel(url):
+    return (norm_domain(url), cds._form_intent(url))
 
 
-def is_maker_form(url, official):
-    u = (url or "").lower()
-    if any(x in u for x in _NON_MAKER_FORM):
-        return False
-    if official and norm_domain(url) == norm_domain(official):
-        return True
-    return norm_domain(url) not in so.CROWDFUNDING_PLATFORMS
+def forms_before(pid):
+    return [u for u in (PRED[pid].get("saved_forms") or [])]
 
 
-def eval_forms():
+def forms_after(pid):
+    official = GT[pid]["expected_official_site"]
+    dom = so.registrable_domain(official) if official else None
+    return cds.select_maker_forms(PRED[pid].get("saved_forms") or [], dom)
+
+
+def eval_forms(pred_of, label):
     tp = fp = fn = 0
     n = 0
     for pid in IDS:
         g = GT[pid]
         if g["verification_status"] not in STRICT:
             continue
-        exp = {norm_url(u) for u in g["expected_forms"]}
-        if not exp and not (PRED[pid].get("saved_forms")):
+        pred_forms = pred_of(pid)
+        if not g["expected_forms"] and not pred_forms:
             continue
         n += 1
-        official = g["expected_official_site"]
-        pred = {norm_url(u) for u in (PRED[pid].get("saved_forms") or [])}
-        pred_maker = {u for u in pred if is_maker_form(u, official)}
-        pred_nonmaker = pred - pred_maker
-        tps = exp & pred_maker
-        tp += len(tps)
-        fp += len(pred_maker - exp) + len(pred_nonmaker)  # 非maker form も FP
-        fn += len(exp - pred_maker)
+        exp = {form_channel(u) for u in g["expected_forms"]}
+        pred = {form_channel(u) for u in pred_forms}
+        tp += len(exp & pred)
+        fp += len(pred - exp)
+        fn += len(exp - pred)
     p, r, f = prf(tp, fp, fn)
-    print(f"  N(verified で form 期待 or 予測ありの案件)={n}  "
+    print(f"  [{label}] N(verified で form 期待 or 予測ありの案件)={n}  "
           f"TP={tp} FP={fp} FN={fn}  P={pct(p)} R={pct(r)} F1={pct(f)}")
-    print("  注: platform/marketing/messenger/login/newsletter/search フォームは FP 扱い")
+
+
+def form_supplemental(pred_of, label):
+    """channel 採点は expected_forms 未列挙の影響を受けるため、曖昧さのない補助指標を出す:
+    総 URL 数（dedup 効果）と 非maker所有フォーム数（第三者/ユーティリティ混入）。"""
+    total = nonmaker = 0
+    for pid in IDS:
+        if GT[pid]["verification_status"] not in STRICT:
+            continue
+        for u in pred_of(pid):
+            total += 1
+            cls = so.classify_domain(u).ownership_class
+            path = u.lower()
+            util = any(x in path for x in ("/login", "/signin", "/register", "/search",
+                                           "newsletter", "/cart", "/account"))
+            if cls in ("crowdfunding_platform", "crowdfunding_marketing_service",
+                       "url_shortener", "messenger", "retailer", "agency") or util \
+                    or cds.is_platform_url(u):
+                nonmaker += 1
+    print(f"  [{label}] 総フォームURL数={total}  非maker所有(第三者/ユーティリティ)={nonmaker}")
 
 
 # =================== SNS ===================
@@ -317,8 +336,13 @@ def main():
     print("\n■ 公式サイト（normalized domain / entity）")
     eval_official()
 
-    print("\n■ フォーム（maker-owned real form / entity）")
-    eval_forms()
+    print("\n■ フォーム（maker-owned real form / channel=登録ドメイン×intent）  Phase2 before→after")
+    eval_forms(forms_before, "BEFORE saved")
+    eval_forms(forms_after, "AFTER  select_maker_forms")
+    form_supplemental(forms_before, "BEFORE saved")
+    form_supplemental(forms_after, "AFTER  select_maker_forms")
+    print("    注: channel-P は expected_forms 未列挙(email検証案件)で過小評価される。"
+          "総URL数と非maker所有数が dedup/第三者除去の実効。")
 
     print("\n■ SNS（maker本人のみ TP / entity）  Phase1 before→after")
     eval_sns(sns_before, "BEFORE saved")
