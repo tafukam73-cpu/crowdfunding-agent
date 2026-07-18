@@ -3,3 +3,5 @@
 # build_real100_sample.py）で再生成する。
 *.json
 *.csv
+# GT レビュー時のバックアップ（*.csv.bak 等・同じ実データを含むため除外）。
+*.bak
