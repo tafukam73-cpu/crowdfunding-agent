@@ -1557,6 +1557,35 @@ _OFFICIAL_CATEGORY_CONFLICT = frozenset({
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _OG_SITE_NAME_RE = re.compile(
     r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)', re.IGNORECASE)
+_OG_TYPE_RE = re.compile(
+    r'<meta[^>]+property=["\']og:type["\'][^>]+content=["\']([^"\']+)', re.IGNORECASE)
+
+# --- 公式サイト候補が「メーカー本体」ではない媒体/団体/名鑑であることを示す一般化シグナル ---
+# JSON-LD @type：報道機関・記事・NPO/NGO・政府・教育・図書館等（メーカー公式ではない）。
+_MEDIA_LDTYPES = frozenset({
+    "newsmediaorganization", "newsarticle", "reportagenewsarticle",
+    "analysisnewsarticle", "opinionnewsarticle", "liveblogposting", "blogposting",
+    "blog", "article", "ngo", "governmentorganization", "governmentagency",
+    "educationalorganization", "collegeoruniversity", "library", "museum",
+    "periodical", "publicationissue", "webpageelement", "faqpage",
+})
+# 名称/ドメインに現れると媒体・名鑑・レビュー・団体を示す語（deny-list ではなく一般化語彙）。
+# maker 名がサイト identity にもドメインにも現れない場合にのみ発火させる（正規メーカー保護）。
+_MEDIA_CATEGORY_TOKENS = frozenset({
+    "news", "newspaper", "magazine", "gazette", "tribune", "herald", "bulletin",
+    "journal", "times", "daily", "weekly", "monthly", "post", "press", "media",
+    "wire", "agency", "review", "reviews", "blog", "wiki", "encyclopedia",
+    "directory", "listing", "listings", "catalog", "roundup", "digest",
+    "foundation", "nonprofit", "ngo", "charity", "association", "network",
+    "movement", "coalition", "council", "institute", "society", "forum",
+    "community", "portal", "marketplace",
+})
+# ただし単独では弱い語（企業名にも普通に入る）。強い語（下記）か JSON-LD/og:type が
+# 無い限り、これらだけでは媒体と断定しない。
+_MEDIA_WEAK_TOKENS = frozenset({
+    "media", "network", "post", "times", "wire", "community", "forum", "institute",
+    "society", "council", "portal",
+})
 _CANONICAL_RE = re.compile(
     r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)', re.IGNORECASE)
 _LDJSON_BLOCK_RE = re.compile(
@@ -1565,7 +1594,7 @@ _LDJSON_BLOCK_RE = re.compile(
 
 
 def _walk_org_website(node, out: dict) -> None:
-    """JSON-LD を再帰走査し Organization / WebSite の name / url を集める。"""
+    """JSON-LD を再帰走査し Organization / WebSite の name / url と全 @type を集める。"""
     if isinstance(node, list):
         for it in node:
             _walk_org_website(it, out)
@@ -1574,6 +1603,10 @@ def _walk_org_website(node, out: dict) -> None:
         return
     types = node.get("@type")
     tset = {types} if isinstance(types, str) else set(types or [])
+    # 全 @type を記録（NewsMediaOrganization / NGO 等の媒体・団体判定に使う）。
+    for t in tset:
+        if isinstance(t, str) and t.strip():
+            out.setdefault("ld_types", []).append(t.strip())
     if {"Organization", "Corporation", "LocalBusiness", "Brand"} & tset:
         nm = node.get("name")
         if isinstance(nm, str) and nm.strip():
@@ -1599,8 +1632,9 @@ def extract_site_identity(html: str | None, final_url: str | None = None) -> dic
     Returns: {names, organization_names, urls, canonical_url, registered_domain,
               final_url}。JSON-LD が壊れていても例外で全体を止めない。
     """
-    out = {"names": [], "organization_names": [], "urls": [],
-           "canonical_url": None, "registered_domain": None, "final_url": final_url}
+    out = {"names": [], "organization_names": [], "urls": [], "ld_types": [],
+           "og_type": None, "canonical_url": None, "registered_domain": None,
+           "final_url": final_url}
     html = html or ""
     t = _TITLE_RE.search(html)
     if t:
@@ -1611,6 +1645,9 @@ def extract_site_identity(html: str | None, final_url: str | None = None) -> dic
         og = _html.unescape(og).strip()
         if og:
             out["names"].append(og)
+    ogt = _OG_TYPE_RE.search(html)
+    if ogt:
+        out["og_type"] = ogt.group(1).strip().lower()
     canon = _CANONICAL_RE.search(html)
     if canon:
         out["canonical_url"] = canon.group(1).strip()
@@ -1632,6 +1669,73 @@ def extract_site_identity(html: str | None, final_url: str | None = None) -> dic
         except Exception:  # noqa: BLE001
             out["registered_domain"] = None
     return out
+
+
+def _identity_token_pool(ident: dict, reg_domain: str | None) -> set[str]:
+    """identity 名称 ＋ 登録ドメインの有意トークン集合（maker 名の在否判定用）。"""
+    pool: set[str] = set()
+    for nm in (ident.get("names") or []) + (ident.get("organization_names") or []):
+        pool |= significant_terms(nm)
+    if reg_domain:
+        pool |= significant_terms(reg_domain.replace(".", " "))
+    return pool
+
+
+def _name_present_in(pool: set[str], name_terms: set[str]) -> bool:
+    """maker 名トークンが identity/ドメインのプールに含まれるか（部分一致に寛容）。"""
+    for n in name_terms:
+        if len(n) < 3:
+            continue
+        for p in pool:
+            if n == p or (len(n) >= 4 and (n in p or p in n)):
+                return True
+    return False
+
+
+def official_media_or_directory_collision(
+    ident: dict, reg_domain: str | None, maker_name: str | None,
+) -> tuple[bool, list[str]]:
+    """公式候補が「メーカー本体ではない媒体/団体/名鑑」かを一般化シグナルで判定する。
+
+    強シグナル（JSON-LD の報道/NPO/政府/教育 @type、og:type=article、名称中の非弱
+    カテゴリ語）があり、かつ **maker 名が識別情報にもドメインにも一切現れない** 場合
+    のみ collision とする（正規メーカーの誤除外を避ける）。deny-list ではなく、既存の
+    構造化データ抽出（extract_site_identity）＋語彙で判定する。
+    Returns: (collision, evidence)。
+    """
+    name_terms = significant_terms(maker_name or "")
+    pool = _identity_token_pool(ident, reg_domain)
+    # maker 名がサイト identity/ドメインに現れるなら本人サイト＝除外しない（最優先）。
+    if name_terms and _name_present_in(pool, name_terms):
+        return False, []
+
+    ld = {t.lower() for t in (ident.get("ld_types") or [])}
+    og = (ident.get("og_type") or "").lower()
+    id_name_tokens: set[str] = set()
+    for nm in (ident.get("names") or []) + (ident.get("organization_names") or []):
+        id_name_tokens |= significant_terms(nm)
+    dom_tokens = significant_terms((reg_domain or "").replace(".", " "))
+
+    evidence: list[str] = []
+    strong = False
+    md = ld & _MEDIA_LDTYPES
+    if md:
+        strong = True
+        evidence += [f"ld:{t}" for t in sorted(md)]
+    if og in ("article", "book", "profile") and "article" == og:
+        strong = True
+        evidence.append("og:article")
+    # 名称/ドメイン中のカテゴリ語（弱語は強シグナル扱いにしない）。
+    cat_hits = (_MEDIA_CATEGORY_TOKENS & (id_name_tokens | dom_tokens))
+    strong_cat = cat_hits - _MEDIA_WEAK_TOKENS
+    if strong_cat:
+        strong = True
+        evidence += [f"cat:{t}" for t in sorted(strong_cat)]
+
+    if not strong:
+        return False, []
+    # maker 名が識別情報にもドメインにも無い媒体/団体 → 別主体（collision）。
+    return True, evidence[:6]
 
 
 def verify_official_candidate(
@@ -1675,6 +1779,17 @@ def verify_official_candidate(
     # identity 照合（あれば）。無ければ既存動作維持。
     ident = extract_site_identity(html, final_url)
     id_tokens = tokens_from_identity(ident)
+
+    # Rule 4（identity 語が乏しくても JSON-LD @type だけで判定できるため先に評価）:
+    # ニュース/メディア/レビュー/ディレクトリ/NPO/団体（メーカー本体でない）で、maker 名が
+    # identity にもドメインにも無い候補を拒否する（theinsiderweekly.com / en.yna.co.kr /
+    # transitionnetwork.org 等）。product 語のみの名称衝突は maker 名の在否で守る。
+    media_collision, media_ev = official_media_or_directory_collision(
+        ident, reg, maker_name)
+    if media_collision:
+        return {"accepted": False, "reason": "media_or_directory_not_maker",
+                "evidence": media_ev, "collision_detected": True, "confidence": 80}
+
     if not id_tokens:
         return result  # identity 不足 → 過剰拒否しない
 
@@ -2397,9 +2512,42 @@ def discover(
             if inferred_official is None:
                 cand = extract_official_link(html, url, terms)
                 if cand:
-                    inferred_official = cand
-                    if not official:
-                        official_domain = _domain_of(cand)
+                    _same_as_primary = bool(official) and (
+                        source_ownership.registrable_domain(cand)
+                        == source_ownership.registrable_domain(official))
+                    if _same_as_primary:
+                        # primary（maker_url）と同一登録ドメイン → primary の検証結果が支配。
+                        # 追加 fetch/verify はしない（既存の _dup ロジックが処理）。
+                        inferred_official = cand
+                    else:
+                        # 別ドメイン候補：root ページを取得し identity 検証してから採用する
+                        # （media/directory/NPO 判定は候補自身の title/JSON-LD が必要なため）。
+                        chtml = None
+                        if cand not in searched:
+                            chtml = fetch(cand)
+                            searched.append(cand)
+                        _cv = verify_official_candidate(
+                            cand, chtml, cand, project.maker_name, terms,
+                            getattr(project, "source_url", None),
+                            getattr(project, "source_site", None))
+                        if _cv["collision_detected"]:
+                            logger.info("discover: inferred official rejected (%s): %s [%s]",
+                                        _cv["reason"], cand, _cv.get("evidence"))
+                        else:
+                            inferred_official = cand
+                            if official_html is None and chtml:
+                                official_html = chtml
+                            if not official:
+                                official_domain = _domain_of(cand)
+                            # 採用した候補ページのメール/フォームも既存経路で取り込む。
+                            if chtml:
+                                _ingest_emails(chtml, cand)
+                                if _is_contact_url(cand) and cand not in forms:
+                                    forms.append(cand)
+                                for _lk in extract_links(chtml, cand):
+                                    if official_domain and _same_domain(_lk, official_domain) \
+                                            and _is_contact_url(_lk) and _lk not in forms:
+                                        forms.append(_lk)
 
         # --- second-pass：発見済み maker 自ドメイン contact/about/support を上限付きで追跡 ---
         # 公式サイトがロケール別ページ（/us/contact 等）にメールを置くケースを拾う。追加は
