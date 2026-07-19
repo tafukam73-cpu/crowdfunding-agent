@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
@@ -37,6 +38,7 @@ from app.models.company_research import CompanyResearch
 from app.models.contact_discovery import ContactDiscovery
 from app.models.project import Project
 from app.services import contact_discovery_service as cds
+from app.services import source_ownership as so
 
 logger = logging.getLogger("web_research")
 
@@ -49,6 +51,65 @@ SOCIAL_ADOPT_MIN_SCORE = 30     # 検索結果由来の SNS を採用する最�
 FETCH_TIMEOUT = 8.0         # 1 ページのタイムアウト（秒）
 SEARCH_TIMEOUT = 8.0        # 検索のタイムアウト（秒）
 RATE_LIMIT_SECONDS = 1.5    # ページ/検索の間隔（過度なアクセスを避ける）
+
+# --- per-case ハード時間予算（オプトイン）。既定 None = 無制限（従来挙動を維持）。 ---
+# 呼び出し側（バッチ/評価）が time_budget を渡したときのみ有効化する。検索フェーズには
+# 予算の SEARCH_BUDGET_FRAC までを割り当て、残りをクロールに使う。十分な公式連絡先
+# （検証済み公式サイト＋maker所有メール/フォーム）を得たら early_exit で打ち切る。
+SEARCH_BUDGET_FRAC = 0.55   # time_budget のうち検索フェーズに充てる割合
+
+
+def _email_maker_ownership(
+    email: str, sources: list[str] | None, official_domain: str | None
+) -> tuple[bool, str]:
+    """検証済み公式ドメインに対する maker 所有判定。(owned, reason) を返す。
+
+    採用（maker-owned）:
+      - 検証済み公式サイトと同一の登録可能ドメイン / 正当なサブドメイン
+      - フリーメール（Gmail 等）で、かつ出典ページが検証済み公式ドメインに属する場合のみ
+    不採用（第三者 / manual review へ分離）:
+      - レビュー / ニュース / 紹介 / ディレクトリ / 代理店 / 小売 / マーケットプレイス /
+        名前衝突ドメイン / unknown / 検証不能 / 検索スニペットのみ / 第三者ページ由来
+      - 公式サイトが未確定（official_domain 無し）の場合は unknown 系は一切採用しない
+    ドメイン分類は既存の source_ownership を再利用する（二重実装しない）。
+    """
+    if not official_domain:
+        return False, "no_verified_official"
+    off_reg = so.registrable_domain(official_domain)
+    if not off_reg:
+        return False, "no_verified_official"
+    email_reg = so.registrable_domain(email)
+    if email_reg and email_reg == off_reg:
+        # 同一登録ドメイン / サブドメイン（source_ownership も maker_official/subdomain）。
+        return True, "official_domain"
+    own = so.classify_domain(email)
+    if own.ownership_class == "personal_email":
+        # フリーメールは「検証済み公式ドメインのページに掲載」されている場合のみ採用。
+        for src in sources or []:
+            if so.registrable_domain(src) == off_reg:
+                return True, "personal_on_official_page"
+        return False, "personal_off_official_page"
+    # それ以外（review/news/directory/retailer/agency/unknown/名前衝突）は maker-owned にしない。
+    return False, f"third_party:{own.ownership_class}"
+
+
+def _form_maker_owned(form_url: str, official_domain: str | None) -> bool:
+    """問い合わせフォーム URL が検証済み公式ドメイン（同一登録ドメイン）に属するか。"""
+    if not official_domain:
+        return False
+    off_reg = so.registrable_domain(official_domain)
+    return bool(off_reg) and so.registrable_domain(form_url) == off_reg
+
+
+def _is_domain_root(url: str, domain: str | None) -> bool:
+    """url が domain（同一登録ドメイン）のトップページ（path が空/`/`）か。"""
+    if not domain:
+        return False
+    p = urlparse(url)
+    if p.path not in ("", "/"):
+        return False
+    off_reg = so.registrable_domain(domain)
+    return bool(off_reg) and so.registrable_domain(url) == off_reg
 
 # 公式サイト内で当たりにいく代表パス（要件 4）
 WEB_KNOWN_PATHS = [
@@ -271,7 +332,8 @@ def _default_domain_get(url: str, timeout: float = 8.0):
 
 
 def verify_official_domain(
-    url: str, terms: set[str], *, get_fn=None, timeout: float = 8.0
+    url: str, terms: set[str], *, get_fn=None, timeout: float = 8.0,
+    maker_name: str | None = None,
 ) -> str | None:
     """候補ドメインを GET で実在確認し、本文に関連語があれば公式 root を返す。
 
@@ -292,20 +354,29 @@ def verify_official_domain(
     low = (body or "").lower()
     if terms and not any(t in low for t in terms):
         return None  # ページに関連語が無い＝本物とみなさない
+    # ニュース/メディア/レビュー/ディレクトリ/NPO 等（メーカー本体でない）は採用しない。
+    ident = cds.extract_site_identity(body, final)
+    reg = cds.source_ownership.registrable_domain(final)
+    media_collision, _ev = cds.official_media_or_directory_collision(ident, reg, maker_name)
+    if media_collision:
+        return None
     p = urlparse(final)
     return f"{p.scheme}://{p.netloc}"
 
 
 def guess_and_verify_official(
     brand: str, slug: str, project_slug: str, terms: set[str],
-    *, get_fn=None, max_candidates: int = 10, timeout: float = 6.0
+    *, get_fn=None, max_candidates: int = 10, timeout: float = 6.0,
+    maker_name: str | None = None,
 ) -> str | None:
     """候補ドメインを順に実在確認し、最初に確認できた公式サイト root を返す。
 
     同期エンドポイントで使うため、候補数とタイムアウトを絞る（速さ優先）。
     """
     for u in guess_domains(brand, slug, project_slug)[:max_candidates]:
-        verified = verify_official_domain(u, terms, get_fn=get_fn, timeout=timeout)
+        verified = verify_official_domain(
+            u, terms, get_fn=get_fn, timeout=timeout,
+            maker_name=maker_name or brand)
         if verified:
             logger.info("guessed & verified official site: %s", verified)
             return verified
@@ -1019,12 +1090,31 @@ def web_research(
     fetch_fn=None,
     search_fn=None,
     progress_cb=None,
+    time_budget: float | None = None,
+    max_queries: int | None = None,
+    max_urls: int | None = None,
+    early_exit: bool = False,
 ) -> dict:
     """Web リサーチ本体（DB 非依存）。集計した結果 dict を返す。
 
     fetch_fn(url)->html|None, search_fn(query)->[url]|[{url,title,snippet}] を注入
     できる（テスト用）。未指定なら DuckDuckGo HTML 検索 + 既存 HTTP 基盤を使う。
+
+    per-case 時間制御（すべてオプトイン。未指定なら従来挙動を維持）:
+      time_budget : 1 案件あたりのハード総時間上限（秒）。超過で探索を打ち切り、
+                    それまでの部分結果を返す（stop_reason="timeout"）。
+      max_queries : 実行検索クエリ数の上限（既定 MAX_QUERIES を上書き）。
+      max_urls    : クロール URL 数の上限（既定 MAX_URLS を上書き）。
+      early_exit  : 検証済み公式サイト＋maker所有メール/フォームを得たら即終了。
+    1 案件の超過・失敗はこの関数内で吸収し、例外はバッチ全体を止めない。
     """
+    _start = time.monotonic()
+    _q_cap = max_queries if max_queries is not None else MAX_QUERIES
+    _u_cap = max_urls if max_urls is not None else MAX_URLS
+    stop_reason: str | None = None
+
+    def _expired(frac: float = 1.0) -> bool:
+        return time_budget is not None and (time.monotonic() - _start) > time_budget * frac
     # maker_url がクラファン/集約プラットフォーム（kickstarter/profile 等）なら
     # 公式サイトとして採用しない。実際の外部公式サイトはクラファン/プロフィール
     # ページの本文リンクから推定する（要件）。
@@ -1144,8 +1234,14 @@ def web_research(
                 })
 
     try:
-        _qn = min(len(generated_queries), MAX_QUERIES)
-        for _qi, q in enumerate(generated_queries[:MAX_QUERIES]):
+        _qn = min(len(generated_queries), _q_cap)
+        for _qi, q in enumerate(generated_queries[:_q_cap]):
+            # 検索フェーズには time_budget の SEARCH_BUDGET_FRAC までを割り当てる。
+            if _expired(SEARCH_BUDGET_FRAC):
+                stop_reason = "timeout"
+                logger.info("web_research[%s] search budget reached at query %d/%d",
+                            getattr(project, "id", "?"), _qi, _qn)
+                break
             if progress_cb:
                 progress_cb(f"検索中 ({_qi + 1}/{_qn}): {q[:60]}",
                             pct=(_qi / max(1, _qn)) * 0.4)  # 検索フェーズは全体の 0〜40%
@@ -1221,13 +1317,16 @@ def web_research(
             crawl_urls.append(u)
         return True
 
-    def expand_official(root_url: str, insert_at: int) -> None:
+    def expand_official(root_url: str, insert_at: int, *, inferred: bool = False) -> None:
         """確定した公式サイトに代表パスを展開してクロール待ち行列の先頭側に差し込む。"""
-        nonlocal effective_official, effective_domain
+        nonlocal effective_official, effective_domain, official_inferred, official_verified
         p = urlparse(root_url)
         root = f"{p.scheme}://{p.netloc}"
         effective_official = root
         effective_domain = cds._domain_of(root)
+        # maker_url 由来（登録済み）は信頼して検証しない。検索/本文推定は root 巡回時に検証する。
+        official_inferred = inferred
+        official_verified = not inferred
         pos = insert_at
         if add_crawl(root, front_at=pos):
             pos += 1
@@ -1235,14 +1334,18 @@ def web_research(
             if add_crawl(root + path, front_at=pos):
                 pos += 1
         logger.info(
-            "web_research[%s] official site set: %s (+%d known paths)",
-            getattr(project, "id", "?"), root, len(WEB_KNOWN_PATHS),
+            "web_research[%s] official site set: %s (+%d known paths, inferred=%s)",
+            getattr(project, "id", "?"), root, len(WEB_KNOWN_PATHS), inferred,
         )
+
+    # 推定公式の検証状態（maker_url 由来は検証不要＝True 扱い）。
+    official_inferred = False
+    official_verified = bool(official)
 
     # クラファンページ・公式サイト（既知なら）・research.sources を最優先で巡回
     for u in _seed_and_known_urls(project, research):
         add_crawl(u)
-    # 既知の公式サイトは即展開
+    # 既知の公式サイトは即展開（maker_url 由来＝信頼）
     if official:
         expand_official(official, len(crawl_urls))
     # 検索結果ページ（スコア順）も候補に追加（補助）
@@ -1267,9 +1370,29 @@ def web_research(
     # 配列を採用）。present=配列あり / count=URL件数 / registered=公式サイト登録あり。
     ks_websites: dict | None = None
 
+    def _has_official_contact() -> bool:
+        """maker 所有メールを確保できたか（early_exit 判定）。
+
+        フォームだけでは早期終了しない：フォームは実際の連絡先メールより先に見つかり
+        やすく、推定公式ドメインが後で覆るとメールを取り逃す。高価値かつ曖昧さの少ない
+        「maker 所有メール」を得た時点でのみ打ち切る（誤って早く止めない）。
+        """
+        if not effective_domain:
+            return False
+        for rec in email_map.values():
+            owned, _ = _email_maker_ownership(rec["email"], rec.get("sources"), effective_domain)
+            if owned:
+                return True
+        return False
+
     try:
         i = 0
-        while i < len(crawl_urls) and len(searched) < MAX_URLS:
+        while i < len(crawl_urls) and len(searched) < _u_cap:
+            if _expired():
+                stop_reason = "timeout"
+                logger.info("web_research[%s] crawl time budget reached (%d crawled)",
+                            pid, len(searched))
+                break
             url = crawl_urls[i]
             i += 1
             if progress_cb:
@@ -1288,6 +1411,24 @@ def web_research(
                 logger.info("web_research[%s] fetch FAIL: %s", pid, url)
                 continue
             ok_count += 1
+
+            # 推定公式（検索/本文由来）の root ページを巡回したら identity 検証する。
+            # ニュース/メディア/レビュー/ディレクトリ/NPO 等（メーカー本体でない）なら
+            # 公式を撤回し、そのドメインの form/email は最終フィルタで第三者に落とす。
+            if (effective_official and official_inferred and not official_verified
+                    and _is_domain_root(url, effective_domain)):
+                official_verified = True
+                v = cds.verify_official_candidate(
+                    url, html, url, getattr(project, "maker_name", None),
+                    project_terms | maker_terms,
+                    campaign_url=getattr(project, "source_url", None),
+                    source_type=getattr(project, "source_site", None))
+                if v.get("collision_detected"):
+                    logger.info("web_research[%s] official REJECTED (%s): %s [%s]",
+                                pid, v.get("reason"), effective_official, v.get("evidence"))
+                    effective_official = None
+                    effective_domain = None
+                    official_inferred = False
 
             # メール（既存フィルタを必ず通す。出典 URL を付与）
             page_emails = 0
@@ -1388,7 +1529,7 @@ def web_research(
                     before_queue = len(crawl_urls)
                     logger.info("web_research[%s] inferred official from %s -> %s",
                                 pid, url, cand)
-                    expand_official(cand, i)
+                    expand_official(cand, i, inferred=True)
                     logger.info("web_research[%s] added crawl URLs: %d (queue now %d)",
                                 pid, len(crawl_urls) - before_queue, len(crawl_urls))
                 else:
@@ -1397,6 +1538,13 @@ def web_research(
                         "(html may be JS-rendered/blocked; %d external candidates)",
                         pid, url, len(official_links),
                     )
+
+            # 十分な公式連絡先（検証済み公式＋maker所有メール/フォーム）を得たら早期終了。
+            if early_exit and _has_official_contact():
+                stop_reason = stop_reason or "early_exit_sufficient"
+                logger.info("web_research[%s] early exit: official contact found (%d crawled)",
+                            pid, len(searched))
+                break
     finally:
         if own_fetcher:
             client = getattr(fetch, "_client", None)
@@ -1413,11 +1561,12 @@ def web_research(
     # 実在確認（GET＋本文の関連語チェック）し、確認できたら代表パスをミニクロール
     # してメール/SNS/フォームを抽出する（要件2）。
     domain_guess_used = False
-    if not effective_official and own_fetcher:
+    if not effective_official and own_fetcher and not _expired():
         guessed = guess_and_verify_official(
             keywords["maker_name"] or keywords["project_title"],
             keywords["creator_slug"], keywords["project_slug"],
             project_terms | maker_terms,
+            maker_name=getattr(project, "maker_name", None),
         )
         if guessed:
             domain_guess_used = True
@@ -1428,7 +1577,7 @@ def web_research(
                 root = guessed.rstrip("/")
                 for path in ["", "/contact", "/contact-us", "/about",
                              "/pages/contact", "/team", "/press"]:
-                    if len(searched) >= MAX_URLS:
+                    if len(searched) >= _u_cap or _expired():
                         break
                     url = root + path
                     if url in crawl_seen:
@@ -1485,11 +1634,30 @@ def web_research(
             consider_social(plat, link, 20, f"pdf:{p['url']}")
 
     # 運営会社（platform）のメールは営業候補に含めない
-    emails = sorted(
+    _non_platform = sorted(
         (e for e in email_map.values() if e["email_owner"] != "platform"),
         key=lambda e: e["score"],
         reverse=True,
     )
+    # 検証済み公式ドメインに対する maker 所有関係を厳格に検証し、maker-owned と
+    # 第三者（レビュー/ニュース/紹介/ディレクトリ/代理店/小売/unknown/検証不能）を
+    # 分離する。第三者は discovered_emails には入れず third_party_emails へ（manual review）。
+    emails: list[dict] = []
+    third_party_emails: list[dict] = []
+    for e in _non_platform:
+        owned, reason = _email_maker_ownership(
+            e["email"], e.get("sources"), effective_domain
+        )
+        rec = {**e, "maker_owned": owned, "ownership_reason": reason}
+        (emails if owned else third_party_emails).append(rec)
+
+    # フォームも同様に、検証済み公式ドメインに属するもののみ maker-owned とする。
+    maker_forms: list[str] = []
+    third_party_forms: list[str] = []
+    for f in forms:
+        (maker_forms if _form_maker_owned(f, effective_domain) else third_party_forms).append(f)
+    forms = maker_forms
+
     primary_email = emails[0]["email"] if emails else None
     primary_form = forms[0] if forms else None
     has_official_site = bool(effective_official)
@@ -1521,6 +1689,11 @@ def web_research(
         "failed": fail_count,
         "excluded": excluded_count,
         "email_pages": email_pages_count,
+        # maker 所有検証で第三者として分離した件数（誤検出防止の可視化）。
+        "third_party_emails": len(third_party_emails),
+        "third_party_forms": len(third_party_forms),
+        "elapsed_sec": round(time.monotonic() - _start, 1),
+        "stop_reason": stop_reason,
         # Kickstarter 等の埋め込み websites 配列（要件 6）
         "ks_websites_present": bool(ks_websites and ks_websites["present"]),
         "ks_websites_count": (ks_websites["count"] if ks_websites else None),
@@ -1579,8 +1752,12 @@ def web_research(
         "search_results": search_records,
         "searched_urls": searched,
         "candidate_pages": candidate_pages,
+        # maker 所有と検証できたもののみ（誤検出防止）。
         "discovered_emails": emails,
         "discovered_forms": forms,
+        # maker 所有と確認できなかった第三者連絡先（削除せず manual review 用に分離保持）。
+        "third_party_emails": third_party_emails,
+        "third_party_forms": third_party_forms,
         "discovered_socials": socials,
         "discovered_pdfs": pdfs,
         "primary_email": primary_email,
@@ -1590,6 +1767,7 @@ def web_research(
         "evidence_summary": evidence,
         "debug_counts": debug_counts,
         "research_flow": research_flow,
+        "stop_reason": stop_reason,
         "notes": ", ".join(notes_bits),
     }
 
