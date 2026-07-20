@@ -70,6 +70,8 @@ MAJOR_UNRELATED_BRANDS = frozenset({
     "lg.com", "lge.com", "samsung.com", "sony.com", "apple.com", "google.com",
     "microsoft.com", "amazon.com", "panasonic.com", "philips.com", "bosch.com",
     "xiaomi.com", "huawei.com", "nike.com", "adidas.com",
+    # 一般的な姓/語と衝突しやすい大企業ブランド（呼び出し側の姓衝突ルールと併用）。
+    "wilson.com", "ford.com", "dyson.com", "dell.com", "canon.com", "gucci.com",
 })
 
 _TWO_LEVEL_TLDS = frozenset({

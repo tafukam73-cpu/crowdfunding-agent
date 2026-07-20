@@ -1586,6 +1586,56 @@ _MEDIA_WEAK_TOKENS = frozenset({
     "media", "network", "post", "times", "wire", "community", "forum", "institute",
     "society", "council", "portal",
 })
+
+# --- Hosting/deploy/preview vs site-builder（共有インフラ上のサブドメイン＝独自ドメインでない）---
+# 概念: 「候補が自社の登録ドメインでなく、共有ホスティング/デプロイ/ビルダー基盤の上にある」。
+# preview/deploy/tunnel/redirect は一時的で maker 公式にならない（拒否）。site-builder/store は
+# 小規模メーカーの実サイトになり得る（拒否せず低 confidence で保持）。拡張可能な基盤リスト。
+_HOSTING_PREVIEW_DOMAINS = frozenset({
+    "vercel.app", "vercel.link", "vercel.com", "netlify.app", "netlify.com",
+    "pages.dev", "web.app", "firebaseapp.com", "herokuapp.com", "onrender.com",
+    "render.com", "fly.dev", "workers.dev", "ngrok.io", "ngrok-free.app", "ngrok.app",
+    "glitch.me", "repl.co", "replit.app", "replit.dev", "surge.sh",
+    "trycloudflare.com", "now.sh", "deno.dev", "railway.app", "up.railway.app",
+    "github.dev", "codesandbox.io", "stackblitz.io", "gitpod.io",
+})
+_SITE_BUILDER_DOMAINS = frozenset({
+    "myshopify.com", "wixsite.com", "wix.com", "weebly.com", "squarespace.com",
+    "webflow.io", "wordpress.com", "blogspot.com", "github.io", "gitlab.io",
+    "notion.site", "notion.so", "carrd.co", "framer.website", "framer.app",
+    "strikingly.com", "mystrikingly.com", "jimdosite.com", "webnode.page",
+    "bubbleapps.io", "softr.app", "durable.co", "tilda.ws", "godaddysites.com",
+})
+
+# --- Web 制作会社 / 代理店（メーカー本体でない）判定シグナル ---
+_AGENCY_LDTYPES = frozenset({"professionalservice", "webdesign"})
+# 多語フレーズのみ（単語1個では拒否しない）。
+_AGENCY_PHRASES = (
+    "digital agency", "web design", "web development", "web dev", "creative agency",
+    "marketing agency", "branding agency", "design studio", "web studio",
+    "production company", "software house", "dev shop", "seo agency", "web agency",
+    "advertising agency", "ux agency", "care plan", "website maintenance",
+    "wordpress support", "wordpress hosting", "we build websites", "we design websites",
+    "our clients", "case studies", "digital studio", "growth agency",
+)
+
+# --- editorial / 媒体（構造化 @type が無い媒体）判定シグナル ---
+_EDITORIAL_WORDS = (
+    "interview", "interviews", "essay", "essays", "stories", "magazine",
+    "publication", "editorial", "reportage", "op-ed", "byline", "newsroom",
+    "columnist", "correspondent",
+)
+_BYLINE_RE = re.compile(r"\bby\s+[A-Z][a-z]+")
+_RSS_RE = re.compile(r"application/(?:rss|atom)\+xml", re.IGNORECASE)
+
+# --- 人名（フルネーム）判定用：社名を示す語（これを含むと人名でない）---
+_COMPANY_SUFFIX_TOKENS = frozenset({
+    "inc", "llc", "ltd", "co", "corp", "corporation", "gmbh", "company", "studio",
+    "studios", "labs", "lab", "tech", "technologies", "technology", "group", "team",
+    "sarl", "srl", "oy", "ab", "bv", "kk", "pte", "plc", "limited", "holdings",
+    "ventures", "works", "design", "digital", "media", "games", "interactive",
+    "systems", "solutions", "industries", "official", "store", "shop", "brand",
+})
 _CANONICAL_RE = re.compile(
     r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)', re.IGNORECASE)
 _LDJSON_BLOCK_RE = re.compile(
@@ -1738,6 +1788,127 @@ def official_media_or_directory_collision(
     return True, evidence[:6]
 
 
+# 公共部門（政府/軍/国際機関/教育）ドメイン。クラウドファンディングのメーカー公式には
+# ならない。特定サイト deny-list ではなく TLD/ラベルパターンの概念で判定する。
+_INSTITUTIONAL_HOST_RE = re.compile(
+    r"(?:\.gov|\.gov\.[a-z]{2,3}|\.mil|\.int|\.edu|\.edu\.[a-z]{2,3}|\.ac\.[a-z]{2,3}"
+    r"|\.go\.[a-z]{2}|\.gob\.[a-z]{2}|\.gouv\.[a-z]{2}|\.gc\.ca|\.europa\.eu"
+    r"|\.un\.org|\.who\.int)$", re.IGNORECASE)
+
+
+def official_is_institutional(url_or_host: str, maker_name: str | None = None) -> bool:
+    """候補が政府/軍/国際機関/教育の公共部門ドメインか（maker 名がホストに無い場合）。"""
+    from app.services import source_ownership as _so
+    host = _so.host_of(url_or_host)
+    if not host or not _INSTITUTIONAL_HOST_RE.search(host):
+        return False
+    host_tokens = significant_terms(host.replace(".", " "))
+    return not _name_present_in(host_tokens, significant_terms(maker_name or ""))
+
+
+def official_hosting_class(url_or_host: str) -> str | None:
+    """候補が共有ホスティング基盤上か。"preview"(deploy/preview/tunnel) / "builder"
+    (site-builder/store) / None(独自ドメイン) を返す。文字列 deny-list ではなく
+    「自社登録ドメインでなく共有基盤の登録ドメイン」という概念で判定する。"""
+    from app.services import source_ownership as _so
+    reg = _so.registrable_domain(url_or_host)
+    if not reg:
+        return None
+    if reg in _HOSTING_PREVIEW_DOMAINS:
+        return "preview"
+    if reg in _SITE_BUILDER_DOMAINS:
+        return "builder"
+    return None
+
+
+def official_looks_like_agency(
+    html: str | None, ident: dict, maker_name: str | None, reg_domain: str | None,
+) -> tuple[bool, list[str]]:
+    """候補が Web 制作会社/代理店（メーカー本体でない）か。maker 名が identity/ドメインに
+    無く、ProfessionalService @type か多語の代理店フレーズが 2 つ以上ある場合のみ True。
+    単語1個（studio 等）では発火しない＝社名に studio/design を持つメーカーを保護する。"""
+    name_terms = significant_terms(maker_name or "")
+    pool = _identity_token_pool(ident, reg_domain)
+    if name_terms and _name_present_in(pool, name_terms):
+        return False, []
+    ld = {t.lower() for t in (ident.get("ld_types") or [])}
+    low = (html or "").lower()
+    ev: list[str] = []
+    strong = False
+    if ld & _AGENCY_LDTYPES:
+        strong = True
+        ev += [f"ld:{t}" for t in sorted(ld & _AGENCY_LDTYPES)]
+    phrases = [p for p in _AGENCY_PHRASES if p in low]
+    if len(phrases) >= 2:
+        strong = True
+    if phrases:
+        ev += [f"phrase:{p}" for p in phrases[:3]]
+    return (True, ev[:6]) if strong else (False, [])
+
+
+def official_looks_like_editorial(
+    html: str | None, ident: dict, maker_name: str | None, reg_domain: str | None,
+) -> tuple[bool, list[str]]:
+    """構造化 @type の無い媒体/編集サイトか（記事密度・byline・RSS・編集語彙の複合）。
+    maker 名が identity/ドメインに無く、強い複合シグナルがある場合のみ True。単一語では拒否しない。"""
+    name_terms = significant_terms(maker_name or "")
+    pool = _identity_token_pool(ident, reg_domain)
+    if name_terms and _name_present_in(pool, name_terms):
+        return False, []
+    text = html or ""
+    low = text.lower()
+    rss = bool(_RSS_RE.search(text))
+    bylines = len(_BYLINE_RE.findall(text))
+    edwords = sorted({w for w in _EDITORIAL_WORDS if w in low})
+    strong = (
+        (rss and bylines >= 8 and len(edwords) >= 2)
+        or (bylines >= 20 and len(edwords) >= 3)
+        or (rss and len(edwords) >= 4)
+    )
+    if not strong:
+        return False, []
+    ev = (["rss"] if rss else []) + [f"bylines:{bylines}"] + [f"ed:{w}" for w in edwords[:3]]
+    return True, ev[:6]
+
+
+def maker_is_person_name(maker_name: str | None) -> bool:
+    """maker 名が人物のフルネームらしいか（2〜3 語・全て英字語頭大文字・社名語/略語なし）。"""
+    toks = [t for t in re.findall(r"[A-Za-z][A-Za-z'\-]+", maker_name or "") if len(t) >= 2]
+    if not (2 <= len(toks) <= 3):
+        return False
+    if {t.lower() for t in toks} & _COMPANY_SUFFIX_TOKENS:
+        return False
+    if any(t.isupper() and len(t) > 1 for t in toks):  # 全大文字略語（GPD 等）は人名でない
+        return False
+    return True
+
+
+def official_surname_collision(
+    maker_name: str | None, ident: dict, reg_domain: str | None, terms: set[str] | None,
+) -> tuple[bool, list[str]]:
+    """maker が人物フルネームなのに、候補が「姓のみ一致」（名が identity/ドメインに無く、
+    product/campaign 語も無い）＝別主体（大企業ブランド等との姓衝突）を検出する。
+    フルネームがドメイン/identity に入る個人メーカー（例: danielazconegui.com）は保護する。"""
+    if not maker_is_person_name(maker_name):
+        return False, []
+    toks = [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z'\-]+", maker_name or "") if len(t) >= 2]
+    surname, others = toks[-1], set(toks[:-1])
+    pool = _identity_token_pool(ident, reg_domain)
+    if not _name_present_in(pool, {surname}):
+        return False, []          # 姓が一致しない → 対象外
+    if others and _name_present_in(pool, others):
+        return False, []          # 名も一致 → 本人サイト（保護）
+    prod = set(terms or set()) - significant_terms(maker_name or "")
+    if prod and _name_present_in(pool, prod):
+        return False, []          # product/campaign 語が一致 → 別解釈で保護
+    from app.services import source_ownership as _so
+    reg = _so.registrable_domain(reg_domain or "")
+    ev = [f"surname_only:{surname}"]
+    if reg in _so.MAJOR_UNRELATED_BRANDS:
+        ev.append("major_brand")
+    return True, ev
+
+
 def verify_official_candidate(
     candidate_url: str,
     html: str | None,
@@ -1776,6 +1947,19 @@ def verify_official_candidate(
         return {"accepted": False, "reason": f"major_unrelated_brand:{reg}",
                 "evidence": [reg], "collision_detected": True, "confidence": 90}
 
+    # Rule 5: 共有ホスティング/デプロイ/プレビュー基盤。deploy/preview/tunnel は一時的で
+    # メーカー公式にならない → 拒否。site-builder/store は実サイトになり得る → 拒否せず
+    # 低 confidence で保持（独自ドメインでないため official 確定にはしない）。
+    host_class = official_hosting_class(final_url or candidate_url)
+    if host_class == "preview":
+        return {"accepted": False, "reason": "hosting_preview_not_official",
+                "evidence": [reg], "collision_detected": True, "confidence": 80}
+
+    # Rule 5b: 政府/国際機関/教育の公共部門ドメイン（メーカー公式でない。europa.eu 等）。
+    if official_is_institutional(final_url or candidate_url, maker_name):
+        return {"accepted": False, "reason": "institutional_not_maker",
+                "evidence": [reg], "collision_detected": True, "confidence": 82}
+
     # identity 照合（あれば）。無ければ既存動作維持。
     ident = extract_site_identity(html, final_url)
     id_tokens = tokens_from_identity(ident)
@@ -1790,8 +1974,31 @@ def verify_official_candidate(
         return {"accepted": False, "reason": "media_or_directory_not_maker",
                 "evidence": media_ev, "collision_detected": True, "confidence": 80}
 
+    # Rule 6: Web 制作会社/代理店（ProfessionalService @type or 多語の代理店フレーズ）。
+    agency, agency_ev = official_looks_like_agency(html, ident, maker_name, reg)
+    if agency:
+        return {"accepted": False, "reason": "web_agency_not_maker",
+                "evidence": agency_ev, "collision_detected": True, "confidence": 78}
+
+    # Rule 7: editorial/媒体（構造化 @type が無い媒体。記事密度・byline・RSS の複合）。
+    editorial, ed_ev = official_looks_like_editorial(html, ident, maker_name, reg)
+    if editorial:
+        return {"accepted": False, "reason": "editorial_media_not_maker",
+                "evidence": ed_ev, "collision_detected": True, "confidence": 78}
+
+    # Rule 8: 人物フルネーム maker と「姓のみ一致」の大企業/別主体（wilson.com 等）。
+    surname_col, surname_ev = official_surname_collision(maker_name, ident, reg, terms)
+    if surname_col:
+        return {"accepted": False, "reason": "surname_brand_collision",
+                "evidence": surname_ev, "collision_detected": True, "confidence": 75}
+
     if not id_tokens:
-        return result  # identity 不足 → 過剰拒否しない
+        # identity 不足 → 過剰拒否しない。ただし site-builder は低 confidence で保持。
+        if host_class == "builder":
+            result["reason"] = "site_builder_subdomain"
+            result["confidence"] = 30
+            result["evidence"] = [reg]
+        return result
 
     shared_name = id_tokens & name_terms
     product_terms = terms - name_terms
@@ -1813,6 +2020,11 @@ def verify_official_candidate(
     result["reason"] = "identity_match"
     result["confidence"] = 70 if shared_product else 60
     result["evidence"] = sorted(id_tokens & terms)[:6]
+    # site-builder/store サブドメインは独自ドメインでないため低 confidence に留める
+    # （拒否はしない＝小規模メーカーの実サイトの recall を維持）。
+    if host_class == "builder":
+        result["reason"] = "site_builder_subdomain"
+        result["confidence"] = min(result["confidence"], 35)
     return result
 
 

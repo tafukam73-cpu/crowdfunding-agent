@@ -1412,11 +1412,15 @@ def web_research(
                 continue
             ok_count += 1
 
-            # 推定公式（検索/本文由来）の root ページを巡回したら identity 検証する。
-            # ニュース/メディア/レビュー/ディレクトリ/NPO 等（メーカー本体でない）なら
-            # 公式を撤回し、そのドメインの form/email は最終フィルタで第三者に落とす。
-            if (effective_official and official_inferred and not official_verified
-                    and _is_domain_root(url, effective_domain)):
+            # 推定公式（検索/本文由来）の同一ドメインページを最初に取得できたら identity 検証する。
+            # ニュース/メディア/レビュー/ディレクトリ/NPO/代理店/editorial 等（メーカー本体でない）
+            # なら公式を撤回し、そのドメインの form/email は最終フィルタで第三者に落とす。
+            # 取得できたページが 1 つも無ければ official_verified=False のまま → 最終で撤回する。
+            # 同一ドメインの各ページで検証する（最初の1ページだけだと、homepage の
+            # NewsMediaOrganization/NGO/Government 等の構造化シグナルを持たない下位ページで
+            # 通過してしまうため。homepage が後から巡回されても捕捉できるようにする）。
+            if (effective_official and official_inferred
+                    and cds._same_domain(url, effective_domain or "")):
                 official_verified = True
                 v = cds.verify_official_candidate(
                     url, html, url, getattr(project, "maker_name", None),
@@ -1556,6 +1560,42 @@ def web_research(
         getattr(project, "id", "?"), len(searched), ok_count, fail_count,
         len(email_map), len(socials), len(forms),
     )
+
+    # 推定公式（検索/本文由来）の同一ドメインページを 1 つも「取得できなかった」場合は
+    # identity 検証不能＝unverified。official 確定にせず撤回する（en.rian.ru のような fetch
+    # 不能候補を verified official にしない）。ただし推定確定より前に候補として取得済みで
+    # 検証ブロックが走らなかっただけのケース（official_verified=False でも実際には取得成功）
+    # は撤回しない＝正規メーカーの recall を守る（例: miradial.com）。maker_url 由来は対象外。
+    _official_fetched = bool(effective_domain) and any(
+        p.get("ok") and cds._same_domain(p["url"], effective_domain) for p in candidate_pages)
+    # 公式ドメインと同一登録ドメインの maker 所有メール/フォームが得られていれば、それ自体が
+    # 「そのドメインは maker のもの」という強い証拠なので撤回しない（miradial.com のように
+    # 案件本文に記載のメールで確定するケースの recall を守る）。
+    _has_maker_contact = _has_official_contact() or any(
+        _form_maker_owned(f, effective_domain) for f in forms)
+    if (official_inferred and not official_verified
+            and not _official_fetched and not _has_maker_contact):
+        logger.info("web_research[%s] official DROPPED (unfetchable/unverified): %s",
+                    getattr(project, "id", "?"), effective_official)
+        effective_official = None
+        effective_domain = None
+        official_inferred = False
+
+    # ドメインレベル最終ガード: 推定公式が全ページ 403/取得不能で crawl 中に検証できなかった
+    # 場合でも、ドメインのみで判定できる collision（大企業ブランド/hosting-preview/第三者/姓衝突）
+    # は html 無しで捕捉して撤回する（wilson.com のように全ページがブロックされるケース）。
+    if official_inferred and effective_official:
+        _fg = cds.verify_official_candidate(
+            effective_official, None, effective_official,
+            getattr(project, "maker_name", None), project_terms | maker_terms,
+            campaign_url=getattr(project, "source_url", None),
+            source_type=getattr(project, "source_site", None))
+        if _fg.get("collision_detected"):
+            logger.info("web_research[%s] official DROPPED (domain-guard %s): %s",
+                        getattr(project, "id", "?"), _fg.get("reason"), effective_official)
+            effective_official = None
+            effective_domain = None
+            official_inferred = False
 
     # 公式サイトがどこからも見つからない場合の最終手段：候補ドメインを生成して
     # 実在確認（GET＋本文の関連語チェック）し、確認できたら代表パスをミニクロール
