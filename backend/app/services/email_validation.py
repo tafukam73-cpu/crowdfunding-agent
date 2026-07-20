@@ -156,6 +156,14 @@ def business_email_reason(email: str | None) -> str | None:
     if not EMAIL_FORMAT_RE.match(addr):
         return "format:invalid"
 
+    # メールドメインが "www." で始まるものは実在しない（MX は www サブドメインに置かない）。
+    # 実害は抽出側の誤接着で、本文の語と近傍の URL ホストが `video @ www.brand.com` の
+    # ように結合され `video@www.brand.com` という架空アドレスが生まれる。ここは全経路が
+    # 通る共通検証層なので、抽出側の正規表現を触らずに一箇所で止血できる。
+    # 先頭ラベルが完全に "www" の場合のみ弾く（wwwtech.com / mywww.brand.io は無傷）。
+    if domain.startswith("www."):
+        return "format:www_domain"
+
     labels = domain.split(".")
 
     # ダミー / プレースホルダーのドメインラベル（example.com / test.org / domain.com …）
