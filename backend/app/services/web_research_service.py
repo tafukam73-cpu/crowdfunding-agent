@@ -59,8 +59,137 @@ RATE_LIMIT_SECONDS = 1.5    # ページ/検索の間隔（過度なアクセス�
 SEARCH_BUDGET_FRAC = 0.55   # time_budget のうち検索フェーズに充てる割合
 
 
+# --- 公式サイト未確定時の限定的救済（corroborated domain / Phase 3-②） ---
+# 公式サイトを確定できないと、取得済みの正当なメール（info@ / cs@ 等）まで
+# no_verified_official で捨ててしまう。特に非ラテン文字の maker 名では
+# significant_terms() が空集合になり _infer_official_url が構造的に候補を返せないため、
+# 韓国語/日本語圏の案件で recall が出ない（例: 주식회사 에이치알메디컬 / hr-medical.co.kr）。
+#
+# そこで「同一ドメインが自分自身のページで複数の役割アドレスを掲載している」という
+# 裏付け（corroboration）がある場合に限り、**メールだけ** maker 所有として救済する。
+# official_site / effective_domain は更新しない＝公式サイト判定へは昇格させないため、
+# Phase2 が潰した公式サイト FP の面は一切広がらない。
+_CORROBORATION_MIN_ROLE_EMAILS = 2
+# 役割アドレス（組織の窓口）。person は個人名の可能性があり裏付けに数えない。
+_CORROBORATION_ROLES = frozenset({"high", "mid", "support"})
+# 裏付けに使えないドメインクラス（フリーメール・明確な第三者）。
+_CORROBORATION_DENY_CLASSES = frozenset({"personal_email"})
+
+
+def _corroboration_role_ok(email: str) -> bool:
+    """裏付けに数えられる役割アドレスか（info/cs/support/sales 等）。"""
+    return so.email_role(email) in _CORROBORATION_ROLES
+
+
+def _corroboration_self_sourced(sources: list[str] | None, reg: str) -> bool:
+    """そのメールが「そのドメイン自身のページ」から採れたか（条件2）。
+
+    ディレクトリ/まとめサイトが第三者のメールを転載しているケースを排除する。
+    """
+    return any(so.registrable_domain(s) == reg for s in (sources or []))
+
+
+# --- DNS プロファイル（Web サイトを持たないメーカーの識別） ---
+# 実在する形態として「Web サイトは無いがメールは生きている」メーカーがある
+# （例: hr-medical.co.kr は A レコード無し / MX = mailapp.hiworks.co.kr）。
+# この場合 root ページを永久に取得できないため content 検証を課すと救済できない。
+# 一方 A レコードを持つドメイン（transitionnetwork.org / xinc.digital / en.rian.ru 等）は
+# 従来どおり root fetch + verify を必須にする＝Phase2 の FP 面は広がらない。
+DNS_TIMEOUT = 3.0
+_dns_cache: dict[str, dict | None] = {}
+
+
+def dns_profile(domain: str) -> dict | None:
+    """登録可能ドメインの {"a": bool, "mx": bool} を返す（失敗時 None）。
+
+    A が引けない（NXDOMAIN / NoAnswer）かつ MX がある = 「サイト無し・メールあり」。
+    プロセス内でキャッシュする（同一 run で同じドメインを何度も引かない）。
+    """
+    if not domain:
+        return None
+    if domain in _dns_cache:
+        return _dns_cache[domain]
+    prof: dict | None = None
+    try:
+        import dns.resolver  # noqa: PLC0415
+
+        res = dns.resolver.Resolver()
+        res.lifetime = DNS_TIMEOUT
+        res.timeout = DNS_TIMEOUT
+
+        def _has(rtype: str) -> bool:
+            try:
+                return bool(res.resolve(domain, rtype))
+            except Exception:  # noqa: BLE001  NXDOMAIN/NoAnswer/Timeout は「無し」扱い
+                return False
+
+        has_a = _has("A") or _has("AAAA")
+        prof = {"a": has_a, "mx": _has("MX")}
+    except Exception:  # noqa: BLE001  dnspython 未導入/解決不能は判定不能
+        prof = None
+    _dns_cache[domain] = prof
+    return prof
+
+
+def build_domain_corroboration(
+    email_map: dict,
+    root_verdicts: dict,
+    maker_name: str | None,
+    terms: set[str] | None,
+    dns_fn=None,
+) -> dict:
+    """救済してよい登録可能ドメインを {domain: mode} で返す。
+
+    mode は救済の根拠:
+      - "site"     : root ページを取得でき、verify_official_candidate が accepted
+                     （条件2 の自サイト掲載も必須）
+      - "siteless" : A レコード無し + MX あり＝Web サイトを持たないメーカー。
+                     root を永久に取得できないため content 検証は課さず、
+                     出典も第三者ページを許す（自サイトが存在しないため）
+
+    A レコードを持つのに root を取得できなかったドメイン（403 等の en.rian.ru 型）は
+    どちらにも該当せず、従来どおり救済しない。
+    """
+    terms = set(terms or set())
+    dns_fn = dns_fn or dns_profile
+    # 自サイト掲載のみ（"site" 経路用）/ 出典を問わない（"siteless" 経路用）の2通りで数える。
+    counts_self: dict[str, int] = {}
+    counts_any: dict[str, int] = {}
+    for rec in (email_map or {}).values():
+        addr = rec.get("email") or ""
+        reg = so.registrable_domain(addr)
+        if not reg or not _corroboration_role_ok(addr):
+            continue
+        counts_any[reg] = counts_any.get(reg, 0) + 1
+        if _corroboration_self_sourced(rec.get("sources"), reg):
+            counts_self[reg] = counts_self.get(reg, 0) + 1
+
+    out: dict[str, str] = {}
+    for reg, n_any in counts_any.items():
+        if n_any < _CORROBORATION_MIN_ROLE_EMAILS:
+            continue  # 条件3(=役割メール2件以上)。siteless/site 共通の前提
+        # 条件4: フリーメール等は対象外
+        if so.classify_domain(reg).ownership_class in _CORROBORATION_DENY_CLASSES:
+            continue
+        # 条件5: maker 名一致、または非ラテン名で照合語が作れない場合のみ緩和する。
+        if terms:
+            dom_tok = reg.split(".")[0]
+            if not any(t in dom_tok or dom_tok in t for t in terms):
+                continue
+        # 経路1: root を取得でき verify accepted（自サイト掲載が必須）
+        if root_verdicts.get(reg) and counts_self.get(reg, 0) >= _CORROBORATION_MIN_ROLE_EMAILS:
+            out[reg] = "site"
+            continue
+        # 経路2: A 無し + MX あり＝サイトを持たないメーカー（条件1・2）
+        prof = dns_fn(reg)
+        if prof and not prof.get("a") and prof.get("mx"):
+            out[reg] = "siteless"
+    return out
+
+
 def _email_maker_ownership(
-    email: str, sources: list[str] | None, official_domain: str | None
+    email: str, sources: list[str] | None, official_domain: str | None,
+    corroborated_domains: set[str] | None = None,
 ) -> tuple[bool, str]:
     """検証済み公式ドメインに対する maker 所有判定。(owned, reason) を返す。
 
@@ -74,6 +203,18 @@ def _email_maker_ownership(
     ドメイン分類は既存の source_ownership を再利用する（二重実装しない）。
     """
     if not official_domain:
+        # 公式サイト未確定でも、裏付けの取れたドメイン（build_domain_corroboration）の
+        # 役割アドレスで、かつ自サイト掲載のものだけは救済する。official_site は
+        # 確定させない＝メール採用のみ。
+        reg = so.registrable_domain(email)
+        if corroborated_domains and reg and reg in corroborated_domains and \
+                _corroboration_role_ok(email):
+            # "site" 経路は自サイト掲載を必須にする。"siteless"（A 無し + MX あり）は
+            # 自サイトが存在しないため出典を問わない。
+            mode = (corroborated_domains.get(reg)
+                    if isinstance(corroborated_domains, dict) else "site")
+            if mode == "siteless" or _corroboration_self_sourced(sources, reg):
+                return True, "corroborated_domain"
         return False, "no_verified_official"
     off_reg = so.registrable_domain(official_domain)
     if not off_reg:
@@ -1361,6 +1502,10 @@ def web_research(
     searched: list[str] = []
     candidate_pages: list[dict] = []
     email_map: dict[str, dict] = {}
+    # 公式サイト未確定時の救済用（Phase 3-②）。root ページを取得できたドメインについて
+    # verify_official_candidate の結果を控える（reg_domain -> accepted）。追加の fetch は
+    # 一切行わず、既に取得済みの html を使い回すだけ（実行時間に影響しない）。
+    root_verdicts: dict[str, bool] = {}
     forms: list[str] = []
     ok_count = 0
     fail_count = 0
@@ -1411,6 +1556,22 @@ def web_research(
                 logger.info("web_research[%s] fetch FAIL: %s", pid, url)
                 continue
             ok_count += 1
+
+            # 公式サイト未確定のときだけ、取得できた root ページを検証して控えておく
+            # （Phase 3-② の救済判定用）。html が手元にあるこの時点でしか Phase2 の
+            # content ルール（媒体/NGO/代理店/editorial）を評価できないため、ここで行う。
+            # 追加の fetch は発生しない。公式が既に確定している場合は何もしない。
+            if not effective_domain:
+                _rp = urlparse(url)
+                _rreg = so.registrable_domain(url)
+                if _rreg and _rp.path in ("", "/") and _rreg not in root_verdicts:
+                    _rv = cds.verify_official_candidate(
+                        url, html, url, getattr(project, "maker_name", None),
+                        project_terms | maker_terms,
+                        campaign_url=getattr(project, "source_url", None),
+                        source_type=getattr(project, "source_site", None))
+                    root_verdicts[_rreg] = bool(
+                        _rv.get("accepted") and not _rv.get("collision_detected"))
 
             # 推定公式（検索/本文由来）の同一ドメインページを最初に取得できたら identity 検証する。
             # ニュース/メディア/レビュー/ディレクトリ/NPO/代理店/editorial 等（メーカー本体でない）
@@ -1682,11 +1843,23 @@ def web_research(
     # 検証済み公式ドメインに対する maker 所有関係を厳格に検証し、maker-owned と
     # 第三者（レビュー/ニュース/紹介/ディレクトリ/代理店/小売/unknown/検証不能）を
     # 分離する。第三者は discovered_emails には入れず third_party_emails へ（manual review）。
+    # 公式サイト未確定のときだけ、裏付けの取れたドメインを算出する（Phase 3-②）。
+    # effective_domain / official_site はここでも更新しない＝公式判定へは昇格させない。
+    corroborated_domains: set[str] = set()
+    if not effective_domain:
+        corroborated_domains = build_domain_corroboration(
+            email_map, root_verdicts, getattr(project, "maker_name", None),
+            project_terms | maker_terms)
+        if corroborated_domains:
+            logger.info("web_research[%s] corroborated domain(s) for email rescue: %s",
+                        pid, sorted(corroborated_domains))
+
     emails: list[dict] = []
     third_party_emails: list[dict] = []
     for e in _non_platform:
         owned, reason = _email_maker_ownership(
-            e["email"], e.get("sources"), effective_domain
+            e["email"], e.get("sources"), effective_domain,
+            corroborated_domains=corroborated_domains,
         )
         rec = {**e, "maker_owned": owned, "ownership_reason": reason}
         (emails if owned else third_party_emails).append(rec)
