@@ -1087,6 +1087,161 @@ _NON_OFFICIAL_HOST_HINTS = (
     "news", "press", "magazine", "review", "blog.",
 )
 
+# タイトル照合フォールバック候補**専用**の追加 deny-list（Phase 3-③）。
+# 小売モール/求人/書店/企業ディレクトリ/portfolio は「maker 名を掲載するが公式ではない」。
+# ドメイン語照合では引っかからないが、タイトルには maker 名が載るため title 候補に紛れる。
+# ここは title 候補の選定にのみ使う（メイン crawl の巡回可否＝_NON_OFFICIAL_HOST_HINTS には
+# 足さない。既存の巡回・メール収集の挙動を変えないため）。
+_TITLE_CANDIDATE_DENY = (
+    # 小売モール / マーケットプレイス（韓国系を含む）
+    "ssg.com", "shinsegae", "gmarket.", "auction.co.kr", "11st.co.kr",
+    "coupang.", "lotteon.com", "interpark.", "tmon.", "wemakeprice.",
+    "smartstore.naver.", "brand.naver.", "shopping.naver.", "storefarm.naver.",
+    "kakao.com", "kakaomaker",
+    # 書店（出版社 maker が本屋として現れる）
+    "kyobobook", "aladin.co.kr", "yes24.com", "book1st", "ridibooks", "millie.co.kr",
+    # 求人 / 企業情報ディレクトリ
+    "jobkorea", "saramin", "wanted.co.kr", "incruit", "jobplanet", "rocketpunch",
+    "catch.co.kr", "bizno.net", "moneypin", "marketbz", "cookiedeal", "linkonbiz",
+    "thevc.kr", "innoforest", "nicebizinfo", "kipris", "stockplus",
+    # ポートフォリオ / まとめ / 百科
+    "behance.net", "dribbble.com", "artstation.", "pinterest.",
+    "namu.wiki", "namu.moe", "encykorea", "pillyze", "shoppinghow",
+)
+
+
+# --- 非ラテン maker 名のためのタイトル照合フォールバック（Phase 3-③） ---
+# significant_terms() は ASCII トークン前提のため、韓国語/日本語/中国語の maker 名では
+# 空集合になる。_infer_official_url の照合条件 `t in domain_token or domain_token in t`
+# は terms が空だと常に False なので、非ラテン圏の案件では公式サイト候補を **一件も**
+# 生成できない（実測: 対象26件で recall 0%）。
+#
+# ドメイン文字列は ASCII なので、名前をローマ字化しても届かない正解が多い
+# （퍼시몬→monshop / 경성건강원→gswon / 도서출판 무지개→rainbowbooks / 나노랩→nanowt）。
+# 一方、検索結果の **タイトル**には maker 名がそのままの表記で載る。現行コードは
+# タイトルを候補選定に使っていないため、ここを補う。
+#
+# ただしタイトル一致だけでは小売・媒体・別会社を拾う（実測 precision 73%）。
+# 採用は root を取得し identity（<title>/og:site_name/JSON-LD name）に maker 名が
+# 現れることを必須にする（_official_identity_matches_maker）。実測で FP 0 / precision 100%。
+
+# 法人格の表記（照合前に除去する）。
+_CORP_FORMS = (
+    "주식회사", "㈜", "(주)", "（주）", "유한회사", "유한책임회사",
+    "사단법인", "재단법인", "합자회사", "합명회사",
+    "株式会社", "有限会社", "合同会社", "一般社団法人", "公益財団法人",
+    "股份有限公司", "有限公司", "股份公司", "公司",
+)
+
+# identity として受理してはいけない文字列（エラー/チャレンジページのタイトル）。
+# これらを identity と認めると「Access Denied」ページが照合を通してしまう。
+_IDENTITY_ERROR_MARKERS = (
+    "access denied", "just a moment", "not found", "404", "403", "forbidden",
+    "error", "attention required", "are you human", "bot verification",
+    "service unavailable", "bad gateway", "site not found", "page not found",
+    "under construction", "coming soon", "security check", "cloudflare",
+)
+
+
+def _strip_corp_forms(name: str | None) -> str:
+    """maker 名から法人格表記を除去し、空白を詰めた照合用の文字列を返す。"""
+    s = name or ""
+    for form in _CORP_FORMS:
+        s = s.replace(form, " ")
+    return re.sub(r"\s+", "", s).strip()
+
+
+def _title_mentions_maker(title: str | None, maker_core: str) -> bool:
+    """検索結果タイトルに maker 名（法人格除去後）が含まれるか。"""
+    if not maker_core or len(maker_core) < 2:
+        return False
+    return maker_core in re.sub(r"\s+", "", title or "")
+
+
+def _identity_strings(html: str | None, final_url: str | None) -> list[str]:
+    """root ページの identity 文字列（<title>/og:site_name/JSON-LD name）を返す。"""
+    ident = cds.extract_site_identity(html, final_url)
+    return [s for s in ((ident.get("names") or [])
+                        + (ident.get("organization_names") or [])) if s]
+
+
+# 外部大手ブランドの別名（同一ブランドは 1 グループ。韓国語/英語表記を併記）。
+# title fallback 候補の identity が maker 以外のこれらブランドに支配されている場合、
+# 別事業ライン/リセラーの店舗（例: "LG전자 B2B 공식커머셜 전문점 올음"）なので採用しない。
+_MAJOR_BRAND_ALIASES = (
+    ("lg", "lg전자", "엘지"),
+    ("samsung", "삼성"),
+    ("apple", "애플"),
+    ("hyundai", "현대"),
+    ("kia", "기아"),
+    ("sk",),
+    ("lotte", "롯데"),
+    ("coupang", "쿠팡"),
+    ("naver", "네이버"),
+    ("kakao", "카카오"),
+)
+
+
+def _external_brand_in_identity(
+    html: str | None, final_url: str | None, maker_name: str | None
+) -> str | None:
+    """candidate identity が maker 以外の外部大手ブランドに支配されているか。
+
+    支配している外部ブランドの検出語を返す（無ければ None）。maker 名自身にその
+    ブランド語が含まれる場合は「支配」とみなさない（現대バイオ 等の正規メーカーを守る）。
+    - 英語別名（lg / samsung / sk 等）は identity のラテン語トークン単位で一致判定する
+      （task/desk 等への部分一致誤爆を避ける）。
+    - 韓国語別名（엘지 / 삼성 / lg전자 等）は空白除去した identity への部分一致で判定する
+      （"LG전자" のように韓国語と地続きになるため）。
+    """
+    idents = _identity_strings(html, final_url)
+    if not idents:
+        return None
+    joined = " ".join(idents).lower()
+    joined_norm = re.sub(r"\s+", "", joined)
+    latin_tokens = set(re.findall(r"[a-z0-9]+", joined))
+    maker_low = (maker_name or "").lower()
+    maker_norm = re.sub(r"\s+", "", maker_low)
+    maker_latin = set(re.findall(r"[a-z0-9]+", maker_low))
+
+    def _hit(alias: str, tokens: set[str], norm: str) -> bool:
+        # 英数字のみの別名はトークン一致、韓国語を含む別名は部分一致。
+        if alias.isascii():
+            return alias in tokens
+        return alias in norm
+
+    for group in _MAJOR_BRAND_ALIASES:
+        present = next(
+            (a for a in group if _hit(a, latin_tokens, joined_norm)), None)
+        if not present:
+            continue
+        # maker 名自身がこのブランド語を含むなら支配とみなさない。
+        if any(_hit(a, maker_latin, maker_norm) for a in group):
+            continue
+        return present
+    return None
+
+
+def _official_identity_matches_maker(
+    html: str | None, final_url: str | None, maker_name: str | None
+) -> bool:
+    """root の identity に maker 名が現れるか（採用の必須条件）。
+
+    identity を取得できない場合は False（＝採用しない）。エラー/チャレンジページの
+    タイトルは identity として認めない。本文一致では小売サイト（取扱商品として
+    maker 名が本文に出る）を弾けないため、identity に限定する。
+    """
+    core = _strip_corp_forms(maker_name)
+    if not core or len(core) < 2:
+        return False
+    for s in _identity_strings(html, final_url):
+        low = s.strip().lower()
+        if any(m in low for m in _IDENTITY_ERROR_MARKERS):
+            continue
+        if core in re.sub(r"\s+", "", s):
+            return True
+    return False
+
 
 def _infer_official_url(
     page_candidates: list[tuple[int, str]],
@@ -1115,6 +1270,42 @@ def _infer_official_url(
             p = urlparse(url)
             return f"{p.scheme}://{p.netloc}"
     return ""
+
+
+# タイトル照合フォールバックで一度に検証する候補ドメインの上限（実行時間の保険）。
+_TITLE_INFER_MAX_CANDIDATES = 4
+
+
+def _title_official_candidates(
+    page_candidates: list[tuple[int, str]],
+    page_titles: dict[str, str],
+    maker_name: str | None,
+) -> list[str]:
+    """検索結果タイトルに maker 名を含む候補 root URL を、スコア降順・重複排除で返す。
+
+    ドメイン語照合（_infer_official_url）とは独立。呼び出し側は「他の手段で公式が
+    全く確定しなかった場合のみ」最終手段としてこれを使い、各 root を取得して
+    identity 一致と verify を通ったものだけ採用する（小売/媒体/別会社は identity で落ちる）。
+    """
+    maker_core = _strip_corp_forms(maker_name)
+    if not maker_core or not page_titles:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for _score, url in sorted(page_candidates, key=lambda t: t[0], reverse=True):
+        host = urlparse(url).netloc.lower()
+        if any(h in host for h in _NON_OFFICIAL_HOST_HINTS):
+            continue
+        if any(h in host for h in _TITLE_CANDIDATE_DENY):
+            continue
+        reg = cds._domain_of(url)
+        if not reg or reg in seen:
+            continue
+        if _title_mentions_maker(page_titles.get(url), maker_core):
+            p = urlparse(url)
+            seen.add(reg)
+            out.append(f"{p.scheme}://{p.netloc}")
+    return out
 
 
 # <a href="...">テキスト</a> から (絶対URL, アンカーテキスト小文字) を取り出す。
@@ -1292,6 +1483,7 @@ def web_research(
     pdfs: list[dict] = []
     pdf_seen: set[str] = set()
     page_candidates: list[tuple[int, str]] = []   # (score, url) クロール対象候補
+    page_titles: dict[str, str] = {}              # url -> 検索結果タイトル（推定に使う）
     seen_results: set[str] = set()
 
     def consider_social(platform: str, raw_url: str, score: int, source: str) -> bool:
@@ -1362,6 +1554,7 @@ def web_research(
                     reason = reason + "（非公式ホストのため巡回対象外）"
                 else:
                     page_candidates.append((score, url))
+                    page_titles.setdefault(url, rec["title"] or "")
                     adopted = True
             if len(search_records) < MAX_SEARCH_RESULTS_SAVED:
                 search_records.append({
@@ -1757,6 +1950,106 @@ def web_research(
             effective_official = None
             effective_domain = None
             official_inferred = False
+
+    # 非ラテン maker 名のタイトル照合フォールバック（最終手段・Phase 3-③）。
+    # ここまでで公式が全く確定していない場合のみ動く＝page 由来 / ドメイン語照合の候補が
+    # 1 件でもあれば入らない（page candidate 優先）。検索結果タイトルに maker 名を含む
+    # 候補を順に root 取得し、identity 一致（<title>/og:site_name/JSON-LD name）と
+    # verify_official_candidate accepted の **両方**を満たしたものだけ採用する。
+    # 小売モール/求人/書店/portfolio/別会社は identity で落ちる。identity は候補ドメイン
+    # 単位で判定するため、途中の撤回・再評価に依存しない（単一 bool のバイパス問題を回避）。
+    if not effective_official and not _expired():
+        title_cands = _title_official_candidates(
+            page_candidates, page_titles, getattr(project, "maker_name", None))
+        identity_rejected_domains: set[str] = set()
+        mkr = getattr(project, "maker_name", None)
+        for root in title_cands[:_TITLE_INFER_MAX_CANDIDATES]:
+            if _expired() or len(searched) >= _u_cap:
+                break
+            reg = cds._domain_of(root)
+            if not reg or reg in identity_rejected_domains:
+                continue
+            # root は main crawl で page candidate として既訪問のことがある。その場合でも
+            # identity 検証のため取得し直す（注入 fetcher はキャッシュ、実 fetcher も許容範囲）。
+            already_seen = root in crawl_seen
+            thtml = fetch(root)
+            if not already_seen:
+                crawl_seen.add(root)
+                searched.append(root)
+                candidate_pages.append({
+                    "url": root, "type": _page_type(root, reg),
+                    "ok": bool(thtml), "emails": 0})
+            if not thtml:
+                identity_rejected_domains.add(reg)  # 取得できない＝検証不能
+                continue
+            # identity 一致（必須）。小売/求人/書店/別会社/エラーページはここで落ちる。
+            if not _official_identity_matches_maker(thtml, root, mkr):
+                identity_rejected_domains.add(reg)
+                logger.info("web_research[%s] title-match REJECTED (identity mismatch): %s",
+                            pid, root)
+                continue
+            # 既存の公式検証（媒体/NGO/代理店/preview/大企業/姓衝突）も必須。
+            tv = cds.verify_official_candidate(
+                root, thtml, root, mkr, project_terms | maker_terms,
+                campaign_url=getattr(project, "source_url", None),
+                source_type=getattr(project, "source_site", None))
+            if tv.get("collision_detected"):
+                identity_rejected_domains.add(reg)
+                logger.info("web_research[%s] title-match REJECTED (%s): %s",
+                            pid, tv.get("reason"), root)
+                continue
+            # 外部大手ブランド支配ガード（title fallback 専用）。maker 名は含むが identity の
+            # 主体が別の大手ブランド（LG전자 等）＝別事業ライン/リセラー店舗は採用しない。
+            _brand = _external_brand_in_identity(thtml, root, mkr)
+            if _brand:
+                identity_rejected_domains.add(reg)
+                logger.info(
+                    "web_research[%s] title-match REJECTED "
+                    "(external_brand_identity_conflict brand=%s): %s", pid, _brand, root)
+                continue
+            # 採用。official_verified=True（root を取得し identity+verify 済み）。
+            effective_official = root
+            effective_domain = reg
+            official_inferred = True
+            official_verified = True
+            logger.info("web_research[%s] title-match official ADOPTED: %s", pid, root)
+            # 採用ページ + 代表パスからメール/フォーム/SNS を回収。追加 fetch は既存の
+            # 注入 fetcher を使う（別 fetcher を作らない＝注入・レート制御を尊重）。
+            base = root.rstrip("/")
+            for path in ["", "/contact", "/contact-us", "/about",
+                         "/pages/contact", "/company", "/about-us"]:
+                if len(searched) >= _u_cap or _expired():
+                    break
+                murl = base + path
+                if murl in crawl_seen:
+                    continue
+                mhtml = thtml if path == "" else fetch(murl)
+                if path != "":
+                    crawl_seen.add(murl)
+                    searched.append(murl)
+                    candidate_pages.append({
+                        "url": murl, "type": _page_type(murl, effective_domain),
+                        "ok": bool(mhtml), "emails": 0})
+                if not mhtml:
+                    continue
+                for addr in cds.extract_emails(mhtml, site_domain):
+                    if addr.lower() not in email_map:
+                        _sc, _ti = cds.score_email(addr, effective_domain)
+                        email_map[addr.lower()] = {
+                            "email": addr, "score": _sc, "tier": _ti,
+                            "email_owner": cds.classify_email_owner(
+                                addr, effective_domain, site_domain),
+                            "sources": [murl]}
+                for link in cds.extract_links(mhtml, murl):
+                    plat = _social_platform(link)
+                    if plat:
+                        consider_social(plat, link, 25, f"title:{murl}")
+                    elif cds._same_domain(link, effective_domain) \
+                            and cds._is_contact_url(link) and link not in forms:
+                        forms.append(link)
+                if cds._is_contact_url(murl) and murl not in forms:
+                    forms.append(murl)
+            break
 
     # 公式サイトがどこからも見つからない場合の最終手段：候補ドメインを生成して
     # 実在確認（GET＋本文の関連語チェック）し、確認できたら代表パスをミニクロール
