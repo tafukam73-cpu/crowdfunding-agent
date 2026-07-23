@@ -1695,8 +1695,38 @@ def web_research(
             crawl_urls.append(u)
         return True
 
+    # 代表パスを展開済みの公式 root（同一 root への二重展開を防ぐ）。
+    known_paths_expanded: set[str] = set()
+
+    def expand_known_paths(root: str, insert_at: int) -> int:
+        """公式 root の代表パスをクロール待ち行列へ 1 回だけ差し込む。展開件数を返す。
+
+        同じ root で二度呼ばれても 2 回目以降は何もしない（0 を返す）。
+        """
+        if not root or root in known_paths_expanded:
+            return 0
+        known_paths_expanded.add(root)
+        pos = insert_at
+        added = 0
+        for path in WEB_KNOWN_PATHS:
+            if add_crawl(root + path, front_at=pos):
+                pos += 1
+                added += 1
+        logger.info("web_research[%s] known paths expanded: %s (+%d)",
+                    getattr(project, "id", "?"), root, added)
+        return added
+
     def expand_official(root_url: str, insert_at: int, *, inferred: bool = False) -> None:
-        """確定した公式サイトに代表パスを展開してクロール待ち行列の先頭側に差し込む。"""
+        """公式サイトを確定し、クロール待ち行列の先頭側に差し込む。
+
+        inferred=True（検索/本文からの **未検証** 推定）では root だけを積み、代表パスは
+        identity / 大企業ブランドガードを通過してから expand_known_paths() で展開する。
+        未検証候補に代表パス 16 本を先払いすると、その候補が撤回されても積んだ URL は
+        待ち行列に残り、MAX_URLS の予算を食い潰すため（実測 p96 놀로: 誤推定した
+        support.google.com / gemini.google.com が 25 枠中 17 枠を占有した）。
+
+        maker_url 由来（inferred=False）は登録済み＝信頼できるので従来どおり即時展開する。
+        """
         nonlocal effective_official, effective_domain, official_inferred, official_verified
         p = urlparse(root_url)
         root = f"{p.scheme}://{p.netloc}"
@@ -1708,9 +1738,14 @@ def web_research(
         pos = insert_at
         if add_crawl(root, front_at=pos):
             pos += 1
-        for path in WEB_KNOWN_PATHS:
-            if add_crawl(root + path, front_at=pos):
-                pos += 1
+        if inferred:
+            logger.info(
+                "web_research[%s] official site set: %s "
+                "(known paths DEFERRED until verified, inferred=True)",
+                getattr(project, "id", "?"), root,
+            )
+            return
+        expand_known_paths(root, pos)
         logger.info(
             "web_research[%s] official site set: %s (+%d known paths, inferred=%s)",
             getattr(project, "id", "?"), root, len(WEB_KNOWN_PATHS), inferred,
@@ -1791,6 +1826,12 @@ def web_research(
             if not html:
                 fail_count += 1
                 logger.info("web_research[%s] fetch FAIL: %s", pid, url)
+                # 推定公式の root を取得できないと identity 検証も代表パス展開もできず、
+                # /contact だけ生きているサイトの recall を落とす。root が落ちた場合に
+                # 限り従来どおり代表パスを展開して救済する（二重展開は関数側で防止）。
+                if (effective_official and official_inferred
+                        and url.rstrip("/") == effective_official.rstrip("/")):
+                    expand_known_paths(effective_official, i)
                 continue
             ok_count += 1
 
@@ -1831,6 +1872,10 @@ def web_research(
                     effective_official = None
                     effective_domain = None
                     official_inferred = False
+                else:
+                    # 検証を通過した推定公式だけ、ここで初めて代表パスを展開する。
+                    # 撤回された候補は展開されないので URL 予算を浪費しない。
+                    expand_known_paths(effective_official, i)
 
             # メール（既存フィルタを必ず通す。出典 URL を付与）
             page_emails = 0
