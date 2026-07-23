@@ -159,8 +159,19 @@ GOLD_B: dict[int, dict] = {
               note="法人 주식회사 더넥스트・CEO 김미정・momtobabydj@naver.com 確認。System は "
               "@nextbaby.co.kr 3 件(ドメイン一致・未確認)＋naver 正だが CEO/kakao 取りこぼし。",
               a_email_class="correct", a_official_correct=True),
-    96: dict(status="blocked", b_official=None, b_emails=[], b_forms=[], b_socials=[],
-             b_people=[], note="놀로(Nolo)。System email=brand-kr.com(代理店の疑い)。公式未特定。",
+    # GT補正(2026-07-23): 当初 blocked（公式未特定）だったが、놀로=스파크펫(SparkPet) の
+    # ブランドで Knollo Store(knollo.store)/Knollo Square(knollo.co.kr)/Knollo Play(アプリ)
+    # の 3 事業を持つことを確認。knollo.store を実地取得（200・<title>놀로 knollo |
+    # 반려동물 간식·용품·케어 전문몰・canonical=https://www.knollo.store/）したため verified へ。
+    # System A の saved_official_sites は空だったので a_official_correct=False のまま。
+    # brand-kr.com の agency 判定も維持する。
+    96: dict(status="verified", b_official="https://www.knollo.store",
+             b_emails=[], b_forms=[],
+             b_socials=["https://litt.ly/knollo.store"],
+             b_people=[], note="놀로(Knollo)=스파크펫(SparkPet)のブランド。公式 knollo.store を"
+             "実地確認(놀로 knollo | 반려동물 간식·용품·케어 전문몰)。knollo.co.kr は"
+             "Knollo Square(実店舗)で同一ブランド。System email=brand-kr.com は代理店のまま、"
+             "公式サイトは未取得だった。",
              a_email_class="agency", a_official_correct=False),
     97: dict(status="blocked", b_official=None, b_emails=[], b_forms=[], b_socials=[],
              b_people=[], note="주부디자인。System email=makerz.co.kr(代理店の疑い)。公式未特定。",

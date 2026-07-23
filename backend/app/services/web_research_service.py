@@ -524,6 +524,27 @@ def guess_and_verify_official(
     return None
 
 
+# --- 韓国語メーカー向けクエリ（Recall 改善） ---
+# 実測（p96 놀로）: 生成 28 本のうち実行されるのは MAX_QUERIES=20 本まで。その 15〜20
+# 位を占める「スタートアップ系ソース」（Product Hunt / YC / Crunchbase / GitHub 等）は
+# 韓国の中小メーカーには構造的に無効で、収穫 0 の死に枠だった。一方、公式サイトに到達
+# する韓国語の言い回し（공식몰 / 공식 홈페이지 等）は 1 本も生成されていなかった。
+# そこでハングル maker のときだけ、死に枠を韓国語クエリへ **置換**する（単純追加だと
+# ゼロサムの 20 本枠から生産的な先頭クエリが押し出されて既存成功ケースが壊れる）。
+_HANGUL_RE = re.compile(r"[가-힣]")
+
+# maker 名に付けて公式サイトを狙う汎用韓国語サフィックス（業種語は入れない＝
+# 案件固有の語はゼロサム枠を潰すだけで他案件に効かない）。
+_KR_OFFICIAL_QUERY_SUFFIXES = (
+    "공식몰", "공식 홈페이지", "브랜드", "회사", "공식 스토어",
+)
+
+
+def _has_hangul(text: str | None) -> bool:
+    """文字列にハングル音節が含まれるか（韓国語クエリ／死に枠抑制の発火条件）。"""
+    return bool(text) and bool(_HANGUL_RE.search(text))
+
+
 def build_keyword_candidates(
     project: Project, research: CompanyResearch | None = None
 ) -> dict:
@@ -651,6 +672,14 @@ def build_web_search_queries(
         for kwd in ("Instagram", "Facebook", "LinkedIn", "official", "contact"):
             add(f'"{maker}" {kwd}')
 
+    # 優先度3.5: ハングル maker 名の韓国語クエリ（公式サイト到達率の改善）。
+    # 実行される先頭 MAX_QUERIES 本に確実に入るよう、site: 限定より前に置く。
+    # 見返りは優先度8 のスタートアップ系ブロック抑制で相殺する（下記参照）。
+    kr_maker = _has_hangul(maker)
+    if kr_maker:
+        for kwd in _KR_OFFICIAL_QUERY_SUFFIXES:
+            add(f'"{maker}" {kwd}')
+
     # 曖昧でなければ slug 検索はここで追加（補助）
     if not maker_ambiguous:
         add_slug_queries()
@@ -694,9 +723,12 @@ def build_web_search_queries(
 
     # 優先度8: スタートアップ系ソース（Product Hunt / GitHub / YC / Crunchbase /
     # LinkedIn company / App Store 等）。会社・創業者・SNS の発見率を上げる（要件3・7）。
+    # ただしハングル maker では実測 収穫 0（韓国の中小メーカーはこれらに載らない）で、
+    # MAX_QUERIES のゼロサム枠を占有するだけなので抑制し、その枠を優先度3.5 の
+    # 韓国語クエリに充てる。ラテン/日本語/中国語 maker の生成列は一切変わらない。
     brand_terms = [t for t in (title, maker, short, creator_slug, project_slug) if t]
     # ブランド語は最初の 2 つに絞る（クエリ爆発を防ぐ）
-    for b in list(dict.fromkeys(brand_terms))[:2]:
+    for b in (list(dict.fromkeys(brand_terms))[:2] if not kr_maker else []):
         for src in ("Product Hunt", "Crunchbase", "GitHub", "YC", "founder",
                     "LinkedIn company"):
             add(f'"{b}" {src}')
