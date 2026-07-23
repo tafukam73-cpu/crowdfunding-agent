@@ -48,8 +48,28 @@ def check(name, cond):
         print(f"  FAIL- {name}")
 
 
+_project_seq = 0
+
+
 def _mk_project(db) -> Project:
-    p = Project(title="Test", source_site="kickstarter")
+    # メール探索は日本クラファン適性ゲートを通る必要があるため、商品ページ URL と
+    # 商品内容（物販・訴求点あり）を持つ案件にする。
+    global _project_seq
+    _project_seq += 1
+    p = Project(
+        title=f"Test Compact Kitchen Gadget {_project_seq}",
+        source_site="kickstarter",
+        source_url=(
+            "https://www.kickstarter.com/projects/acme-lab/"
+            f"compact-kitchen-gadget-{_project_seq}"
+        ),
+        category="kitchen",
+        description="A compact and portable kitchen gadget with a minimal design.",
+        description_clean="A compact and portable kitchen gadget with a minimal design.",
+        backers_count=500,
+        goal_amount=1000,
+        raised_amount=5000,
+    )
     db.add(p)
     db.commit()
     db.refresh(p)

@@ -15,7 +15,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.contact_intelligence_job import ContactIntelligenceJobOut
-from app.services import contact_intelligence_service, project_service
+from app.services import (
+    contact_intelligence_service,
+    contact_search_gate,
+    product_context_service,
+    project_service,
+)
 
 router = APIRouter(tags=["contact-intelligence"])
 
@@ -38,6 +43,10 @@ def create_job(
         "full_contact_intelligence",
     ),
     force: bool = Query(False, description="24h キャッシュを無視して再実行する"),
+    override_reason: str | None = Query(
+        None,
+        description="適性ゲート不合格でも管理者が手動実行する場合の理由（監査のため記録する）",
+    ),
     db: Session = Depends(get_db),
 ) -> ContactIntelligenceJobOut:
     project = project_service.get_project(db, project_id)
@@ -45,11 +54,44 @@ def create_job(
         raise HTTPException(status_code=404, detail="案件が見つかりません")
     try:
         job, from_cache = contact_intelligence_service.create_job(
-            db, project, job_type, force=force
+            db, project, job_type, force=force, override_reason=override_reason
+        )
+    except contact_search_gate.GateBlocked as blocked:
+        # フロントのボタン非表示だけに頼らず、サーバー側で拒否する。
+        # 理由と判定内容を返し、UI が「対象外の理由」と手動実行の導線を出せるようにする。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "日本クラファン適性ゲートによりメール探索を開始できません",
+                "gate": _gate_detail(blocked.result),
+            },
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _out(job, from_cache)
+
+
+def _gate_detail(result: dict) -> dict:
+    """ゲート判定を API レスポンス向けに整形する（datetime は ISO 文字列）。"""
+    checked = result.get("gate_checked_at")
+    return {
+        **{k: v for k, v in result.items() if k != "gate_checked_at"},
+        "gate_checked_at": checked.isoformat() if checked else None,
+    }
+
+
+@router.get("/projects/{project_id}/contact-search-gate")
+def get_contact_search_gate(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """メール探索の可否（日本クラファン適性ゲート）と商品コンテキストを返す。
+
+    UI はこれを見て「何の商品を調査するのか」「なぜ探索できる/できないのか」を表示する。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    gate = contact_search_gate.evaluate(db, project)
+    context = product_context_service.build(db, project, gate=gate)
+    return {"gate": _gate_detail(gate), "product": context}
 
 
 @router.get(

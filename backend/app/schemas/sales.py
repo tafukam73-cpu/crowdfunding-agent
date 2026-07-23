@@ -54,6 +54,13 @@ class RankingItem(BaseModel):
     rank: int
     title: str
     source_site: str
+    # 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+    # メーカー公式サイト（official_site_url）とは別物。取得できない場合は
+    # campaign_url=None ＋ campaign_url_missing=true（公式サイトで代用しない）。
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    official_site_url: str | None = None
     score: int
     stars: int
     sales_target: str            # "yes" / "no" / "要確認"
@@ -78,6 +85,13 @@ class TaskItem(BaseModel):
     project_id: int
     title: str
     source_site: str
+    # 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+    # メーカー公式サイト（official_site_url）とは別物。取得できない場合は
+    # campaign_url=None ＋ campaign_url_missing=true（公式サイトで代用しない）。
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    official_site_url: str | None = None
     sales_status: SalesStatus
     latest_score: int | None = None
     # 営業優先度（0〜100）と星評価。
@@ -159,6 +173,13 @@ class CopilotCard(BaseModel):
     project_id: int
     title: str
     source_site: str
+    # 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+    # メーカー公式サイト（official_site_url）とは別物。取得できない場合は
+    # campaign_url=None ＋ campaign_url_missing=true（公式サイトで代用しない）。
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    official_site_url: str | None = None
     decision: str          # sell_now / needs_contact / needs_followup / ...
     decision_label: str    # 日本語ラベル
     next_action: str       # 次の一手（短い命令形）
@@ -319,6 +340,13 @@ class ExecutionTaskItem(BaseModel):
     project_id: int
     title: str
     source_site: str | None = None
+    # 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+    # メーカー公式サイト（official_site_url）とは別物。取得できない場合は
+    # campaign_url=None ＋ campaign_url_missing=true（公式サイトで代用しない）。
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    official_site_url: str | None = None
     outreach_status: str
     recipient: str | None = None
     sent_at: str | None = None

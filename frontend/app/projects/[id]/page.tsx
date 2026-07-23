@@ -1,5 +1,6 @@
 "use client";
 
+import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -299,14 +300,16 @@ export default function ProjectDetail() {
               ))}
             </dl>
             <div className="mt-4 flex flex-wrap gap-4 text-sm">
-              {/* ダミー/プレースホルダー URL（example.com 等）はリンク表示しない */}
-              {isValidBusinessUrl(project.source_url) && (
-                <a className="text-blue-700 hover:underline" href={project.source_url as string} target="_blank" rel="noreferrer">
-                  案件ページ ↗
-                </a>
-              )}
-              {isValidBusinessUrl(project.maker_url) && (
-                <a className="text-blue-700 hover:underline" href={project.maker_url as string} target="_blank" rel="noreferrer">
+              {/* 海外クラファンの商品ページ（公式サイトで代用しない。未取得なら未確認表示） */}
+              <CampaignLink source={project} size="md" />
+              {/* メーカー公式サイトは商品ページとは別に表示する */}
+              {isValidBusinessUrl(project.official_site_url ?? project.maker_url) && (
+                <a
+                  className="text-blue-700 hover:underline"
+                  href={(project.official_site_url ?? project.maker_url) as string}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   メーカー公式 ↗
                 </a>
               )}

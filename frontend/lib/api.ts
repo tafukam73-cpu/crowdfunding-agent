@@ -81,6 +81,18 @@ export type Project = {
   end_date: string | null;
   maker_name: string | null;
   maker_url: string | null;
+  // 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+  // メーカー公式サイト（official_site_url）とは別物。未取得なら
+  // campaign_url=null ＋ campaign_url_missing=true（公式サイトで代用しない）。
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
+  // 日本クラファン適性ゲート（メール探索の事前判定）
+  eligible_for_contact_search: boolean | null;
+  contact_search_gate_reason: string | null;
+  japan_crowdfunding_score: number | null;
+  gate_checked_at: string | null;
   contact_info: string | null;
   status: ProjectStatus;
   sales_status: SalesStatus;
@@ -795,6 +807,13 @@ export type ExecutionTaskItem = {
   project_id: number;
   title: string;
   source_site: string | null;
+  // 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+  // メーカー公式サイト（official_site_url）とは別物。未取得なら
+  // campaign_url=null ＋ campaign_url_missing=true（公式サイトで代用しない）。
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
   outreach_status: OutreachStatus;
   recipient: string | null;
   sent_at: string | null;
@@ -1873,18 +1892,83 @@ export type ContactIntelligenceJob = {
   worker_id: string | null;
   heartbeat_at: string | null;
   cancel_requested: boolean;
+  // 適性ゲート不合格のまま手動実行したときの理由（通常実行は null）。
+  gate_override_reason: string | null;
 };
 
+// ===== 日本クラファン適性ゲート（メール探索の事前判定） =====
+export type ContactSearchGate = {
+  eligible_for_contact_search: boolean;
+  contact_search_gate_decision: "eligible" | "needs_review" | "not_eligible";
+  contact_search_gate_reason: string;
+  japan_crowdfunding_score: number | null;
+  japan_crowdfunding_threshold: number;
+  gate_checked_at: string | null;
+  reasons: string[];
+  blockers: string[];
+  rationale: string;
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
+};
+
+// メール探索画面に出す「何の商品を調査しているのか」。
+export type ProductContext = {
+  project_id: number;
+  product_name: string;
+  summary_ja: string | null;
+  summary_missing: boolean;
+  key_features: string[];
+  source_site: string;
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
+  japan_crowdfunding_score: number | null;
+  eligible_for_contact_search: boolean;
+  contact_search_gate_reason: string;
+  gate_reasons: string[];
+  contact_search_rationale: string;
+};
+
+export async function fetchContactSearchGate(
+  projectId: number
+): Promise<{ gate: ContactSearchGate; product: ProductContext }> {
+  const res = await apiFetch(`/projects/${projectId}/contact-search-gate`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+/** ゲート不合格でサーバーが 409 を返したときのエラー（理由と判定内容を持つ）。 */
+export class ContactSearchGateError extends Error {
+  gate: ContactSearchGate;
+  constructor(gate: ContactSearchGate) {
+    super(gate.contact_search_gate_reason || "メール探索を開始できません");
+    this.name = "ContactSearchGateError";
+    this.gate = gate;
+  }
+}
+
 // 重い探索をジョブ化して開始（24hキャッシュ再利用。force で再実行）。すぐ返る。
+// overrideReason を渡すと、適性ゲート不合格でも理由を記録したうえで実行する。
 export async function startContactIntelligenceJob(
   projectId: number,
   jobType: CIJobType = "full_contact_intelligence",
-  force = false
+  force = false,
+  overrideReason?: string
 ): Promise<ContactIntelligenceJob> {
+  const qs = new URLSearchParams({ job_type: jobType, force: String(force) });
+  if (overrideReason) qs.set("override_reason", overrideReason);
   const res = await fetch(
-    `${API_BASE}/projects/${projectId}/contact-intelligence/jobs?job_type=${jobType}&force=${force}`,
+    `${API_BASE}/projects/${projectId}/contact-intelligence/jobs?${qs.toString()}`,
     { method: "POST" }
   );
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null);
+    const gate = body?.detail?.gate as ContactSearchGate | undefined;
+    if (gate) throw new ContactSearchGateError(gate);
+  }
   if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
   return res.json();
 }
@@ -2067,6 +2151,10 @@ export type ExecutiveChannel =
 
 export type ExecutiveSummary = {
   project_id: number;
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
   score: number;
   stars: number;
   sales_target: SalesTarget;
@@ -2146,6 +2234,13 @@ export type RankingItem = {
   rank: number;
   title: string;
   source_site: string;
+  // 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+  // メーカー公式サイト（official_site_url）とは別物。未取得なら
+  // campaign_url=null ＋ campaign_url_missing=true（公式サイトで代用しない）。
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
   score: number;
   stars: number;
   sales_target: SalesTarget;
@@ -2179,6 +2274,10 @@ export type SalesTask = {
   project_id: number;
   title: string;
   source_site: string;
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
   sales_status: SalesStatus;
   latest_score: number | null;
   priority_score: number;
@@ -2265,6 +2364,13 @@ export type CopilotCard = {
   project_id: number;
   title: string;
   source_site: string;
+  // 海外クラファンの商品ページ URL（「商品ページを開く」ボタン用）。
+  // メーカー公式サイト（official_site_url）とは別物。未取得なら
+  // campaign_url=null ＋ campaign_url_missing=true（公式サイトで代用しない）。
+  campaign_url: string | null;
+  campaign_url_missing: boolean;
+  campaign_url_missing_reason: string | null;
+  official_site_url: string | null;
   decision: CopilotDecision;
   decision_label: string;
   next_action: string;

@@ -2,6 +2,8 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import ProductContextCard from "@/components/ProductContextCard";
+
 import {
   type AiCandidateEmail,
   applyContactPersonToCrm,
@@ -25,6 +27,7 @@ import {
   type ContactIntelligenceJob,
   type CIJobType,
   createSalesOpportunityFromDiscovery,
+  ContactSearchGateError,
   startContactIntelligenceJob,
   getContactIntelligenceJob,
   getLatestContactIntelligenceJob,
@@ -1163,10 +1166,13 @@ function DeepInvestigationSection({
     setBusy(true);
     setError(null);
     try {
-      const j = await startContactIntelligenceJob(
-        projectId,
-        "full_contact_intelligence",
-        force
+      const j = await startJobWithGate((overrideReason) =>
+        startContactIntelligenceJob(
+          projectId,
+          "full_contact_intelligence",
+          force,
+          overrideReason
+        )
       );
       setJob(j);
       if (ACTIVE(j.status)) startPolling(j.id);
@@ -3491,6 +3497,34 @@ function ContactDiscoveryV2Section({
   );
 }
 
+/**
+ * 適性ゲート（サーバー側再判定）で弾かれたときの共通処理。
+ *
+ * サーバーが 409 を返したら、理由を提示したうえで管理者に手動実行の理由を入力させる。
+ * 理由が入力された場合のみ override 付きで再実行し、その理由はジョブに記録される。
+ * 入力しなければ実行しない（ボタンの非表示だけに頼らず、必ずここを通す）。
+ */
+async function startJobWithGate(
+  run: (overrideReason?: string) => Promise<ContactIntelligenceJob>
+): Promise<ContactIntelligenceJob> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!(e instanceof ContactSearchGateError)) throw e;
+    const reason = window.prompt(
+      [
+        "日本クラファン適性ゲートによりメール探索を開始できません。",
+        `理由: ${e.gate.contact_search_gate_reason}`,
+        "",
+        "それでも実行する場合は理由を入力してください（記録されます）。",
+      ].join("\n"),
+      ""
+    );
+    if (!reason || !reason.trim()) throw e;
+    return run(reason.trim());
+  }
+}
+
 export default function ContactDiscoveryPanel({
   projectId,
   searchKeyword,
@@ -3658,7 +3692,9 @@ export default function ContactDiscoveryPanel({
     setApplyMsg(null);
     try {
       // force=true：ユーザーの「再探索」操作なので毎回実行する
-      const j = await startContactIntelligenceJob(projectId, jobType, true);
+      const j = await startJobWithGate((overrideReason) =>
+        startContactIntelligenceJob(projectId, jobType, true, overrideReason)
+      );
       if (j.status === "completed") {
         try {
           const latest = await fetchContactDiscovery(projectId);
@@ -3770,6 +3806,11 @@ export default function ContactDiscoveryPanel({
       <p className="mt-1 text-xs text-slate-400">
         まず「じっくり調査」を実行すると、公式サイト・SNS・問い合わせフォーム・メール・担当者候補をまとめて探索します。
       </p>
+
+      {/* 何の商品を調査しているのか（商品名/日本語概要/特徴/商品ページ/適性）を先頭に示す */}
+      <div className="mt-3">
+        <ProductContextCard projectId={projectId} />
+      </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 

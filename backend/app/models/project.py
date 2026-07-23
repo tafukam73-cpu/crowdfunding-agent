@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     Integer,
@@ -146,6 +147,18 @@ class Project(Base):
         index=True,
     )
 
+    # --- 日本クラファン適性ゲート（メール探索の事前判定キャッシュ） ---
+    # 判定ロジックは contact_search_gate。スコアは既存 sales_assessment の
+    # makuake_fit（日本クラファン適性）を再利用し、ここには結果だけを保存する。
+    eligible_for_contact_search: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, index=True
+    )
+    contact_search_gate_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    japan_crowdfunding_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gate_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # --- AI 評価キャッシュ（最新評価。一覧のソート/フィルタ用） ---
     latest_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     latest_recommendation: Mapped[str | None] = mapped_column(
@@ -162,3 +175,29 @@ class Project(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # --- 表示用の派生プロパティ（DB 非保存。ProjectOut が from_attributes で読む） ---
+    # 海外クラファンの商品ページ URL。正規フィールドは source_url で、source_site と
+    # 整合するものだけを campaign_url として公開する（公式サイトで代用しない）。
+    @property
+    def campaign_url(self) -> str | None:
+        from app.services.campaign_url import campaign_url_of
+
+        return campaign_url_of(self)
+
+    @property
+    def campaign_url_missing(self) -> bool:
+        return self.campaign_url is None
+
+    @property
+    def campaign_url_missing_reason(self) -> str | None:
+        from app.services.campaign_url import missing_reason
+
+        return missing_reason(self)
+
+    # メーカー/商品の公式サイト。campaign_url とは明確に分離する。
+    @property
+    def official_site_url(self) -> str | None:
+        from app.services.campaign_url import official_site_url_of
+
+        return official_site_url_of(self)

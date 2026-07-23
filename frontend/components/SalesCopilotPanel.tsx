@@ -1,5 +1,6 @@
 "use client";
 
+import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -96,7 +97,10 @@ function Card({ card, detailed = false }: { card: CopilotCard; detailed?: boolea
         >
           {card.title}
         </Link>
-        <DecisionBadge card={card} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <CampaignLink source={card} />
+          <DecisionBadge card={card} />
+        </div>
       </div>
 
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">

@@ -85,6 +85,20 @@ _HEAVY_JOB_TYPES = {
     CIJobType.zeczec_enrichment.value,
 }
 
+# メール探索（連絡先探索）に該当するジョブ。開始前に日本クラファン適性ゲートを
+# サーバー側で再判定する。日本販売状況チェックや営業メール生成など、探索を伴わない
+# ジョブはゲートの対象外（既存の運用を壊さない）。
+_CONTACT_SEARCH_JOB_TYPES = {
+    CIJobType.full_contact_intelligence.value,
+    CIJobType.web_research.value,
+    CIJobType.recursive_crawl.value,
+    CIJobType.document_reader.value,
+    CIJobType.search_agent.value,
+    CIJobType.contact_discovery.value,
+    CIJobType.contact_discovery_v2.value,
+    CIJobType.ai_research.value,
+}
+
 _TERMINAL_STATUSES = (
     CIJobStatus.completed.value,
     CIJobStatus.failed.value,
@@ -335,13 +349,29 @@ def create_job(
     *,
     force: bool = False,
     runner=None,
+    override_reason: str | None = None,
 ) -> tuple[ContactIntelligenceJob, bool]:
     """ジョブを作成（or キャッシュ再利用）。(job, from_cache) を返す。
 
     runner を渡すとスレッド起動の代わりに同期実行する（テスト用）。
+
+    メール探索系（_CONTACT_SEARCH_JOB_TYPES）は **サーバー側で** 日本クラファン適性
+    ゲートを再判定する。フロントのボタン非表示だけに頼らない。不合格の場合は
+    ``GateBlocked`` を送出し、override_reason（管理者の手動実行理由）が与えられた
+    ときのみ理由を記録して実行する。
     """
     if job_type not in {t.value for t in CIJobType}:
         raise ValueError(f"未知の job_type: {job_type}")
+
+    gate_override: str | None = None
+    if job_type in _CONTACT_SEARCH_JOB_TYPES:
+        from app.services import contact_search_gate
+
+        gate = contact_search_gate.require_eligible(
+            db, project, override_reason=override_reason
+        )
+        if gate.get("override"):
+            gate_override = gate.get("override_reason")
 
     # heartbeat が途絶えた running（ワーカー死亡の孤児）を回収してから重複判定する。
     # これで dead worker のジョブが重複抑止を永久ロックするのを防ぐ（書き込みパスのみ）。
@@ -364,12 +394,35 @@ def create_job(
         if cached is not None:
             return cached, True
 
+    logs = [{"ts": _now().isoformat(), "message": "ジョブを受け付けました"}]
+    if job_type in _CONTACT_SEARCH_JOB_TYPES:
+        # 探索ジョブへ元の商品ページ URL を引き継ぐ（どの商品を調べたか後から辿れる）。
+        from app.services import campaign_url as campaign_url_mod
+
+        campaign = campaign_url_mod.campaign_url_of(project)
+        logs.append(
+            {
+                "ts": _now().isoformat(),
+                "message": (
+                    f"対象商品: {project.title} / 商品ページ: "
+                    + (campaign or "未確認")
+                ),
+            }
+        )
+    if gate_override:
+        logs.append(
+            {
+                "ts": _now().isoformat(),
+                "message": f"適性ゲート不合格のまま手動実行（理由: {gate_override}）",
+            }
+        )
     job = ContactIntelligenceJob(
         project_id=project.id,
         job_type=job_type,
         status=CIJobStatus.queued.value,
         progress=0,
-        logs_json=[{"ts": _now().isoformat(), "message": "ジョブを受け付けました"}],
+        gate_override_reason=gate_override,
+        logs_json=logs,
     )
     db.add(job)
     db.commit()
