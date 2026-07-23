@@ -31,6 +31,7 @@ from app.models.email_draft import EmailDraft
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
 from app.services import campaign_url as campaign_url_mod
+from app.services import product_facts_service as facts
 
 # 短文アウトリーチ（DM / フォーム）を生成できるチャネル
 _DM_CHANNELS = ("contact_form", "instagram", "linkedin", "facebook")
@@ -308,6 +309,7 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
                 "title": p.title,
                 "source_site": p.source_site,
                 **campaign_url_mod.url_state(p),
+                "facts": facts.compact_facts(p),
                 "sales_status": p.sales_status,
                 "priority_score": score,
                 "stars": stars_for(score),
@@ -588,6 +590,7 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
             "title": p.title,
             "source_site": p.source_site,
             **campaign_url_mod.url_state(p),
+            "facts": facts.compact_facts(p),
             "sales_status": p.sales_status,
             "latest_score": p.latest_score,
             "priority_score": score,
@@ -794,6 +797,7 @@ def ranking(
                 "title": p.title,
                 "source_site": p.source_site,
                 **campaign_url_mod.url_state(p),
+                "facts": facts.compact_facts(p),
             }
         )
     return items

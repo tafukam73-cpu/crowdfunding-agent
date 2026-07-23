@@ -1,5 +1,6 @@
 "use client";
 
+import FactChips from "@/components/FactChips";
 import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -228,9 +229,9 @@ function TaskCard({
         </div>
       </div>
 
+      <FactChips facts={task.facts} className="mt-1" />
+
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-        <Stars n={task.stars} />
-        <span className="text-slate-500">営業価値 {task.priority_score}</span>
         {level && (
           <span className={`rounded px-1.5 py-0.5 font-bold ${level.cls}`}>
             {level.label}

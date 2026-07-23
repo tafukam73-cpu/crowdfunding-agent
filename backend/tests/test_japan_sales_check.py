@@ -2,7 +2,8 @@
 
 検証対象：
 - 営業価値（★1〜5）の判定ロジック（compute_stars）
-- 各チャネルの検索 URL（Amazon / 楽天 / Yahoo / 代理店 / 法人 / Makuake / GREEN FUNDING）
+- 各チャネルの検索 URL（Amazon / 楽天 / Yahoo / 代理店 / 法人 / Makuake /
+  GREEN FUNDING / CAMPFIRE / 日本語公式サイト / 日本の公式販売ページ）
 - モックチェッカー → service.run_check（end-to-end・SQLite）
 - メール生成への反映（日本未上陸なら参入機会の一文が本文に入る）
 
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.ai.japan_sales_checker import (  # noqa: E402
     CHANNEL_KEYS,
+    CHANNELS,
     build_search_queries,
     compute_stars,
     search_url,
@@ -117,7 +119,10 @@ def test_service_end_to_end() -> None:
     row = japan_sales_service.run_check(db, project, checker=MockJapanSalesChecker())
     check("status=completed", row.status == "completed")
     check("★は 5（モックは全未検出）", row.sales_value_stars == 5)
-    check("channels は 7 チャネル", isinstance(row.channels, list) and len(row.channels) == 7)
+    # CHANNELS（Amazon/楽天/Yahoo/代理店/法人/Makuake/GREEN FUNDING/CAMPFIRE/
+    # 日本語公式サイト/日本の公式販売ページ）と一致すること
+    check("channels は CHANNELS と同数",
+          isinstance(row.channels, list) and len(row.channels) == len(CHANNELS))
     check(
         "全チャネルに search_url が付く",
         all(c.get("search_url", "").startswith("http") for c in (row.channels or [])),

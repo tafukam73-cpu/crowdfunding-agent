@@ -19,6 +19,7 @@ from app.services import (
     contact_intelligence_service,
     contact_search_gate,
     product_context_service,
+    product_facts_service,
     project_service,
 )
 
@@ -71,13 +72,41 @@ def create_job(
     return _out(job, from_cache)
 
 
+# 画面へ出さない内部フィールド（予測スコア・内部判定文）。
+_INTERNAL_GATE_FIELDS = {
+    "japan_crowdfunding_score",
+    "japan_crowdfunding_threshold",
+    "contact_search_gate_reason",
+    "reasons",
+    "rationale",
+    "gate_checked_at",
+}
+
+
 def _gate_detail(result: dict) -> dict:
-    """ゲート判定を API レスポンス向けに整形する（datetime は ISO 文字列）。"""
+    """ゲート判定を API レスポンス向けに整形する。
+
+    内部スコア（japan_crowdfunding_score など）は返さない。画面には
+    user_reasons（探索しなかった具体的理由）だけを出す。
+    """
     checked = result.get("gate_checked_at")
     return {
-        **{k: v for k, v in result.items() if k != "gate_checked_at"},
+        **{k: v for k, v in result.items() if k not in _INTERNAL_GATE_FIELDS},
         "gate_checked_at": checked.isoformat() if checked else None,
     }
+
+
+@router.get("/projects/{project_id}/facts")
+def get_product_facts(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """商品ファクトシート（確認可能な事実のみ）を返す。
+
+    予測値・可能性・適性スコアは含めない。取得できない項目は「未取得」を返し、
+    各項目には取得元 URL / 取得元の種類 / 最終確認日時を付ける。
+    """
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return product_facts_service.build(db, project)
 
 
 @router.get("/projects/{project_id}/contact-search-gate")

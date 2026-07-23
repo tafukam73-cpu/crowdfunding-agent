@@ -732,28 +732,12 @@ function ProductCard({
         </span>
       </div>
 
-      {/* 営業価値・日本市場適性を目立たせる（「営業すべき順」の判断軸） */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span
-          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-bold ${scoreColor(
-            product.sales_value_score
-          )}`}
-          title="営業価値スコア（営業すべき順）"
-        >
-          営業価値 {scoreText(product.sales_value_score)}
-        </span>
-        <ScoreChip label="日本市場適性" value={product.japan_fit_score} />
-      </div>
-
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        <ScoreChip label="総合" value={product.overall_discovery_score} />
-        <ScoreChip label="CF適性" value={product.crowdfunding_fit_score} />
-        <ScoreChip label="独自性" value={product.novelty_score} />
-      </div>
-
+      {/* 予測スコアは表示しない。AI が書いた評価理由は「AI要約」と明示する。 */}
       {product.discovery_reasoning && (
         <p className="mt-2 text-xs text-slate-600">
-          <span className="font-medium text-slate-700">評価理由:</span>{" "}
+          <span className="mr-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+            AI要約
+          </span>
           {product.discovery_reasoning}
         </p>
       )}

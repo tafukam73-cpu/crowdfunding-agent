@@ -90,21 +90,11 @@ function CardDetail({
   ];
   return (
     <div className="border-t border-slate-100 bg-slate-50 px-4 py-3 text-sm">
-      {/* 3スコアの内訳・理由 */}
+      {/* 判定の根拠（点数は出さず、どんな事実からそう判断したかだけを出す） */}
       <div className="grid gap-3 md:grid-cols-3">
         {blocks.map(({ key, label, b }) => (
           <div key={key} className="rounded border border-slate-200 bg-white p-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-700">{label}</span>
-              <span className="flex items-center gap-1">
-                <span className="font-semibold">{b.score ?? "-"}</span>
-                {b.grade && (
-                  <span className={`rounded px-1 text-[10px] font-bold ${GRADE_COLORS[b.grade]}`}>
-                    {b.grade}
-                  </span>
-                )}
-              </span>
-            </div>
+            <span className="font-medium text-slate-700">{label}の判断材料</span>
             <ul className="mt-1 list-disc pl-4 text-xs text-slate-500">
               {b.reasons.map((r, i) => (
                 <li key={i}>{r}</li>
@@ -114,12 +104,11 @@ function CardDetail({
         ))}
       </div>
 
-      {/* confidence / missing_data / v1v2 比較 */}
+      {/* 不足データ / v1v2 比較 */}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded border border-slate-200 bg-white p-2">
           <div className="text-xs font-medium text-slate-600">
-            confidence: <span className="font-semibold">{a.confidence ?? "-"}</span>
-            {a.engine && <span className="ml-2 text-slate-400">engine: {a.engine}</span>}
+            {a.engine && <span className="text-slate-400">engine: {a.engine}</span>}
           </div>
           {a.missing_data && a.missing_data.length > 0 && (
             <div className="mt-1 text-xs text-slate-500">
@@ -261,29 +250,8 @@ function V2Row({
             ))}
           </div>
         </div>
-        {/* 総合優先度（未評価は 0 点/grade E にせず「未評価」表示） */}
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-slate-400">総合</span>
-          {card.priority_score == null ? (
-            <span className="text-xs font-medium text-slate-400">未評価</span>
-          ) : (
-            <span className="flex items-center gap-1">
-              <span className="text-sm font-bold text-slate-900">{card.priority_score}</span>
-              {card.priority_grade && (
-                <span className={`rounded px-1 text-[10px] font-bold ${GRADE_COLORS[card.priority_grade]}`}>
-                  {card.priority_grade}
-                </span>
-              )}
-            </span>
-          )}
-        </div>
-        <ScoreBadge score={a.japan_market_fit.score} grade={a.japan_market_fit.grade} label="日本適性" />
-        <ScoreBadge score={a.exclusivity.score} grade={a.exclusivity.grade} label="独占" />
-        <ScoreBadge score={a.makuake_fit.score} grade={a.makuake_fit.grade} label="Makuake" />
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] text-slate-400">確度</span>
-          <span className="text-sm text-slate-700">{a.confidence ?? "-"}</span>
-        </div>
+        {/* 予測スコア（総合優先度・日本市場適性・独占販売可能性・Makuake適性）は
+            内部の並び順にだけ使い、画面には出さない。 */}
         <div className="w-24 text-right">
           <DecisionBadge decision={card.decision} />
         </div>
@@ -350,7 +318,7 @@ export default function SalesCopilotV2Page() {
           <div>
             <h1 className="text-xl font-bold text-slate-900">営業AI秘書 (Sales Copilot v2)</h1>
             <p className="text-sm text-slate-500">
-              日本市場適性・独占販売可能性・Makuake適性を統合し、次の一手を提示します（ルールベース）。
+              取得済みの事実（連絡先・日本販売状況・営業状況）から次の一手を提示します（ルールベース）。予測スコアは表示しません。
             </p>
           </div>
           <button

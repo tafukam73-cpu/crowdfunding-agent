@@ -105,15 +105,8 @@ export default function ExecutiveSummaryPanel({
         </span>
       </div>
 
-      {/* スコア・星・推奨アクション（大きく表示） */}
+      {/* 推奨アクション（予測スコア・★は表示しない） */}
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <div className="flex items-baseline gap-1">
-          <span className={`text-4xl font-extrabold ${scoreColor(data.score)}`}>
-            {data.score}
-          </span>
-          <span className="text-sm text-slate-400">/ 100</span>
-        </div>
-        <Stars value={data.stars} />
         <span
           className={`rounded-md border px-3 py-1.5 text-sm font-bold ${actionCls}`}
         >
@@ -131,12 +124,6 @@ export default function ExecutiveSummaryPanel({
         <div className="mt-4 rounded-md border border-amber-300 bg-amber-50/70 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-amber-900">🏆 推奨送信先</span>
-            {data.recommended_email_stars != null && (
-              <span className="text-sm font-bold text-amber-500">
-                {"★".repeat(data.recommended_email_stars)}
-                {"☆".repeat(5 - data.recommended_email_stars)}
-              </span>
-            )}
             <a
               href={`mailto:${data.recommended_email}`}
               className="font-semibold text-slate-900 hover:underline"
@@ -166,10 +153,6 @@ export default function ExecutiveSummaryPanel({
               ? `YES${
                   data.contact_person_department
                     ? ` ・ ${data.contact_person_department}`
-                    : ""
-                }${
-                  data.contact_person_priority != null
-                    ? `（営業優先度 ${data.contact_person_priority}）`
                     : ""
                 }`
               : "未発見（Contact Hunterで担当者を探せます）"

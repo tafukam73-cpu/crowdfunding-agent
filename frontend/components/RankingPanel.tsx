@@ -1,5 +1,6 @@
 "use client";
 
+import FactChips from "@/components/FactChips";
 import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -66,11 +67,10 @@ function RankCard({ item }: { item: RankingItem }) {
         <CampaignLink source={item} />
       </div>
 
+      {/* 予測スコア・★ではなく確認可能な事実を出す */}
+      <FactChips facts={item.facts} className="mt-1.5" />
+
       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span>
-          <Stars value={item.stars} />{" "}
-          <span className="font-bold text-slate-800">{item.score}点</span>
-        </span>
         <span className={`rounded px-2 py-0.5 text-xs font-bold ${actionCls}`}>
           {item.recommended_action}
         </span>

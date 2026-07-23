@@ -12,20 +12,6 @@ import {
   runJapanSalesCheck,
 } from "@/lib/api";
 
-// 営業価値（★1〜5）。5=日本未販売で最も営業価値が高い。
-function Stars({ value }: { value: number | null }) {
-  const n = Math.max(0, Math.min(5, value ?? 0));
-  return (
-    <span className="inline-flex items-center gap-1" aria-label={`営業価値 ${n} / 5`}>
-      <span className="text-base leading-none text-amber-500">
-        {"★".repeat(n)}
-        <span className="text-slate-300">{"★".repeat(5 - n)}</span>
-      </span>
-      <span className="text-xs font-medium text-slate-500">{n} / 5</span>
-    </span>
-  );
-}
-
 // チャネルの販売/掲載状況バッジ
 const STATUS_BADGE: Record<ChannelStatus, string> = {
   found: "bg-rose-100 text-rose-700",
@@ -101,7 +87,7 @@ export default function JapanSalesPanel({ projectId }: { projectId: number }) {
         </button>
       </div>
       <p className="mt-1 text-xs text-slate-400">
-        営業前に「既に日本で販売されていないか」を調査し、営業価値（★1〜5）を判定します。
+        営業前に「既に日本で販売されていないか」を各チャネルで調査します。検索で見つからない場合も「日本未発売」とは断定しません。
         各チャネルの「検索」から最終確認できます。
       </p>
 
@@ -128,14 +114,10 @@ export default function JapanSalesPanel({ projectId }: { projectId: number }) {
 
       {completed && data && (
         <div className="mt-3 space-y-4 text-sm">
-          {/* 営業価値 */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold text-slate-500">営業価値</span>
-            <Stars value={data.sales_value_stars} />
-            {data.summary && (
-              <span className="text-xs text-slate-500">{data.summary}</span>
-            )}
-          </div>
+          {/* 調査サマリ（★や営業価値スコアは表示しない） */}
+          {data.summary && (
+            <p className="text-xs text-slate-600">{data.summary}</p>
+          )}
 
           {/* チャネル別の販売状況 */}
           <div>

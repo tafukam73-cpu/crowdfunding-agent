@@ -1,5 +1,6 @@
 "use client";
 
+import FactChips from "@/components/FactChips";
 import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -103,9 +104,9 @@ function Card({ card, detailed = false }: { card: CopilotCard; detailed?: boolea
         </div>
       </div>
 
+      <FactChips facts={card.facts} className="mt-1" />
+
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-        <Stars n={card.stars} />
-        <span className="text-slate-500">営業価値 {card.priority_score}</span>
         {card.summary.japan_market_fit && (
           <span className="text-slate-400">
             日本相性: {card.summary.japan_market_fit}
