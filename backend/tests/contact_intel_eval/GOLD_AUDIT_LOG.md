@@ -142,3 +142,105 @@ Google Play `com.sparkpet.knollo`、platum.kr/archives/199247（스파크펫の�
 ### 5.5 verification_status 内訳の変化
 - 変更前: verified 14 / partially_verified 2 / blocked 3 / unresolved 5
 - 変更後: **verified 15 / partially_verified 2 / blocked 3 / unresolved 4**
+
+## 6. GT補正 2026-07-23: p97 주부디자인 を unresolved → verified
+
+### 6.1 補正理由
+当初 p97 は「真メーカー未特定」として `unresolved`（precision/recall の分母外）にしていた。
+p96 놀로 と同型の**過小評価**だった。`주부디자인` は **호정아이앤티(I&T)** の
+**消費者向け流通ブランド**で、公式ショップは `jubudesign.com`。
+
+自社サイトの説明文（逐語）:
+
+> 주부디자인은 30년 이상을 스테인리스 와이어와 정사각형 압연 소재의 수납용품을
+> 전문적으로 제조하는 '호정I&T'의 소비자 유통 브랜드입니다.
+
+### 6.2 実地確認（2026-07-23・fetch のみ）
+
+| 項目 | 実測値 |
+|---|---|
+| `https://jubudesign.com/` | HTTP **200** / UTF-8 / 240KB |
+| `<title>` / `og:site_name` | `주부디자인` |
+| canonical / og:url | `https://jubudesign.com/` |
+| `http://` → | 301 で https へ |
+| `www.` | 到達可・canonical は非 www |
+
+事業者情報（`jubudesign.com` / `jubudesign.cafe24.com` / `/shopinfo/company.html` /
+`/shopinfo/guide.html` の**全ページ共通**・HTML 逐語）:
+
+| 項目 | 値 |
+|---|---|
+| 상호 | 호정아이앤티(I&T) |
+| 대표자 | 이순향 외 1명（Brave snippet では 이순향 / 김용권） |
+| 사업자등록번호 | **212-22-58903** |
+| 통신판매업 신고 | 제 2016-인천부평-0766 호 |
+| 주소 | 21315 인천광역시 부평구 새벌로 44 통일개발1층 |
+| 메일 | judy@jubudesign.com |
+| 전화 | 채팅상담만 가능 |
+
+傍証: 네이버 블로그「와디즈 펀딩에서 최초 출시! 주부디자인 큐브EGI물받침싱크랙」
+（큐브 시리즈は jubudesign.com に実在＝campaign 商品と shop 商品の一致）、
+Instagram `@jubudesign_official`、SSG(신세계몰) ブランドページ。
+競合する別の「주부디자인」事業者は 1 件も見つからなかった。
+
+**未確認として残る点**: wadiz campaign 406038 のページ自体は 403 で開けず、Brave も
+`site:wadiz.kr` を 0 件で返す。同一性は「maker 名の完全一致 + 上記の傍証」に依拠する。
+
+### 6.3 公式 URL に `jubudesign.com` を採り、cafe24 サブドメインを採らない理由
+
+`jubudesign.cafe24.com` は同一実体（事業者情報が完全一致）だが:
+
+1. cafe24 側の **canonical / og:url が `https://jubudesign.com/` を指す**（自己宣言）
+2. `so.registrable_domain("https://jubudesign.cafe24.com")` → **`cafe24.com`**
+   （PSL に private suffix 登録がないため共有ホスティングドメインに潰れる）。
+   一方 `cds._domain_of()` は `jubudesign.cafe24.com` を返し、**2 つの正規化が食い違う**。
+3. その結果、公式を cafe24 サブドメインにすると実測で
+   `judy@jubudesign.com` が **owner=unknown（third_party 扱い）**に落ちる。
+   `jubudesign.com` なら **owner=maker**。
+
+ブランドショップを公式に採る方針は p96 `놀로` → `knollo.store`（運営会社
+`sparkpetkorea.com` ではない）と同型。
+
+### 6.4 変更内容
+
+| 項目 | 変更前 | 変更後 |
+|---|---|---|
+| `verification_status` | `unresolved` | **`verified`** |
+| `expected_official_site` | なし | **`https://jubudesign.com`** |
+| `maker_name` | `주부디자인 maker (未特定)` | `주부디자인 (호정아이앤티 I&T)` |
+| `blocked_reason` | `true maker not identified; …` | 削除 |
+| `expected_fallback_emails` | `real1@makerz.co.kr` | **据え置き（agency 判定を維持）** |
+| `plausible_unconfirmed_emails` | なし | `judy@jubudesign.com` |
+
+`judy@jubudesign.com` は公式ドメイン上に掲載確認済みだが役割の人手確認が未了のため
+`direct` に昇格させず `plausible` に留める（2.3 の方針どおり TP/FP どちらにも数えない）。
+
+### 6.5 verification_status 内訳の変化
+- 変更前: verified 15 / partially_verified 2 / blocked 3 / unresolved 4
+- 変更後: **verified 16 / partially_verified 2 / blocked 3 / unresolved 3**
+
+strict 分母 15 → 16、expected_official あり 13 → 14。
+
+### 6.6 既知の副作用: official precision が 1 件悪化する
+
+System の現行予測は `https://jubudesign.cafe24.com` で、expected `https://jubudesign.com`
+とは **3 つの比較方法すべてで不一致**になる:
+
+| 比較方法 | 予測 | 期待 | 判定 |
+|---|---|---|---|
+| 文字列 | jubudesign.cafe24.com | jubudesign.com | 不一致 |
+| `so.registrable_domain` | cafe24.com | jubudesign.com | 不一致 |
+| `cds._domain_of` | jubudesign.cafe24.com | jubudesign.com | 不一致 |
+
+これは **GT が正しくなった結果、実在の弱点（cafe24 サブドメイン正規化の欠如）が
+可視化された**もので、数値を良く見せるために GT を曲げることはしない（2.3 の方針）。
+canonical / og:url を用いた公式 URL 正規化は **別 PR** で扱う（本 PR は GT のみ）。
+
+### 6.7 変更ファイル
+- `build_ground_truth.py` — p97 を unresolved ブロックから verified ブロックへ移動・証拠付与
+- `gold_set_v1.py` — `GOLD_B[97]` を `blocked` → `verified`、`b_official` を付与
+- 本ファイル（`GOLD_AUDIT_LOG.md`）
+
+**再生成していない成果物**: `gold_ground_truth.json` / `gold_frozen_24.json` はいずれも
+`.gitignore` 対象の生成/凍結物で、**まだ旧 p97 レコードを保持している**（5.4 と同じ状況）。
+eval_v2 の数値へ反映するには別途 `build_ground_truth.py` の実行と frozen の更新可否判断が必要。

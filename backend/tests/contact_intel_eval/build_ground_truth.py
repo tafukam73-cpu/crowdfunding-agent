@@ -89,6 +89,36 @@ GROUND_TRUTH = [
                  "놀로=스파크펫(SparkPet)のブランド。Store/Square/Play の3事業。",
                  "brand-kr.com は運営代行(代理店)で maker 直通でなく fallback のまま。",
                  "CX@sparkpetkorea.com は運営会社ドメインのため未確認(plausible)扱い"]),
+    # GT補正(2026-07-23): 当初 p97 は「真メーカー未特定」で unresolved としていたが、
+    # 주부디자인 は **호정아이앤티(I&T)** の消費者向け流通ブランドで、公式ショップが
+    # jubudesign.com であることを事業者情報レベルで確認したため verified へ昇格。
+    # 自社サイトの説明文（逐語）:
+    #   「주부디자인은 30년 이상을 스테인리스 와이어와 정사각형 압연 소재의 수납용품을
+    #     전문적으로 제조하는 '호정I&T'의 소비자 유통 브랜드입니다.」
+    # 実測(2026-07-23): https://jubudesign.com/ 200 / UTF-8 /
+    #   <title>주부디자인</title> / og:site_name=주부디자인 / canonical=https://jubudesign.com/
+    #   事業者情報（全ページ共通・HTML 逐語）:
+    #     상호=호정아이앤티(I&T) / 대표자=이순향 외 1명 / 사업자번호=212-22-58903
+    #     통신판매업=제 2016-인천부평-0766 호 / judy@jubudesign.com
+    #     주소=21315 인천광역시 부평구 새벌로 44 통일개발1층
+    # 傍証: 네이버 블로그「와디즈 펀딩에서 최초 출시! 주부디자인 큐브EGI물받침싱크랙」
+    #       （큐브 시리즈は jubudesign.com に実在）、Instagram @jubudesign_official、
+    #       SSG(신세계몰) ブランドページ。
+    # 公式 URL は **jubudesign.com**（cafe24 サブドメインではない）:
+    #   jubudesign.cafe24.com は同一実体だが canonical/og:url が jubudesign.com を指す。
+    #   加えて so.registrable_domain("jubudesign.cafe24.com") は共有ホスティングの
+    #   "cafe24.com" に潰れるため、公式に据えると judy@jubudesign.com が third_party に
+    #   落ちる（実測）。ブランドショップを採用する方針は p96 놀로→knollo.store と同型。
+    # 代理店判定は維持: real1@makerz.co.kr は maker 直通でなく fallback(agency)。
+    _c(97, "wadiz", "주부디자인 (호정아이앤티 I&T)", official="https://jubudesign.com",
+       fallback=["real1@makerz.co.kr"],
+       plausible=["judy@jubudesign.com"],
+       evidence=["https://jubudesign.com", "https://jubudesign.com/shopinfo/company.html"],
+       snippets=["公式 jubudesign.com を確認(<title>주부디자인・canonical=https://jubudesign.com/)。",
+                 "주부디자인은 …'호정I&T'의 소비자 유통 브랜드입니다(自社サイト逐語)。",
+                 "사업자번호 212-22-58903 / 대표자 이순향 외 1명 / 통신판매업 제 2016-인천부평-0766 호。",
+                 "makerz.co.kr は運営代行(代理店)で maker 直通でなく fallback のまま。",
+                 "judy@jubudesign.com は掲載確認済みだが人手での役割未確認のため plausible"]),
     _c(108, "zeczec", "Single Step", official="https://singlestep.com",
        direct=["info@singlestep.com"],
        plausible=[],  # mediafol.io / ulpi.com.tw は第三者（expected に入れない）
@@ -193,10 +223,6 @@ GROUND_TRUTH = [
        fallback=["apply@ideafound.com"],
        blocked_reason="true maker not identified; ideafound.com は代理店",
        evidence=[], snippets=["email=ideafound.com(代理店)。真メーカー未特定"]),
-    _c(97, "wadiz", "주부디자인 maker (未特定)", status="unresolved",
-       fallback=["real1@makerz.co.kr"],
-       blocked_reason="true maker not identified; makerz.co.kr は代理店の疑い",
-       evidence=[], snippets=["System email=makerz.co.kr(代理店の疑い)。公式未特定。fallback(agency)"]),
 
     # --- blocked: サイト到達不能/接続不安定で未確認 ---
     _c(116, "zeczec", "Roly One / Suntrail", official="https://suntrail.com.tw",

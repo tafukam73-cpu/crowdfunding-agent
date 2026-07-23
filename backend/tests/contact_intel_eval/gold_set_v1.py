@@ -173,8 +173,19 @@ GOLD_B: dict[int, dict] = {
              "Knollo Square(実店舗)で同一ブランド。System email=brand-kr.com は代理店のまま、"
              "公式サイトは未取得だった。",
              a_email_class="agency", a_official_correct=False),
-    97: dict(status="blocked", b_official=None, b_emails=[], b_forms=[], b_socials=[],
-             b_people=[], note="주부디자인。System email=makerz.co.kr(代理店の疑い)。公式未特定。",
+    # GT補正(2026-07-23): 当初 blocked（公式未特定）だったが、주부디자인 は
+    # 호정아이앤티(I&T) の消費者向け流通ブランドで、公式ショップ jubudesign.com を
+    # 事業者情報（사업자번호 212-22-58903 / 대표자 이순향 외 1명）まで確認したため verified へ。
+    # System A の saved_official_sites は空だったので a_official_correct=False のまま。
+    # makerz.co.kr の agency 判定も維持する。
+    97: dict(status="verified", b_official="https://jubudesign.com",
+             b_emails=[], b_forms=[],
+             b_socials=["https://www.instagram.com/jubudesign_official/"],
+             b_people=[["이순향", "대표자"]],
+             note="주부디자인=호정아이앤티(I&T)の消費者流通ブランド。公式 jubudesign.com を"
+             "実地確認(사업자번호 212-22-58903・judy@jubudesign.com)。jubudesign.cafe24.com は"
+             "同一実体だが canonical が jubudesign.com を指すため公式は .com を採る。"
+             "System email=makerz.co.kr は代理店のまま、公式サイトは未取得だった。",
              a_email_class="agency", a_official_correct=False),
 }
 
