@@ -1308,6 +1308,18 @@ def _infer_official_url(
 _TITLE_INFER_MAX_CANDIDATES = 4
 
 
+def _crawl_seen_has(seen: set[str], url: str) -> bool:
+    """crawl_seen に url が含まれるか（末尾スラッシュの有無を同一視する）。
+
+    main crawl は検索結果の URL をそのまま積むため "https://x.example/" が入る一方、
+    タイトル照合の候補 root は scheme://netloc 形式で末尾スラッシュを持たない。素の
+    `in` 判定だと同じページを「未訪問」と誤判定し、取得済みで URL 予算を消費しない
+    候補まで予算切れ扱いで捨ててしまう（p96 놀로 の実害）。
+    """
+    n = (url or "").rstrip("/")
+    return url in seen or n in seen or (n + "/") in seen
+
+
 def _title_official_candidates(
     page_candidates: list[tuple[int, str]],
     page_titles: dict[str, str],
@@ -1996,14 +2008,20 @@ def web_research(
         identity_rejected_domains: set[str] = set()
         mkr = getattr(project, "maker_name", None)
         for root in title_cands[:_TITLE_INFER_MAX_CANDIDATES]:
-            if _expired() or len(searched) >= _u_cap:
+            if _expired():
                 break
             reg = cds._domain_of(root)
             if not reg or reg in identity_rejected_domains:
                 continue
             # root は main crawl で page candidate として既訪問のことがある。その場合でも
             # identity 検証のため取得し直す（注入 fetcher はキャッシュ、実 fetcher も許容範囲）。
-            already_seen = root in crawl_seen
+            # 既訪問なら searched を増やさない＝URL 予算を消費しないので、予算チェックは
+            # 「新規に予算を使う候補」だけに適用する。判定順を逆にすると（予算 → 既訪問）、
+            # 予算ゼロ消費で評価できる本命候補まで捨ててしまう。実測 p96 놀로 では
+            # knollo.co.kr / knollo.store を取得済みなのに 1 件も評価されず未回収だった。
+            already_seen = _crawl_seen_has(crawl_seen, root)
+            if not already_seen and len(searched) >= _u_cap:
+                continue
             thtml = fetch(root)
             if not already_seen:
                 crawl_seen.add(root)
