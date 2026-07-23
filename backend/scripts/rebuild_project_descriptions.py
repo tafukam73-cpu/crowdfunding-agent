@@ -2,9 +2,9 @@
 
 過去に保存された project.description が生 HTML のままで description_clean が
 未生成（null）／古い案件について、HTML 除去済みの読みやすい概要を作り直して
-保存する。対象は Kickstarter / Indiegogo / Ulule / Wadiz / その他すべて。
+保存する。対象は Kickstarter / Indiegogo / Wadiz / その他すべて。
 
-処理内容（app.ai.ulule.clean_description / app.util.text.html_to_text）:
+処理内容（app.util.text.clean_description / app.util.text.html_to_text）:
   - figure / img / script / style / svg / video / iframe を内容ごと除去
   - 画像 URL・alt 文字列・キャプションの混入を防止
   - HTML エンティティ（&amp; 等）をデコード
@@ -23,7 +23,7 @@ import argparse
 
 from sqlalchemy import select
 
-from app.ai.ulule import clean_description
+from app.util.text import clean_description
 from app.db.session import SessionLocal
 from app.models.project import Project
 

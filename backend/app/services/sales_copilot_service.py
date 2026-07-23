@@ -180,9 +180,7 @@ def _decide(sig: dict, status, score, days) -> tuple[str, str]:
         return "waiting", f"営業済みで返信待ち期間中{d}のため待機"
 
     # 4. 未営業（未接触 / 準備完了）
-    # 4a. 見送り候補：営業対象外・日本に代理店/販売済み
-    if not sig.get("is_sales_target_candidate"):
-        return "drop", "物販ではない可能性が高く営業対象外"
+    # 4a. 見送り候補：日本に代理店/販売済み
     if sig.get("has_distributor"):
         return "drop", "日本に代理店・法人がある可能性が高い"
     if sig.get("sold_in_japan"):

@@ -1,7 +1,7 @@
 """商品発掘（Discovery Crawler）の非同期ジョブモデル。
 
-一覧取得は軽量（Wadiz/Zeczec は httpx）だが、Kickstarter は Playwright、Ulule/
-Indiegogo も条件により重い。HTTP リクエスト内で完了させると 12 秒タイムアウトで
+一覧取得は軽量（Wadiz/Zeczec は httpx）だが、Kickstarter は Playwright、Indiegogo
+も条件により重い。HTTP リクエスト内で完了させると 12 秒タイムアウトで
 画面が固まるため、Contact Intelligence と同じくジョブ化してポーリングで進捗を返す。
 
 Contact Intelligence ジョブ（contact_intelligence_jobs / project_id 紐づけ）とは

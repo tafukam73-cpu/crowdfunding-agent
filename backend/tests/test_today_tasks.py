@@ -43,7 +43,7 @@ def main() -> int:
     Base.metadata.create_all(engine)
     db = Session(engine)
     db.add_all([
-        Project(title="Eco Kitchen", source_site="ulule", currency="EUR",
+        Project(title="Eco Kitchen", source_site="zeczec", currency="TWD",
                 sales_status="not_started", latest_score=90),
         Project(title="Ready One", source_site="kickstarter", currency="USD",
                 sales_status="ready", latest_score=50),

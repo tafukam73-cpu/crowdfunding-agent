@@ -59,13 +59,6 @@ def sig(**over) -> dict:
         "contact_recommended_channel": None,
         "research_japan_fit": "",
         "similarity_top": None,
-        "is_ulule": False,
-        "is_sales_target_candidate": True,
-        "ulule_europe_design": None,
-        "ulule_sustainability": None,
-        "ulule_gift": None,
-        "ulule_jp_lifestyle": None,
-        "ulule_sales_target_score": None,
         "sales_status": "not_started",
         "category": "キッチン",
     }
@@ -126,16 +119,6 @@ def test_sold_in_japan() -> None:
     check("販売済みは未販売よりスコアが低い", s_sold["score"] < s_not["score"])
 
 
-def test_ulule_non_product() -> None:
-    print("低評価：営業対象外Ulule（非商品）")
-    s = ess.synthesize(
-        sig(is_ulule=True, is_sales_target_candidate=False, category="ドキュメンタリー")
-    )
-    check("営業対象 = no", s["sales_target"] == "no")
-    check("スコアが低い（<=35）", s["score"] <= 35)
-    check("注意点に営業対象外を含む", any("営業対象外" in c for c in s["cautions"]))
-
-
 def test_actions_branching() -> None:
     print("推奨アクションの分岐")
     s_nocheck = ess.synthesize(sig())
@@ -157,22 +140,6 @@ def test_actions_branching() -> None:
         )
     )
     check("営業着手済み → 後回し", s_engaged["recommended_action"] == "後回し")
-
-
-def test_ulule_high_signals() -> None:
-    print("Ulule の高シグナルは加点される")
-    low = ess.synthesize(sig(is_ulule=True))
-    high = ess.synthesize(
-        sig(
-            is_ulule=True,
-            ulule_europe_design=85,
-            ulule_sustainability=85,
-            ulule_gift=80,
-            ulule_jp_lifestyle=80,
-        )
-    )
-    check("高Ululeスコアは加点", high["score"] > low["score"])
-    check("理由にサステナブル/デザインを含む", any("サステナブル" in r or "デザイン" in r for r in high["reasons"]))
 
 
 def test_build_summary_end_to_end() -> None:
@@ -240,9 +207,7 @@ def main() -> int:
     test_high_value()
     test_distributor_present()
     test_sold_in_japan()
-    test_ulule_non_product()
     test_actions_branching()
-    test_ulule_high_signals()
     test_build_summary_end_to_end()
     test_lightweight_similarity()
     print(f"\n{_passed} passed, {_failed} failed")

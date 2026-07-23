@@ -37,7 +37,6 @@ class DiscoverySourcePlatform(str, enum.Enum):
     indiegogo = "indiegogo"
     wadiz = "wadiz"              # 韓国発（プレオーダー/リワード型）
     zeczec = "zeczec"            # 台湾発（嘖嘖・デザイン/ガジェット雑貨）
-    ulule = "ulule"             # フランス発（サステナブル/エコ/デザイン雑貨）
     backerkit = "backerkit"
     backertracker = "backertracker"
     crowdsupply = "crowdsupply"

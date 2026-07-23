@@ -41,7 +41,6 @@ DASHBOARD_SITES = [
     SourceSite.indiegogo,
     SourceSite.wadiz,
     SourceSite.zeczec,
-    SourceSite.ulule,
     SourceSite.makuake,
     SourceSite.greenfunding,
 ]

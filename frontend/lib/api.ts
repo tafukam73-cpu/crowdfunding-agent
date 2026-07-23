@@ -38,7 +38,6 @@ export type SourceSite =
   | "indiegogo"
   | "wadiz"
   | "zeczec"
-  | "ulule"
   | "makuake"
   | "greenfunding"
   | "other";
@@ -90,10 +89,6 @@ export type Project = {
   maker_id: number | null;
   latest_availability: AvailabilityVerdict | null;
   latest_availability_at: string | null;
-  // 商品性 / 営業対象判定（Ulule 案件のみ算出。それ以外は null / true）
-  physical_product_score: number | null;
-  sales_target_score: number | null;
-  is_sales_target_candidate: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -228,16 +223,6 @@ export const EMAIL_TYPE_ORDER: EmailType[] = [
   "followup",
 ];
 
-// Ulule 案件で AI 評価に付与される追加スコア軸（英語キー → 表示名）
-export const ULULE_AXIS_LABELS: Record<string, string> = {
-  europe_design_score: "Europe Design",
-  sustainability_score: "Sustainability",
-  craftsmanship_score: "Craftsmanship",
-  gift_potential_score: "Gift Potential",
-  japan_lifestyle_fit_score: "Japan Lifestyle Fit",
-  premium_brand_potential_score: "Premium Brand Potential",
-};
-
 export const REC_LABELS: Record<Recommendation, string> = {
   high: "高",
   mid: "中",
@@ -298,7 +283,6 @@ export type ListParams = {
   q?: string;
   min_score?: number;
   recommendation?: Recommendation | "";
-  candidates_only?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   page?: number;
@@ -310,7 +294,6 @@ export const SITE_LABELS: Record<SourceSite, string> = {
   indiegogo: "Indiegogo",
   wadiz: "Wadiz",
   zeczec: "Zeczec",
-  ulule: "Ulule",
   makuake: "Makuake",
   greenfunding: "GreenFunding",
   other: "その他",
@@ -323,7 +306,6 @@ export const SALES_TARGET_SITES: SourceSite[] = [
   "indiegogo",
   "wadiz",
   "zeczec",
-  "ulule",
 ];
 
 export const SITE_COLORS: Record<SourceSite, string> = {
@@ -331,7 +313,6 @@ export const SITE_COLORS: Record<SourceSite, string> = {
   indiegogo: "bg-pink-100 text-pink-700",
   wadiz: "bg-sky-100 text-sky-700",
   zeczec: "bg-amber-100 text-amber-700",
-  ulule: "bg-purple-100 text-purple-700",
   makuake: "bg-orange-100 text-orange-700",
   greenfunding: "bg-emerald-100 text-emerald-700",
   other: "bg-slate-100 text-slate-600",
@@ -851,7 +832,6 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   if (params.q) qs.set("q", params.q);
   if (params.min_score != null) qs.set("min_score", String(params.min_score));
   if (params.recommendation) qs.set("recommendation", params.recommendation);
-  if (params.candidates_only) qs.set("candidates_only", "true");
   if (params.sort) qs.set("sort", params.sort);
   if (params.order) qs.set("order", params.order);
   qs.set("page", String(params.page ?? 1));
@@ -2183,13 +2163,11 @@ export type RankingItem = {
 export type RankingParams = {
   limit?: number;
   site?: SourceSite | "";
-  candidates_only?: boolean;
   unsold_only?: boolean;
   contact_only?: boolean;
   not_started_only?: boolean;
   // 営業状況フィルター（既定 "not_started"＝未営業のみ）。
   status_filter?: RankingStatusFilter;
-  ulule_only?: boolean;
   sort?: RankingSort;
 };
 
@@ -2377,13 +2355,11 @@ export async function fetchSalesRanking(
   const qs = new URLSearchParams();
   qs.set("limit", String(params.limit ?? 20));
   if (params.site) qs.set("site", params.site);
-  qs.set("candidates_only", String(params.candidates_only ?? true));
   qs.set("unsold_only", String(params.unsold_only ?? false));
   qs.set("contact_only", String(params.contact_only ?? false));
   qs.set("not_started_only", String(params.not_started_only ?? false));
   // 既定は「未営業のみ」。営業アクション済みはランキングから除外される。
   qs.set("status_filter", params.status_filter ?? "not_started");
-  qs.set("ulule_only", String(params.ulule_only ?? false));
   qs.set("sort", params.sort ?? "score");
 
   const res = await apiFetch(`/sales/ranking?${qs.toString()}`);
@@ -3263,7 +3239,6 @@ export type DiscoverySourcePlatform =
   | "indiegogo"
   | "wadiz"
   | "zeczec"
-  | "ulule"
   | "backerkit"
   | "backertracker"
   | "crowdsupply"
@@ -3288,7 +3263,6 @@ export const DISCOVERY_PLATFORM_LABELS: Record<string, string> = {
   indiegogo: "Indiegogo",
   wadiz: "Wadiz",
   zeczec: "Zeczec",
-  ulule: "Ulule",
   backerkit: "BackerKit",
   backertracker: "BackerTracker",
   crowdsupply: "Crowd Supply",
@@ -3302,7 +3276,6 @@ export const DISCOVERY_PLATFORM_LABELS: Record<string, string> = {
 export const DISCOVERY_PLATFORM_ORDER: DiscoverySourcePlatform[] = [
   "kickstarter",
   "indiegogo",
-  "ulule",
   "wadiz",
   "zeczec",
   "backerkit",

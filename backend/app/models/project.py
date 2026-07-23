@@ -32,7 +32,6 @@ class SourceSite(str, enum.Enum):
     indiegogo = "indiegogo"
     wadiz = "wadiz"             # 韓国発（プレオーダー/リワード型に強い）
     zeczec = "zeczec"           # 台湾発（嘖嘖・デザイン/ガジェット雑貨に強い）
-    ulule = "ulule"             # フランス発（サステナブル/エコ/デザイン雑貨に強い）
     makuake = "makuake"
     greenfunding = "greenfunding"
     other = "other"
@@ -44,7 +43,6 @@ SALES_TARGET_SITES: list[SourceSite] = [
     SourceSite.indiegogo,
     SourceSite.wadiz,
     SourceSite.zeczec,
-    SourceSite.ulule,
 ]
 
 # 日本の成功事例（比較用）サイト。営業対象ではなく、japanese_success_projects
@@ -164,29 +162,3 @@ class Project(Base):
         onupdate=func.now(),
         nullable=False,
     )
-
-    # --- 表示用の派生プロパティ（DB 非保存。ProjectOut が from_attributes で読む） ---
-    @property
-    def _ulule_product(self) -> dict | None:
-        """Ulule 案件のみ商品性判定を返す（それ以外は None）。"""
-        from app.ai.ulule import is_ulule, product_assessment
-
-        if not is_ulule(self):
-            return None
-        return product_assessment(self)
-
-    @property
-    def physical_product_score(self) -> int | None:
-        pa = self._ulule_product
-        return pa["physical_product_score"] if pa else None
-
-    @property
-    def sales_target_score(self) -> int | None:
-        pa = self._ulule_product
-        return pa["sales_target_score"] if pa else None
-
-    @property
-    def is_sales_target_candidate(self) -> bool:
-        """営業対象候補か。Ulule 以外は常に True（既存の営業対象サイト）。"""
-        pa = self._ulule_product
-        return pa["is_sales_target_candidate"] if pa else True

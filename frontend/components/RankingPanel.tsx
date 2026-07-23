@@ -154,13 +154,11 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
   const [error, setError] = useState<string | null>(null);
 
   // フィルタ・並び順
-  const [candidatesOnly, setCandidatesOnly] = useState(true);
   // 営業状況フィルター。既定は「未営業のみ」（営業アクション済みは除外）。
   const [statusFilter, setStatusFilter] =
     useState<RankingStatusFilter>("not_started");
   const [contactOnly, setContactOnly] = useState(false);
   const [unsoldOnly, setUnsoldOnly] = useState(false);
-  const [ululeOnly, setUluleOnly] = useState(false);
   const [site, setSite] = useState<SourceSite | "">("");
   const [sort, setSort] = useState<RankingSort>("score");
   // 画面リロードなしで再取得するためのローカルトリガー（「再取得」ボタン）。
@@ -172,11 +170,9 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
     fetchSalesRanking({
       limit: 20,
       site,
-      candidates_only: candidatesOnly,
       status_filter: statusFilter,
       contact_only: contactOnly,
       unsold_only: unsoldOnly,
-      ulule_only: ululeOnly,
       sort,
     })
       .then((d) => {
@@ -190,11 +186,9 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
       active = false;
     };
   }, [
-    candidatesOnly,
     statusFilter,
     contactOnly,
     unsoldOnly,
-    ululeOnly,
     site,
     sort,
     reloadKey,
@@ -254,10 +248,8 @@ export default function RankingPanel({ reloadKey }: { reloadKey?: number }) {
             ))}
           </select>
         </label>
-        <Toggle label="営業対象候補のみ" checked={candidatesOnly} onChange={setCandidatesOnly} />
         <Toggle label="連絡先ありのみ" checked={contactOnly} onChange={setContactOnly} />
         <Toggle label="日本未販売のみ" checked={unsoldOnly} onChange={setUnsoldOnly} />
-        <Toggle label="Ululeのみ" checked={ululeOnly} onChange={setUluleOnly} />
         <label className="flex items-center gap-1 text-xs text-slate-600">
           サイト
           <select

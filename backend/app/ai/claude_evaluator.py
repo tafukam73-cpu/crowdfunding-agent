@@ -93,11 +93,6 @@ class ClaudeEvaluator(Evaluator):
             f"動画: {'あり' if project.video_url else 'なし'}\n"
             f"メーカー: {project.maker_name}\n"
         )
-        # Ulule 案件はサステナブル/デザイン/ライフスタイル観点を追加で評価させる
-        from app.ai.ulule import is_ulule, prompt_block
-
-        if is_ulule(project):
-            base += prompt_block(project)
         return base
 
     def _parse(self, raw_json: str) -> EvaluationResult:

@@ -10,8 +10,7 @@
 - Contact Intelligence / 連絡先探索（contact_discovery_service）
 - 企業リサーチ（company_research_service）
 - 日本成功事例との類似（japanese_success_service）
-- Ulule 専用スコア（app.ai.ulule）
-- sales_status / is_sales_target_candidate / カテゴリ など案件フィールド
+- sales_status / カテゴリ など案件フィールド
 
 synthesize() は DB 非依存の純粋関数として切り出し、スコアリングを単体テストできる
 ようにしている。build_summary() が DB から材料を集めて synthesize() を呼ぶ。
@@ -23,7 +22,6 @@ import logging
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from app.ai import ulule
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import Project, SalesStatus
 from app.services import (
@@ -91,11 +89,6 @@ def _stars_for(score: int) -> int:
     return 1
 
 
-def _avg(vals: list[int]) -> float | None:
-    nums = [v for v in vals if v is not None]
-    return sum(nums) / len(nums) if nums else None
-
-
 def _market_fit(sig: dict) -> tuple[str, float | None]:
     """日本市場との相性（テキストレベルと内部スコア）を返す。"""
     parts: list[float] = []
@@ -103,8 +96,6 @@ def _market_fit(sig: dict) -> tuple[str, float | None]:
         parts.append(sig["latest_score"] * 0.4)  # 最大 40
     if sig.get("similarity_top") is not None:
         parts.append(min(30.0, sig["similarity_top"] * 0.3))
-    if sig.get("is_ulule") and sig.get("ulule_jp_lifestyle") is not None:
-        parts.append(sig["ulule_jp_lifestyle"] * 0.2)  # 最大 20
     if sig.get("research_japan_fit"):
         parts.append(10.0)
     if not parts:
@@ -226,24 +217,6 @@ def _score(sig: dict) -> int:
         elif st >= 30:
             score += 4
 
-    # Ulule 専用シグナル
-    if sig.get("is_ulule"):
-        if not sig.get("is_sales_target_candidate"):
-            score -= 35
-        else:
-            avg = _avg(
-                [
-                    sig.get("ulule_europe_design"),
-                    sig.get("ulule_sustainability"),
-                    sig.get("ulule_gift"),
-                ]
-            )
-            if avg is not None:
-                score += (avg - 50) * 0.2  # ±10
-    elif not sig.get("is_sales_target_candidate"):
-        # Ulule 以外で営業対象外（通常は発生しない安全網）
-        score -= 30
-
     # 営業状況
     status = sig.get("sales_status")
     if status in _CLOSED_STATUSES:
@@ -264,10 +237,7 @@ def _score(sig: dict) -> int:
 
 
 def _sales_target(sig: dict, score: int) -> str:
-    disqualified = (not sig.get("is_sales_target_candidate")) or sig.get(
-        "has_distributor"
-    )
-    if disqualified:
+    if sig.get("has_distributor"):
         return "no"
     if sig.get("sold_in_japan") and score < 45:
         return "no"
@@ -279,7 +249,7 @@ def _sales_target(sig: dict, score: int) -> str:
 
 
 def _recommended_action(sig: dict, score: int, sales_target: str) -> str:
-    if (not sig.get("is_sales_target_candidate")) or sig.get("has_distributor"):
+    if sig.get("has_distributor"):
         return "営業対象外の可能性"
     if sig.get("sales_status") in _ENGAGED_STATUSES:
         return "後回し"
@@ -317,27 +287,18 @@ def _reasons(sig: dict, contact_text: str, fit_label: str) -> list[str]:
     st = sig.get("similarity_top")
     if st is not None and st >= 50:
         out.append("日本の成功事例と類似している")
-    if sig.get("is_ulule"):
-        if (sig.get("ulule_sustainability") or 0) >= 60:
-            out.append("Ululeのサステナブル商品で日本のMakuake向き")
-        elif (sig.get("ulule_europe_design") or 0) >= 60:
-            out.append("ヨーロッパらしいデザイン性がある")
-        if (sig.get("ulule_gift") or 0) >= 60 and len(out) < 5:
-            out.append("ギフト需要が見込める")
     if fit_label in ("高い", "中程度") and len(out) < 5:
         out.append(f"日本市場との相性が{fit_label}")
     if sig.get("sales_status") in _READY_STATUSES and len(out) < 5:
         out.append("まだ営業未実施")
     # 3 件未満なら一般的な補足で底上げ
-    if len(out) < 3 and sig.get("is_sales_target_candidate"):
+    if len(out) < 3:
         out.append("物販商品として営業検討の余地がある")
     return out[:5]
 
 
 def _cautions(sig: dict) -> list[str]:
     out: list[str] = []
-    if not sig.get("is_sales_target_candidate"):
-        out.append("営業対象外（非商品）の可能性がある")
     if sig.get("has_distributor"):
         out.append("日本に既存代理店・法人がある可能性")
     if sig.get("sold_in_japan"):
@@ -438,20 +399,6 @@ def _gather_signals(db: Session, project: Project) -> dict:
     # 日本成功事例との類似（軽量な EXISTS のみ。同カテゴリがあれば類似度高とみなす）
     similarity_top = 70 if _has_similar_category(db, project) else None
 
-    # Ulule 専用スコア（product_assessment は 1 回だけ算出して使い回す）
-    is_ulule = ulule.is_ulule(project)
-    u_axis: dict = {}
-    is_candidate = True
-    u_sales_target: int | None = None
-    if is_ulule:
-        try:
-            u_axis = ulule.ulule_axis_scores(project)
-            pa = ulule.product_assessment(project)
-            is_candidate = pa["is_sales_target_candidate"]
-            u_sales_target = pa["sales_target_score"]
-        except Exception:  # noqa: BLE001  シグナル算出失敗は無視（要約は継続）
-            u_axis = {}
-
     return {
         "latest_score": project.latest_score,
         "recommendation": project.latest_recommendation,
@@ -478,13 +425,6 @@ def _gather_signals(db: Session, project: Project) -> dict:
         "contact_person_priority": top_person.priority if top_person else None,
         "research_japan_fit": (cr.japan_market_fit or "") if cr else "",
         "similarity_top": similarity_top,
-        "is_ulule": is_ulule,
-        "is_sales_target_candidate": is_candidate,
-        "ulule_europe_design": u_axis.get("europe_design_score"),
-        "ulule_sustainability": u_axis.get("sustainability_score"),
-        "ulule_gift": u_axis.get("gift_potential_score"),
-        "ulule_jp_lifestyle": u_axis.get("japan_lifestyle_fit_score"),
-        "ulule_sales_target_score": u_sales_target,
         "sales_status": project.sales_status,
         "category": project.category,
     }

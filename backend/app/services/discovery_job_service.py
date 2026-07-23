@@ -152,7 +152,7 @@ def _run_job_inner(job_id: int) -> None:
         db.commit()  # ここで一旦コミットしてトランザクションを閉じる（HTTP 前に解放）
 
         # Kickstarter のみ discovery_fetch（Playwright 経由）を注入。network_backed
-        # adapter（Wadiz/Zeczec/Ulule/Indiegogo）は自前で取得するため fetch_fn は None。
+        # adapter（Wadiz/Zeczec/Indiegogo）は自前で取得するため fetch_fn は None。
         if needs_fetch_injection(platform):
             from app.services import discovery_fetch
 

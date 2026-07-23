@@ -36,7 +36,6 @@ _SITE_LANGUAGE: dict[str, str] = {
     "greenfunding": "ja",
     "kickstarter": "en",
     "indiegogo": "en",
-    "ulule": "en",       # フランス発だが英語で到達しやすい
 }
 
 OUTREACH_MODEL_NAME = "rule-sales-outreach-v1"

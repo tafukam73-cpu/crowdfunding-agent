@@ -11,7 +11,6 @@ from app.scrapers.base import BaseScraper
 from app.scrapers.dummy import DummyScraper
 from app.scrapers.indiegogo import IndiegogoScraper
 from app.scrapers.kickstarter import KickstarterScraper
-from app.scrapers.ulule import UluleScraper
 from app.scrapers.wadiz import WadizScraper
 from app.scrapers.zeczec import ZeczecScraper
 
@@ -38,15 +37,6 @@ def get_scraper(site: SourceSite, limit: int = 20) -> BaseScraper:
         # 初回検証の既定：1カテゴリ（tech-innovation）・最大10件
         return IndiegogoScraper(
             limit=min(limit, 10),
-            fetch_method=settings.scrape_fetcher,
-            rate_limit_seconds=settings.scrape_rate_limit_seconds,
-            timeout=settings.scrape_timeout_seconds,
-            retries=settings.scrape_retries,
-        )
-    if site is SourceSite.ulule:
-        # 公式 API（成功/人気案件）優先・最大20件。API 不可時は Playwright で discover
-        return UluleScraper(
-            limit=min(limit, 20),
             fetch_method=settings.scrape_fetcher,
             rate_limit_seconds=settings.scrape_rate_limit_seconds,
             timeout=settings.scrape_timeout_seconds,

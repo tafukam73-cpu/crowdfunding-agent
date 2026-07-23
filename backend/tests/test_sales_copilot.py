@@ -60,7 +60,6 @@ def _sig(**over) -> dict:
     base = {
         "sales_status": SalesStatus.not_started.value,
         "latest_score": 50,
-        "is_sales_target_candidate": True,
         "has_email": False,
         "has_form": False,
         "has_instagram": False,
@@ -114,9 +113,6 @@ def test_classify_rules():
         == "closed",
     )
 
-    # 営業対象外（非物販）→ 見送り候補
-    r = cp.classify(_sig(is_sales_target_candidate=False))
-    check("非物販は drop", r["decision"] == "drop")
     # 日本に代理店 / 販売済み → 見送り候補
     check(
         "代理店ありは drop",
@@ -161,7 +157,6 @@ def test_classify_rules():
         {},
         {"has_email": True, "latest_score": 90},
         {"sales_status": SalesStatus.won.value},
-        {"is_sales_target_candidate": False},
         {"has_official_site": False},
         {"sales_status": SalesStatus.awaiting_reply.value, "days_since_last_outreach": 9},
     ):

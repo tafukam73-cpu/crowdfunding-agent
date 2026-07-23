@@ -144,7 +144,7 @@ def run(
         )
 
     # 実ネットワーク取得を試みたか。fetch_fn 注入型（Kickstarter）に加えて、
-    # 自前で実サイト取得する network_backed adapter（Wadiz/Zeczec/Ulule/Indiegogo）も
+    # 自前で実サイト取得する network_backed adapter（Wadiz/Zeczec/Indiegogo）も
     # 実取得とみなす。取得0件のとき「実取得したが0件」と「fetch未接続で0件」を区別する。
     network_fetched = fetch_fn is not None or bool(
         getattr(adapter, "network_backed", False)
