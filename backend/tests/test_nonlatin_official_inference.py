@@ -348,6 +348,111 @@ def test_e2e_brand_guard_scope_page_derived():
           official_of(r).startswith("https://brandq-store.com"))
 
 
+# ============ 9. p96 놀로（実測固定 e2e） ============
+def test_e2e_p96_knollo():
+    """p96 놀로: 実測した検索結果・identity をそのまま固定した回帰テスト。
+
+    実測（2026-07-23 ライブ）:
+      検索  → knollo.store / knollo.co.kr / litt.ly/knollo.store
+      root  → knollo.store  title="놀로 knollo | 반려동물 간식·용품·케어 전문몰" (200)
+              knollo.co.kr  title="놀로스퀘어"                                  (200)
+              litt.ly       title="리틀리 | 무료로 쉽게 시작하는…"（リンク集の運営会社）
+    놀로 は 스파크펫(SparkPet) のブランドで、Knollo Store(knollo.store) /
+    Knollo Square(knollo.co.kr) / Knollo Play(アプリ) の 3 事業を持つ。
+    案件ページ(wadiz)は実測 403 なので取得不能として与える。
+    """
+    print("test_e2e_p96_knollo")
+    src = None  # wadiz は 403（実測）
+    roots = {
+        "https://www.knollo.store": html_title("놀로 knollo | 반려동물 간식·용품·케어 전문몰"),
+        "https://www.knollo.co.kr": html_title("놀로스퀘어"),
+        # litt.ly はリンク集プラットフォーム。identity は運営会社「리틀리」で maker と別。
+        "https://litt.ly": html_title("리틀리 | 무료로 쉽게 시작하는 나만의 홈페이지·프로필 링크"),
+    }
+    results = [
+        {"url": "https://www.knollo.store/",
+         "title": "놀로 knollo | 반려동물 간식·용품·케어 전문몰", "snippet": ""},
+        {"url": "https://www.knollo.co.kr/", "title": "놀로스퀘어", "snippet": ""},
+        {"url": "https://litt.ly/knollo.store", "title": "놀로스토어", "snippet": ""},
+    ]
+    r = make_wr(src, roots, results, "놀로",
+                source_url="https://www.wadiz.kr/web/campaign/detail/397151")
+    got = official_of(r)
+    check("p96: knollo.store を公式として採用", got == "https://www.knollo.store")
+    check("p96: litt.ly は identity 不一致で不採用（리틀리 ≠ 놀로）", "litt.ly" not in got)
+    # knollo.co.kr も候補には入る（identity 一致）が、スコア順で store が先に採られる。
+    cands = w._title_official_candidates(
+        [(0, x["url"]) for x in results], {x["url"]: x["title"] for x in results}, "놀로")
+    check("p96: knollo.co.kr も候補に含まれる", "https://www.knollo.co.kr" in cands)
+    check("p96: litt.ly も候補段階では残る（identity で落とす設計）",
+          "https://litt.ly" in cands)
+    check("p96: 候補先頭は knollo.store", cands and cands[0] == "https://www.knollo.store")
+
+
+# ============ 10. 韓国語クエリ生成（Recall 改善） ============
+def _proj(maker, **kw):
+    base = dict(id=1, title="", maker_name=maker, maker_url=None, source_url="",
+                source_site="", description="", description_clean="", product_name="")
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_kr_query_generation():
+    print("test_kr_query_generation")
+    KR5 = ['"놀로" 공식몰', '"놀로" 공식 홈페이지', '"놀로" 브랜드',
+           '"놀로" 회사', '"놀로" 공식 스토어']
+    qs = w.build_web_search_queries(_proj(
+        "놀로", source_site="wadiz",
+        source_url="https://www.wadiz.kr/web/campaign/detail/397151"))
+    head = qs[:w.MAX_QUERIES]
+    for q in KR5:
+        check(f"韓国語クエリが先頭{w.MAX_QUERIES}本以内: {q}", q in head)
+    check("生成クエリ数が MAX_QUERIES 以内", len(qs) <= w.MAX_QUERIES)
+    check("重複クエリなし", len(qs) == len(set(qs)))
+    # ハングル maker ではスタートアップ系ブロックを抑制する
+    startup = ("Product Hunt", "Crunchbase", "GitHub", "YC", "founder",
+               "LinkedIn company", "producthunt.com", "ycombinator.com",
+               "crunchbase.com", "apps.apple.com", "play.google.com")
+    check("ハングル maker ではスタートアップ系クエリを生成しない",
+          not any(s in q for q in qs for s in startup))
+    # 既存の生産的な先頭クエリ（実測で唯一の成果源）は維持する
+    for q in ['"놀로" Instagram', '"놀로" Facebook', '"놀로" official', '"놀로" contact']:
+        check(f"既存の先頭クエリを維持: {q}", q in head)
+    # 法人格つきハングル名でも発火する
+    qs2 = w.build_web_search_queries(_proj("주식회사 올음", source_site="wadiz"))
+    check("법인격つきハングル名でも韓国語クエリが出る",
+          '"주식회사 올음" 공식몰' in qs2[:w.MAX_QUERIES])
+    check("p114 もクエリ数 MAX_QUERIES 以内", len(qs2) <= w.MAX_QUERIES)
+
+
+def test_latin_query_generation_unchanged():
+    """ラテン/日本語/中国語 maker のクエリ列は 1 本も変わらない（ゲートの副作用なし）。"""
+    print("test_latin_query_generation_unchanged")
+    latin = w.build_web_search_queries(_proj(
+        "RiseFit", source_site="kickstarter",
+        source_url="https://www.kickstarter.com/projects/risefit/risefit-ai"))
+    check("ラテン名: スタートアップ系を抑制しない",
+          any("Product Hunt" in q for q in latin)
+          and any("site:producthunt.com" in q for q in latin))
+    check("ラテン名: 韓国語クエリを生成しない",
+          not any("공식" in q or "브랜드" in q for q in latin))
+    check("ラテン名: 重複なし", len(latin) == len(set(latin)))
+    # 日本語 maker はハングルではない → 従来どおりスタートアップ系が出る
+    jp = w.build_web_search_queries(_proj(
+        "株式会社アクメ", title="スマート照明", source_site="makuake",
+        source_url="https://www.makuake.com/project/acme/"))
+    check("日本語 maker: 従来どおりスタートアップ系が出る",
+          any("Product Hunt" in q for q in jp))
+    check("日本語 maker: 韓国語クエリを生成しない",
+          not any("공식몰" in q for q in jp))
+    # _has_hangul 単体
+    check("_has_hangul: 놀로 → True", w._has_hangul("놀로"))
+    check("_has_hangul: RiseFit → False", not w._has_hangul("RiseFit"))
+    check("_has_hangul: 株式会社アクメ → False", not w._has_hangul("株式会社アクメ"))
+    check("_has_hangul: None/空 → False",
+          not w._has_hangul(None) and not w._has_hangul(""))
+
+
 def main():
     test_title_candidates()
     test_identity_guard()
@@ -363,6 +468,9 @@ def main():
     test_external_brand_guard()
     test_e2e_external_brand_rejected()
     test_e2e_brand_guard_scope_page_derived()
+    test_e2e_p96_knollo()
+    test_kr_query_generation()
+    test_latin_query_generation_unchanged()
     test_latin_unaffected()
     print(f"\n{_p} passed / {_f} failed")
     return 1 if _f else 0

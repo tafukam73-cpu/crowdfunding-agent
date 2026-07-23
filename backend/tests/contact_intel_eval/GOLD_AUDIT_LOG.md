@@ -83,3 +83,62 @@
 - 変更前: 信頼できる正解ラベル 0 件（frozen は空・partial は汚染）。
 - 変更後: 人手検証 ground truth 24 案件（verified 14 / partial 2 / blocked 3 / unresolved 5、
   direct email 6・fallback email 5）。precision/recall を分母付きで測定可能。
+
+## 5. GT補正 2026-07-23: p96 놀로(Knollo) を unresolved → verified
+
+### 5.1 補正理由
+当初 p96 は「真メーカー未特定」として `unresolved`（precision/recall の分母外）にしていた。
+これは**過小評価**だった。`놀로(Knollo)` は **스파크펫(SparkPet, sparkpetkorea.com)** の
+ブランドで、以下 3 事業を持つ:
+
+- **Knollo Store** — `knollo.store`（ペット用品コマース）← 公式サイトとして採用
+- **Knollo Square** — `knollo.co.kr`（オフライン複合空間）
+- **Knollo Play** — アプリ（Google Play `com.sparkpet.knollo`）
+
+### 5.2 実地確認（2026-07-23 ライブ疎通・httpx）
+
+| 項目 | 実測値 |
+|---|---|
+| `https://www.knollo.store` | HTTP **200** / 854,124 bytes / server=Vercel |
+| TLS | TLSv1.3 / CN=`www.knollo.store` / 有効期限 2026-09-24 |
+| `<title>` | `놀로 knollo \| 반려동물 간식·용품·케어 전문몰` |
+| canonical | `https://www.knollo.store/` |
+| bot protection | **なし**（cf-ray なし・Cloudflare なし・UA 差なし） |
+| `https://www.knollo.co.kr` | HTTP **200** / `<title>놀로스퀘어</title>` / ページ内から `https://www.knollo.store` へリンク |
+
+傍証（第三者ソース）: SparkLabs ポートフォリオ "Sparkpet (KNOLLO)"、
+Google Play `com.sparkpet.knollo`、platum.kr/archives/199247（스파크펫の놀로アプリ出시報道）。
+
+### 5.3 変更内容
+
+| 項目 | 変更前 | 変更後 |
+|---|---|---|
+| `verification_status` | `unresolved` | **`verified`** |
+| `expected_official_site` | なし | **`https://www.knollo.store`** |
+| `maker_name` | `놀로(Nolo) maker (未特定)` | `놀로 (Knollo / 스파크펫)` |
+| `blocked_reason` | `true maker not identified; …` | 削除 |
+| `expected_fallback_emails` | `hi@/makerlive@brand-kr.com` | **据え置き（agency 判定を維持）** |
+| `plausible_unconfirmed_emails` | なし | `CX@sparkpetkorea.com` |
+
+- **代理店判定は維持**: `brand-kr.com` は運営代行で maker 直通ではないため `fallback` のまま。
+- `CX@sparkpetkorea.com` は `knollo.store` 上に実在するが、**運営会社ドメインで maker 公式
+  ドメイン(`knollo.store`)と不一致**のため `direct` に昇格させず `plausible` に留める
+  （2.3 の方針どおり TP/FP どちらにも数えない）。
+- **`status="resolved"` は使用していない**: 本 GT のスキーマ語彙は
+  `verified | partially_verified | blocked | unresolved | no_public_contact` であり、
+  `resolved` は `eval_v2.py` の `STRICT` / `PARTIAL` / `EXCLUDED` いずれにも属さず、
+  集計から**黙って脱落**する。意図（＝分母に入れて採点する）を実現する値は `verified`。
+
+### 5.4 変更ファイル
+- `build_ground_truth.py` — p96 を unresolved ブロックから verified ブロックへ移動・証拠付与
+- `gold_set_v1.py` — GOLD_B[96] を `blocked` → `verified`、`b_official` を付与
+- 本ファイル（`GOLD_AUDIT_LOG.md`）
+
+**再生成していない成果物**: `gold_ground_truth.json`（`build_ground_truth.py` の出力）と
+`gold_frozen_24.json`（`eval_v2.py` の入力）はいずれも `.gitignore` 対象の生成/凍結物で、
+**まだ旧 p96 レコードを保持している**。eval_v2 の数値へ反映するには
+`python tests/contact_intel_eval/build_ground_truth.py` の実行と frozen の更新可否判断が別途必要。
+
+### 5.5 verification_status 内訳の変化
+- 変更前: verified 14 / partially_verified 2 / blocked 3 / unresolved 5
+- 変更後: **verified 15 / partially_verified 2 / blocked 3 / unresolved 4**

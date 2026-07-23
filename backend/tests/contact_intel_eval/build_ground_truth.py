@@ -64,6 +64,31 @@ GROUND_TRUTH = [
        people=[["ZOU WENXIAO", "대표(代表)"]],
        evidence=["https://nocfree.kr"],
        snippets=["公式に help.kr@nocfree.com・代表 ZOU WENXIAO 掲載"]),
+    # GT補正(2026-07-23): 当初 p96 は「真メーカー未特定」で unresolved としていたが、
+    # 놀로(Knollo) は 스파크펫(SparkPet, sparkpetkorea.com) のブランドであり、
+    # Knollo Store(knollo.store) / Knollo Square(knollo.co.kr) / Knollo Play(アプリ) の
+    # 3 事業を持つことを確認したため verified へ昇格（公式サイトのみ。メールは据え置き）。
+    # 実測(2026-07-23 ライブ疎通):
+    #   https://www.knollo.store  200 / TLSv1.3 / CN=www.knollo.store(〜2026-09-24)
+    #       <title>놀로 knollo | 반려동물 간식·용품·케어 전문몰</title>
+    #       canonical=https://www.knollo.store/  server=Vercel  bot protection なし
+    #   https://www.knollo.co.kr  200 / <title>놀로스퀘어</title>（Knollo Square＝実店舗）
+    #       ページ内から https://www.knollo.store へリンク（同一ブランドの相互参照）
+    # 傍証: SparkLabs ポートフォリオ "Sparkpet (KNOLLO)"、Google Play
+    #       com.sparkpet.knollo、platum.kr/archives/199247（스파크펫の놀로アプリ出시）。
+    # 代理店判定は維持: hi@/makerlive@brand-kr.com は maker 直通でなく fallback(agency)。
+    # CX@sparkpetkorea.com は knollo.store 上に実在するが運営会社ドメインで maker 公式
+    # ドメインと不一致のため direct には昇格させず plausible に留める。
+    _c(96, "wadiz", "놀로 (Knollo / 스파크펫)", official="https://www.knollo.store",
+       fallback=["hi@brand-kr.com", "makerlive@brand-kr.com"],
+       plausible=["CX@sparkpetkorea.com"],
+       evidence=["https://www.knollo.store", "https://www.knollo.co.kr",
+                 "https://sparklabs.co.kr/kr/portfolio/sparkpet-knollo/"],
+       snippets=["公式 knollo.store を確認(<title>놀로 knollo | 반려동물 간식·용품·케어 전문몰"
+                 "・canonical=https://www.knollo.store/)。",
+                 "놀로=스파크펫(SparkPet)のブランド。Store/Square/Play の3事業。",
+                 "brand-kr.com は運営代行(代理店)で maker 直通でなく fallback のまま。",
+                 "CX@sparkpetkorea.com は運営会社ドメインのため未確認(plausible)扱い"]),
     _c(108, "zeczec", "Single Step", official="https://singlestep.com",
        direct=["info@singlestep.com"],
        plausible=[],  # mediafol.io / ulpi.com.tw は第三者（expected に入れない）
@@ -168,11 +193,6 @@ GROUND_TRUTH = [
        fallback=["apply@ideafound.com"],
        blocked_reason="true maker not identified; ideafound.com は代理店",
        evidence=[], snippets=["email=ideafound.com(代理店)。真メーカー未特定"]),
-    _c(96, "wadiz", "놀로(Nolo) maker (未特定)", status="unresolved",
-       fallback=["hi@brand-kr.com", "makerlive@brand-kr.com"],
-       blocked_reason="true maker not identified; brand-kr.com は運営代行代理店の疑い",
-       evidence=[], snippets=["System email=brand-kr.com(代理店の疑い)。公式未特定。"
-                              "brand-kr.com は maker 直通でなく fallback(agency)"]),
     _c(97, "wadiz", "주부디자인 maker (未特定)", status="unresolved",
        fallback=["real1@makerz.co.kr"],
        blocked_reason="true maker not identified; makerz.co.kr は代理店の疑い",
