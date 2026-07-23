@@ -250,8 +250,8 @@ def test_double_promote_no_duplicate():
     print("test_double_promote_no_duplicate")
     db = SessionLocal()
     p = _mk_product(
-        db, source_platform="ulule",
-        source_url="https://www.ulule.com/double-promote/",
+        db, source_platform="zeczec",
+        source_url="https://www.zeczec.com/projects/double-promote/",
         product_name="Double Promote",
     )
     first = _promote(db, p.id)

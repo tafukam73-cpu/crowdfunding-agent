@@ -67,8 +67,7 @@ def _mk(db, status: str, score: int = 80) -> Project:
 
 
 def _rank_ids(db, **kwargs) -> set[int]:
-    """ランキング結果の project_id 集合（candidates_only は無効化して状況判定に集中）。"""
-    kwargs.setdefault("candidates_only", False)
+    """ランキング結果の project_id 集合。"""
     items = wf.ranking(db, **kwargs)
     return {it["project_id"] for it in items}
 

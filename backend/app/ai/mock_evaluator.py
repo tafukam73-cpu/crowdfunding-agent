@@ -9,8 +9,6 @@ from __future__ import annotations
 import hashlib
 
 from app.ai.evaluator import AXES, EvaluationResult, Evaluator, score_to_recommendation
-from app.ai.ulule import product_assessment as ulule_product
-from app.ai.ulule import signals as ulule_signals
 from app.models.project import Project
 
 
@@ -59,32 +57,6 @@ class MockEvaluator(Evaluator):
         axis["Makuake向き"] = _jitter(seed, 6, 45, 90)
         axis["GreenFunding向き"] = _jitter(seed, 7, 40, 85)
         axis["営業すべきか"] = _jitter(seed, 8, 40, 95)
-
-        # --- Ulule 案件は優先商材（サステナブル/デザイン/ライフスタイル）を加点 ---
-        # 6 軸の追加スコア・理由文は evaluation_service で両エンジン共通に付与する。
-        sig = ulule_signals(project)
-        if sig["is_ulule"]:
-            hi = len(sig["high_hits"])
-            bonus = min(20, 6 * hi)  # 高評価キーワードに応じて加点
-            if sig["sustainability"]:
-                axis["新規性"] = _clamp(axis["新規性"] + 8)
-            if sig["europe_design"]:
-                axis["動画映え"] = _clamp(axis["動画映え"] + 6)  # デザイン映え
-            if sig["lifestyle_fit"]:
-                axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] + bonus)
-                axis["Makuake向き"] = _clamp(axis["Makuake向き"] + bonus)
-                axis["GreenFunding向き"] = _clamp(axis["GreenFunding向き"] + bonus)
-                axis["営業すべきか"] = _clamp(axis["営業すべきか"] + bonus)
-            if sig["low_hits"]:
-                # 映画/音楽/寄付など営業対象外寄りは減点
-                axis["営業すべきか"] = _clamp(axis["営業すべきか"] - 15)
-                axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] - 10)
-            # 寄付/観光/文化/団体支援などの非商品（営業対象外）は大きく減点する
-            if not ulule_product(project)["is_sales_target_candidate"]:
-                axis["営業すべきか"] = _clamp(axis["営業すべきか"] - 40)
-                axis["日本クラファン適性"] = _clamp(axis["日本クラファン適性"] - 30)
-                axis["Makuake向き"] = _clamp(axis["Makuake向き"] - 25)
-                axis["GreenFunding向き"] = _clamp(axis["GreenFunding向き"] - 25)
 
         # AXES の順序を保証
         axis_scores = {k: int(axis[k]) for k in AXES}

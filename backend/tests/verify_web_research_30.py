@@ -1,6 +1,6 @@
 """検索API導入の効果検証（30 件、オフライン比較）。要件 9。
 
-Kickstarter 10 / Indiegogo 10 / Ulule 10 の各案件で、
+Kickstarter 10 / Indiegogo 10 / Wadiz 10 の各案件で、
   (A) DuckDuckGo フォールバック相当（ノイズ主体・本人SNS/隠れ連絡先を返さない）
   (B) 検索API相当（本人の公式サイト・Contact・隠れ連絡先・SNSを正確に返す）
 を同一の fetch_fn（実ページ）に対して実行し、メール/フォーム/Instagram/Facebook/
@@ -58,7 +58,7 @@ _MAKERS = [
 
 
 def _build_cases() -> list[dict]:
-    sites = ["kickstarter", "indiegogo", "ulule"]
+    sites = ["kickstarter", "indiegogo", "wadiz"]
     cases: list[dict] = []
     cid = 1
     for site in sites:
@@ -225,7 +225,7 @@ def main() -> int:
         "fb": "Facebook", "li": "LinkedIn", "channels": "営業可能チャネル数",
     }
     n = len(cases)
-    print(f"検証件数: {n} 件（Kickstarter 10 / Indiegogo 10 / Ulule 10）\n")
+    print(f"検証件数: {n} 件（Kickstarter 10 / Indiegogo 10 / Wadiz 10）\n")
     print("プラットフォーム別（DDGフォールバック → 検索API）:")
     for site, ps in per_site.items():
         print(f"  [{site}]")

@@ -3,7 +3,7 @@
 ``get_adapter(source_platform)`` で発掘元に対応する adapter を得る。共通型
 ``DiscoveryCandidate`` はどの adapter でも同じ形で候補を返すための契約。
 
-Wadiz / Zeczec / Ulule / Indiegogo は既存スクレイパー（projects 向け収集で実績あり）を
+Wadiz / Zeczec / Indiegogo は既存スクレイパー（projects 向け収集で実績あり）を
 そのまま流用する ``ScraperBackedAdapter`` で接続する（新規スクレイパーを作らない）。
 Kickstarter は discover/advanced JSON を ``discovery_fetch`` 経由で取得する。
 
@@ -29,7 +29,6 @@ from app.services.discovery_adapters.kickstarter_adapter import KickstarterAdapt
 from app.services.discovery_adapters.manual_adapter import ManualAdapter
 from app.services.discovery_adapters.scraper_adapter import (
     IndiegogoScraperAdapter,
-    UluleAdapter,
     WadizAdapter,
     ZeczecAdapter,
 )
@@ -40,20 +39,18 @@ _ADAPTERS: dict[str, type[BaseAdapter]] = {
     DiscoverySourcePlatform.indiegogo.value: IndiegogoScraperAdapter,
     DiscoverySourcePlatform.wadiz.value: WadizAdapter,
     DiscoverySourcePlatform.zeczec.value: ZeczecAdapter,
-    DiscoverySourcePlatform.ulule.value: UluleAdapter,
     DiscoverySourcePlatform.backerkit.value: BackerkitAdapter,
     DiscoverySourcePlatform.manual.value: ManualAdapter,
 }
 
 # discovery_fetch（Playwright 経由の実サイト取得）を注入して動かすプラットフォーム。
-# ここに無い network_backed adapter（Wadiz/Zeczec/Ulule/Indiegogo）は自前で取得する。
+# ここに無い network_backed adapter（Wadiz/Zeczec/Indiegogo）は自前で取得する。
 FETCH_INJECT_PLATFORMS = {DiscoverySourcePlatform.kickstarter.value}
 
 # 発掘元プラットフォームの表示順（manual / other を除く）。
 DISCOVERY_PLATFORM_ORDER = [
     DiscoverySourcePlatform.kickstarter.value,
     DiscoverySourcePlatform.indiegogo.value,
-    DiscoverySourcePlatform.ulule.value,
     DiscoverySourcePlatform.wadiz.value,
     DiscoverySourcePlatform.zeczec.value,
     DiscoverySourcePlatform.backerkit.value,
@@ -62,7 +59,6 @@ DISCOVERY_PLATFORM_ORDER = [
 _PLATFORM_LABELS = {
     "kickstarter": "Kickstarter",
     "indiegogo": "Indiegogo",
-    "ulule": "Ulule",
     "wadiz": "Wadiz",
     "zeczec": "Zeczec",
     "backerkit": "BackerKit",
@@ -163,5 +159,4 @@ __all__ = [
     "ManualAdapter",
     "WadizAdapter",
     "ZeczecAdapter",
-    "UluleAdapter",
 ]

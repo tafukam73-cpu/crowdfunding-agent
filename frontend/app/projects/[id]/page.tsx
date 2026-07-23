@@ -160,12 +160,6 @@ export default function ProjectDetail() {
           <StatusBadge status={project.status} />
         </div>
 
-        {project.is_sales_target_candidate === false && (
-          <p className="mt-3 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800">
-            ⚠ 営業対象外の可能性あり（寄付・観光・文化活動・イベント・団体支援など、物販ではない案件の可能性）
-          </p>
-        )}
-
         {/* 🚀 Sales Mode：ここだけ見れば営業判断でき、営業開始でフローが進む */}
         <div className="mt-4">
           <SalesModeGuide

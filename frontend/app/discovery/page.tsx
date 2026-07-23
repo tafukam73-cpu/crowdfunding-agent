@@ -180,7 +180,7 @@ function RunForm({ onRan }: { onRan: () => void }) {
       <h2 className="mb-1 text-base font-bold text-slate-900">Discovery 実行</h2>
       <p className="mb-3 text-xs text-slate-500">
         発掘元を指定して収集フレームワークを実行します。Kickstarter / Wadiz / Zeczec /
-        Ulule / Indiegogo は実取得に対応しています。その他のプラットフォームは接続状況に
+        Indiegogo は実取得に対応しています。その他のプラットフォームは接続状況に
         応じて表示されます（実行可否は各サイトの状態バッジに従います）。重い収集は
         バックグラウンドのジョブで実行され、進捗をここに表示します。
       </p>

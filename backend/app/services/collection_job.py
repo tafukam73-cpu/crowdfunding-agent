@@ -40,7 +40,6 @@ OVERSEAS_SITES = [
     SourceSite.indiegogo,
     SourceSite.wadiz,
     SourceSite.zeczec,
-    SourceSite.ulule,
 ]
 
 

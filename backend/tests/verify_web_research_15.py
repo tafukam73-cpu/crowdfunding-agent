@@ -1,7 +1,7 @@
 """AI Web Research の 15 件オフライン検証ハーネス（要件 8）。
 
 ネットワークと DB を使わず、search_fn / fetch_fn を注入して 15 件
-（Kickstarter 5 / Indiegogo 5 / Ulule 5）を再現する。各案件の検索結果には
+（Kickstarter 5 / Indiegogo 10）を再現する。各案件の検索結果には
 「手動 Google 検索で簡単に見つかる」本人 SNS（Instagram / Facebook / LinkedIn）と、
 ツールが誤採用しがちなノイズ（運営公式 SNS・share/login・無関係ニュース・同名別
 ブランド）を混在させ、改善後ロジックが本人 SNS を採用しノイズを除外できるかを測る。
@@ -39,7 +39,7 @@ class P:
         self.description_clean = self.description
 
 
-# 15 件（KS5 / IGG5 / Ulule5）。handle は本人 SNS の URL に使う。
+# 15 件（KS5 / IGG10）。handle は本人 SNS の URL に使う。
 CASES = [
     # Kickstarter
     dict(id=1, title="Nuro Sleep Mask", maker_name="Nuro Labs", domain="nurolabs.com", source_site="kickstarter", handle="nurolabs"),
@@ -53,12 +53,12 @@ CASES = [
     dict(id=8, title="Tile Tracker", maker_name="Tile", domain="thetileapp.com", source_site="indiegogo", handle="tile"),
     dict(id=9, title="Skydio Drone", maker_name="Skydio", domain="skydio.com", source_site="indiegogo", handle="skydio"),
     dict(id=10, title="Oura Ring", maker_name="Oura", domain="ouraring.com", source_site="indiegogo", handle="ouraring"),
-    # Ulule
-    dict(id=11, title="Loom Backpack", maker_name="Loom", domain="loom-paris.com", source_site="ulule", handle="loomparis"),
-    dict(id=12, title="Bivouak Tent", maker_name="Bivouak", domain="bivouak.fr", source_site="ulule", handle="bivouak"),
-    dict(id=13, title="Marlette Granola", maker_name="Marlette", domain="marlette.fr", source_site="ulule", handle="marlette"),
-    dict(id=14, title="Le Slip Francais", maker_name="Le Slip", domain="leslipfrancais.fr", source_site="ulule", handle="leslipfrancais"),
-    dict(id=15, title="Respire Deodorant", maker_name="Respire", domain="respire-care.com", source_site="ulule", handle="respire"),
+    # Indiegogo（欧州ブランド）
+    dict(id=11, title="Loom Backpack", maker_name="Loom", domain="loom-paris.com", source_site="indiegogo", handle="loomparis"),
+    dict(id=12, title="Bivouak Tent", maker_name="Bivouak", domain="bivouak.fr", source_site="indiegogo", handle="bivouak"),
+    dict(id=13, title="Marlette Granola", maker_name="Marlette", domain="marlette.fr", source_site="indiegogo", handle="marlette"),
+    dict(id=14, title="Le Slip Francais", maker_name="Le Slip", domain="leslipfrancais.fr", source_site="indiegogo", handle="leslipfrancais"),
+    dict(id=15, title="Respire Deodorant", maker_name="Respire", domain="respire-care.com", source_site="indiegogo", handle="respire"),
 ]
 
 

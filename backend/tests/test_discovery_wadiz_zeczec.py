@@ -109,7 +109,6 @@ def test_platform_registry():
     check("wadiz available=true", avail["wadiz"].available is True)
     check("zeczec available=true", avail["zeczec"].available is True)
     check("indiegogo available=true（現行実装どおり）", avail["indiegogo"].available is True)
-    check("ulule available=true", avail["ulule"].available is True)
     check("backerkit available=false（準備中）", avail["backerkit"].available is False)
     # manual は発掘元一覧に載せない（available 判定は False）
     check("manual is_live_fetch=false", is_live_fetch("manual") is False)

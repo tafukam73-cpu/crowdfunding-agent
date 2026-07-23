@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import and_, exists, func, not_, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.company_research import CompanyResearch, ResearchStatus
@@ -29,12 +29,7 @@ from app.models.contact_discovery import ContactDiscovery
 from app.models.crm import SalesActivity
 from app.models.email_draft import EmailDraft
 from app.models.japanese_success import JapaneseSuccessProject
-from app.models.project import (
-    SALES_TARGET_SITES,
-    Project,
-    SalesStatus,
-    SourceSite,
-)
+from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
 
 # 短文アウトリーチ（DM / フォーム）を生成できるチャネル
 _DM_CHANNELS = ("contact_form", "instagram", "linkedin", "facebook")
@@ -99,7 +94,6 @@ def compute_priority_score(
     raised_amount: Decimal | float | None,
     goal_amount: Decimal | float | None,
     backers_count: int | None,
-    is_sales_target_candidate: bool,
     sales_status: str,
 ) -> int:
     """営業優先順位スコア（0〜100）。値が高いほど今日営業すべき。"""
@@ -125,9 +119,8 @@ def compute_priority_score(
     elif (backers_count or 0) >= 300:
         score += 3
 
-    # 商品性（営業対象候補。Ulule 以外は常に True）
-    if is_sales_target_candidate:
-        score += 5
+    # 物販商品としての基礎点
+    score += 5
 
     # 営業状況による調整（既に営業済み/終了は今日の優先度を下げる）
     if sales_status == SalesStatus.contacted.value:
@@ -255,7 +248,6 @@ def compute_workflow(db: Session, project: Project) -> dict:
         raised_amount=project.raised_amount,
         goal_amount=project.goal_amount,
         backers_count=project.backers_count,
-        is_sales_target_candidate=project.is_sales_target_candidate,
         sales_status=project.sales_status,
     )
 
@@ -307,7 +299,6 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
             raised_amount=p.raised_amount,
             goal_amount=p.goal_amount,
             backers_count=p.backers_count,
-            is_sales_target_candidate=p.is_sales_target_candidate,
             sales_status=p.sales_status,
         )
         out.append(
@@ -509,7 +500,6 @@ SITE_LABELS_JA = {
     "kickstarter": "Kickstarter",
     "indiegogo": "Indiegogo",
     "wadiz": "Wadiz",
-    "ulule": "Ulule",
 }
 
 
@@ -579,7 +569,6 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
             raised_amount=p.raised_amount,
             goal_amount=p.goal_amount,
             backers_count=p.backers_count,
-            is_sales_target_candidate=p.is_sales_target_candidate,
             sales_status=p.sales_status,
         )
         evaluated = p.id in assess_overall
@@ -733,12 +722,10 @@ def ranking(
     *,
     limit: int = 20,
     site: str | None = None,
-    candidates_only: bool = True,
     unsold_only: bool = False,
     contact_only: bool = False,
     not_started_only: bool = False,
     status_filter: str = _DEFAULT_RANKING_STATUS_FILTER,
-    ulule_only: bool = False,
     sort: str = "score",
 ) -> list[dict]:
     """AI 営業優先ランキングを返す（Executive Summary を統合してスコア順）。
@@ -754,8 +741,6 @@ def ranking(
     """
     # 遅延 import で循環参照を避ける
     from app.services import executive_summary_service as ess
-    from app.services.project_service import _non_candidate_condition
-
     if sort not in _RANKING_SORTS:
         sort = "score"
 
@@ -768,10 +753,6 @@ def ranking(
     conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
     if site:
         conditions.append(Project.source_site == site)
-    if ulule_only:
-        conditions.append(Project.source_site == SourceSite.ulule.value)
-    if candidates_only:
-        conditions.append(not_(_non_candidate_condition()))
     # 既定で営業アクション済みステータスを除外（"all" のときは絞り込まない）。
     if status_values is not None:
         conditions.append(Project.sales_status.in_(status_values))

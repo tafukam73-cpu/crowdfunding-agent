@@ -45,7 +45,6 @@ _PLATFORM_TO_SITE: dict[str, SourceSite] = {
     "indiegogo": SourceSite.indiegogo,
     "wadiz": SourceSite.wadiz,
     "zeczec": SourceSite.zeczec,
-    "ulule": SourceSite.ulule,
 }
 
 # source_id 抽出時に無視するパスの汎用セグメント（言語・種別プレフィックス等）。

@@ -1,9 +1,9 @@
-"""既存スクレイパー流用型の Discovery adapter（Wadiz / Zeczec / Ulule / Indiegogo）。
+"""既存スクレイパー流用型の Discovery adapter（Wadiz / Zeczec / Indiegogo）。
 
 新しいスクレイパーをゼロから作らず、projects 向け収集で実績のある既存スクレイパー
 （``app.scrapers.registry.get_scraper``）をそのまま実行し、返り値 ``ProjectCreate`` を
 発掘用の共通型 ``DiscoveryCandidate`` へ変換する。これにより取得ロジック（Wadiz の
-公開 JSON API・Zeczec の /categories HTML・Ulule の公式 API・Indiegogo の SSR HTML）を
+公開 JSON API・Zeczec の /categories HTML・Indiegogo の SSR HTML）を
 一切重複実装しない。
 
 方針：
@@ -185,12 +185,6 @@ class ZeczecAdapter(ScraperBackedAdapter):
     platform = DiscoverySourcePlatform.zeczec.value
     site = SourceSite.zeczec
     default_country = "Taiwan"
-
-
-class UluleAdapter(ScraperBackedAdapter):
-    platform = DiscoverySourcePlatform.ulule.value
-    site = SourceSite.ulule
-    default_country = None  # 案件により異なるため推測しない（メモから取得）
 
 
 class IndiegogoScraperAdapter(ScraperBackedAdapter):

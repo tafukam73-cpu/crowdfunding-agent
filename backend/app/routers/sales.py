@@ -351,7 +351,6 @@ def sales_execution_tasks(
 def sales_ranking(
     limit: int = Query(20, ge=1, le=50),
     site: str | None = Query(None),
-    candidates_only: bool = Query(True),
     unsold_only: bool = Query(False),
     contact_only: bool = Query(False),
     not_started_only: bool = Query(False),
@@ -360,7 +359,6 @@ def sales_ranking(
         description="営業状況フィルター: not_started(未営業のみ・既定) / all(すべて表示) "
         "/ awaiting_reply(返事待ち) / followup(フォローアップ対象) / negotiating(商談中)",
     ),
-    ulule_only: bool = Query(False),
     sort: str = Query("score"),
     db: Session = Depends(get_db),
 ) -> RankingListOut:
@@ -373,12 +371,10 @@ def sales_ranking(
         db,
         limit=limit,
         site=site,
-        candidates_only=candidates_only,
         unsold_only=unsold_only,
         contact_only=contact_only,
         not_started_only=not_started_only,
         status_filter=status_filter,
-        ulule_only=ulule_only,
         sort=sort,
     )
     return RankingListOut(items=items)

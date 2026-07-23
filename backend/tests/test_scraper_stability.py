@@ -268,7 +268,7 @@ def test_wadiz_zeczec_monitored() -> None:
     # 監視対象・表示名に Wadiz / Zeczec が含まれる（既存サイトも維持）
     check("MONITORED_SITES に wadiz", SourceSite.wadiz in scrape_monitor.MONITORED_SITES)
     check("MONITORED_SITES に zeczec", SourceSite.zeczec in scrape_monitor.MONITORED_SITES)
-    for s in (SourceSite.kickstarter, SourceSite.indiegogo, SourceSite.ulule,
+    for s in (SourceSite.kickstarter, SourceSite.indiegogo,
               SourceSite.makuake, SourceSite.greenfunding):
         check(f"MONITORED_SITES に既存 {s.value} 維持", s in scrape_monitor.MONITORED_SITES)
     check("SITE_LABELS に wadiz", scrape_monitor.SITE_LABELS.get("wadiz") == "Wadiz")
@@ -290,7 +290,7 @@ def test_wadiz_zeczec_monitored() -> None:
     check("report に wadiz が含まれる", SourceSite.wadiz in site_map)
     check("report に zeczec が含まれる", SourceSite.zeczec in site_map)
     # 既存サイトも壊れずレポートに残る
-    for s in (SourceSite.kickstarter, SourceSite.indiegogo, SourceSite.ulule,
+    for s in (SourceSite.kickstarter, SourceSite.indiegogo,
               SourceSite.makuake, SourceSite.greenfunding):
         check(f"report に既存 {s.value} 維持", s in site_map)
 
