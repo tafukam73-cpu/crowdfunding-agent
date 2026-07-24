@@ -31,6 +31,9 @@ class ContactIntelligenceJobOut(BaseModel):
     heartbeat_at: datetime | None = None
     cancel_requested: bool = False
 
+    # 適性ゲート不合格のまま管理者が手動実行したときの理由（通常実行は None）。
+    gate_override_reason: str | None = None
+
     # キャッシュ再利用で返したかどうか（API が付与）。
     from_cache: bool = False
 

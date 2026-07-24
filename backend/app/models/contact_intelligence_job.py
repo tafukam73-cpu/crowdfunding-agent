@@ -106,6 +106,9 @@ class ContactIntelligenceJob(Base):
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=func.false()
     )
+    # 日本クラファン適性ゲートを不合格のまま管理者が手動実行したときの理由。
+    # None なら通常実行（ゲート合格）。監査のため必ず理由とともに残す。
+    gate_override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

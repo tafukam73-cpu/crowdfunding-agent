@@ -36,6 +36,7 @@ from app.models.contact_discovery import ContactDiscovery
 from app.models.email_draft import EmailDraft
 from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
 from app.services import (
+    campaign_url as campaign_url_mod,
     contact_discovery_service,
     company_research_service,
     executive_summary_service as ess,
@@ -282,6 +283,7 @@ def build_card(
         "project_id": project.id,
         "title": project.title,
         "source_site": project.source_site,
+        **campaign_url_mod.url_state(project),
         "decision": decision["decision"],
         "decision_label": decision["decision_label"],
         "next_action": decision["next_action"],

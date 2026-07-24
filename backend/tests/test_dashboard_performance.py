@@ -69,8 +69,9 @@ def _count(conn, cursor, statement, params, context, executemany):
 
 def _seed(db, n=60):
     for i in range(n):
-        db.add(Project(title=f"P{i}", source_site="kickstarter",
-                       source_url=f"https://x/{i}", maker_name=f"maker{i}",
+        db.add(Project(title=f"P{i} compact design goods", source_site="kickstarter",
+                       source_url=f"https://www.kickstarter.com/projects/p/{i}",
+                       maker_name=f"maker{i}",
                        category="design goods", backers_count=100,
                        latest_score=50 + (i % 40)))
     db.commit()
@@ -103,8 +104,9 @@ def test_dashboard_no_n_plus_one():
     q60 = _query_count["n"]
     # 追加で 60 件足す
     for i in range(60, 120):
-        db.add(Project(title=f"Q{i}", source_site="indiegogo",
-                       source_url=f"https://y/{i}", maker_name=f"m{i}",
+        db.add(Project(title=f"Q{i} compact kitchen tool", source_site="indiegogo",
+                       source_url=f"https://www.indiegogo.com/projects/q-{i}",
+                       maker_name=f"m{i}",
                        category="kitchen", latest_score=40))
     db.commit()
     _query_count["n"] = 0

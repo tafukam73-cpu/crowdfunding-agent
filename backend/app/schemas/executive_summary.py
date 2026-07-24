@@ -31,5 +31,10 @@ class ExecutiveSummaryOut(BaseModel):
     contact_person_title: str | None = None
     contact_person_department: str | None = None
     contact_person_priority: int | None = None
+    # 海外クラファンの商品ページ / メーカー公式サイト（別物として両方返す）
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    official_site_url: str | None = None
     reasons: list[str]
     cautions: list[str]

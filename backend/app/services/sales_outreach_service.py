@@ -28,6 +28,7 @@ from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
 from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
 from app.models.sales_assessment import SalesAssessment
 from app.models.sales_outreach import OutreachStatus, SalesOutreach
+from app.services import campaign_url as campaign_url_mod
 
 logger = logging.getLogger("sales_outreach")
 
@@ -911,6 +912,13 @@ def _execution_item(db: Session, r: SalesOutreach, project: Project | None, now:
         "project_id": r.project_id,
         "title": project.title if project else f"#{r.project_id}",
         "source_site": project.source_site if project else None,
+        **(
+            campaign_url_mod.url_state(project)
+            if project is not None
+            else {"campaign_url": None, "campaign_url_missing": True,
+                  "campaign_url_missing_reason": "no_source_url",
+                  "official_site_url": None}
+        ),
         "outreach_status": r.outreach_status,
         "recipient": r.recipient_email,
         "sent_at": _iso(r.sent_at),

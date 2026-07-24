@@ -435,4 +435,8 @@ def build_summary(db: Session, project: Project) -> dict:
     sig = _gather_signals(db, project)
     result = synthesize(sig)
     result["project_id"] = project.id
+    # 商品ページ URL / 公式サイト URL（別物として両方返す）
+    from app.services import campaign_url as campaign_url_mod
+
+    result.update(campaign_url_mod.url_state(project))
     return result

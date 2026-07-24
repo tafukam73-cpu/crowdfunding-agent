@@ -1,5 +1,6 @@
 "use client";
 
+import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -219,9 +220,12 @@ function TaskCard({
         >
           {task.title}
         </Link>
-        <span className="shrink-0 text-[10px] text-slate-400">
-          {SALES_STATUS_LABELS[task.sales_status]}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <CampaignLink source={task} />
+          <span className="text-[10px] text-slate-400">
+            {SALES_STATUS_LABELS[task.sales_status]}
+          </span>
+        </div>
       </div>
 
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">

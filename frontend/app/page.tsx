@@ -1,5 +1,6 @@
 "use client";
 
+import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -344,7 +345,10 @@ export default function Home() {
                       >
                         {p.title}
                       </Link>
-                      <div className="text-xs text-slate-400">{p.category ?? "—"}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <CampaignLink source={p} />
+                        <span className="text-xs text-slate-400">{p.category ?? "—"}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <SourceBadge site={p.source_site} />

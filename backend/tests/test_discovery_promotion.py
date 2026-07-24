@@ -339,6 +339,8 @@ def test_api_endpoint():
             "source_url": "https://www.kickstarter.com/projects/api/promote-widget",
             "product_name": "API Promote Widget",
             "creator_name": "API Maker",
+            "category": "kitchen",
+            "description": "A compact and portable kitchen widget with a minimal design.",
             "funding_amount": 3000, "funding_goal": 1000,
         })
         check("商品作成 200", r.status_code == 200)

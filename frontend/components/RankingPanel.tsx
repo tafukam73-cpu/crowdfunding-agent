@@ -1,5 +1,6 @@
 "use client";
 
+import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -62,6 +63,7 @@ function RankCard({ item }: { item: RankingItem }) {
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${target.cls}`}>
           {target.label}
         </span>
+        <CampaignLink source={item} />
       </div>
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

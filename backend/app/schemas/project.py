@@ -73,6 +73,18 @@ class ProjectOut(ProjectBase):
     # 詳細補完の根拠（creator URL / ブランド名 / 商品説明 / 公式サイト候補（確度）/
     # SNS / 取得元 URL / 取得不能理由 など）。未補完なら None。
     enrichment: dict | None = None
+    # 海外クラファンの商品ページ URL（source_url のうち source_site と整合するもの）。
+    # 取得できない場合は None ＋ campaign_url_missing=true（公式サイトで代用しない）。
+    campaign_url: str | None = None
+    campaign_url_missing: bool = True
+    campaign_url_missing_reason: str | None = None
+    # メーカー/商品の公式サイト URL（campaign_url とは別物）
+    official_site_url: str | None = None
+    # 日本クラファン適性ゲート（メール探索の事前判定）の結果
+    eligible_for_contact_search: bool | None = None
+    contact_search_gate_reason: str | None = None
+    japan_crowdfunding_score: int | None = None
+    gate_checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

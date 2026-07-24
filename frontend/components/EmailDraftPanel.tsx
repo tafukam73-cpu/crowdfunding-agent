@@ -1,5 +1,6 @@
 "use client";
 
+import ProductContextCard from "@/components/ProductContextCard";
 import { useEffect, useState } from "react";
 
 import { gmailToKey } from "@/components/ContactDiscoveryPanel";
@@ -423,6 +424,10 @@ export default function EmailDraftPanel({
 
   return (
     <div className="mt-8">
+      {/* 何の商品へ営業するのか（商品ページ・日本語概要・適性）を作成画面でも確認できる */}
+      <div className="mb-3">
+        <ProductContextCard projectId={projectId} reloadKey={researchVersion} />
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-slate-700">営業メール下書き</h2>

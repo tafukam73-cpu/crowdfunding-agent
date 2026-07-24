@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from app.models.company_research import CompanyResearch
 from app.models.contact_discovery import ContactDiscovery
 from app.models.project import Project
+from app.services import campaign_url as campaign_url_mod
 from app.services import contact_discovery_service as cds
 from app.services.email_validation import (
     email_confidence,
@@ -340,7 +341,9 @@ def discover_v2(
 
     company_name = (project.maker_name or "").strip()
     product_name = (project.title or "").strip()
-    campaign_url = (project.source_url or project.maker_url or "").strip()
+    # 商品ページ URL は source_site と整合するものだけを使う。
+    # 公式サイト（maker_url）で代用しない（別物として扱う）。
+    campaign_url = campaign_url_mod.campaign_url_of(project) or ""
     source_site_domain = cds.source_site_email_domain(
         getattr(project, "source_site", None)
     )
