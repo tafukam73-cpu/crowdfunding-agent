@@ -252,32 +252,15 @@ function RankingCard({
 
       {/* 総合スコア（Discovery / Japan Opportunity / Confidence） */}
       <div className="mt-3 flex flex-wrap gap-1.5">
-        <ScoreChip label="Discovery総合" value={product.overall_discovery_score} />
-        <ScoreChip label="Japan Opportunity" value={oppScore} />
-        <ScoreChip label="Confidence" value={analysis?.confidence_score} />
       </div>
 
-      {/* Japan Opportunity 詳細スコア or 未分析 */}
-      {analysis ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <ScoreChip label="日本市場適合" value={analysis.japan_market_fit_score} />
-          <ScoreChip label="日本未進出" value={analysis.japan_entry_gap_score} />
-          <ScoreChip label="法規制安全性" value={analysis.regulatory_safety_score} />
-          <ScoreChip label="競合ギャップ" value={analysis.competition_gap_score} />
-          <ScoreChip label="営業成功可能性" value={analysis.sales_success_score} />
-        </div>
-      ) : (
-        <div className="mt-2">
-          <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-            Japan Opportunity 未分析
-          </span>
-        </div>
-      )}
-
-      {/* 推薦理由・戦略・次アクション（理由文は最大3行で折り返し） */}
+      {/* 予測スコア（営業成功可能性・利益率・法規制安全性 等）は表示しない。
+          AI が書いた推薦理由は「AI要約」と明示する。 */}
       {analysis?.opportunity_reasoning && (
         <p className="mt-2 line-clamp-3 text-xs text-slate-600">
-          <span className="font-medium text-slate-700">推薦理由:</span>{" "}
+          <span className="mr-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+            AI要約
+          </span>
           {analysis.opportunity_reasoning}
         </p>
       )}

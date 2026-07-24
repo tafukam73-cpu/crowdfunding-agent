@@ -286,7 +286,11 @@ def test_api_payloads_include_campaign_url():
     check("商品コンテキストに campaign_url", ctx["campaign_url"] == url)
     check("商品コンテキストに日本語概要", bool(ctx["summary_ja"]))
     check("商品コンテキストに特徴3点まで", 1 <= len(ctx["key_features"]) <= 3)
-    check("商品コンテキストに適性スコア", "japan_crowdfunding_score" in ctx)
+    # 内部スコアは画面へ出さない（ゲート内部でのみ使う）。代わりに具体的な理由を返す。
+    check("商品コンテキストに内部スコアを含めない",
+          "japan_crowdfunding_score" not in ctx)
+    check("商品コンテキストにメール探索の可否がある",
+          "eligible_for_contact_search" in ctx)
     db.close()
 
 

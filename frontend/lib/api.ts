@@ -88,10 +88,8 @@ export type Project = {
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
   official_site_url: string | null;
-  // 日本クラファン適性ゲート（メール探索の事前判定）
+  // 日本クラファン適性ゲート（メール探索の事前判定）。内部スコアは返さない。
   eligible_for_contact_search: boolean | null;
-  contact_search_gate_reason: string | null;
-  japan_crowdfunding_score: number | null;
   gate_checked_at: string | null;
   contact_info: string | null;
   status: ProjectStatus;
@@ -1896,17 +1894,53 @@ export type ContactIntelligenceJob = {
   gate_override_reason: string | null;
 };
 
+
+// ===== 商品ファクトシート（確認可能な事実のみ） =====
+// 予測値・可能性・適性スコアは含まない。取得できない項目は value=null / status="未取得"。
+export type FactItem = {
+  label: string;
+  value: string | string[] | null;
+  status: string;               // 取得済み / 未取得
+  source_kind: string | null;   // クラファン商品ページ / メーカー公式サイト / 法人登記 …
+  source_url: string | null;
+  checked_at: string | null;    // 最終確認日時
+  ai_generated: boolean;        // true なら「AI要約」と明示して表示する
+  note: string | null;
+};
+
+export type RegulatoryCheck = {
+  item: string;                 // PSE / 技適 / 食品衛生法 / 薬機法
+  message: string;              // 「確認が必要」という表現（該当を断定しない）
+  evidence_terms: string[];     // そう判断した商品ページ上の根拠語
+  source_kind: string;
+  source_url: string | null;
+};
+
+export type ProductFacts = {
+  project_id: number;
+  product: { items: FactItem[]; image_url: string | null; campaign_url: string | null; official_site_url: string | null };
+  funding: { items: FactItem[] };
+  maker: { items: FactItem[] };
+  japan_market: { checked: boolean; checked_at: string | null; items: FactItem[] };
+  regulatory: { items: RegulatoryCheck[]; note: string };
+  contact_search: { eligible: boolean; reasons: string[] };
+  generated_at: string;
+};
+
+export async function fetchProductFacts(projectId: number): Promise<ProductFacts> {
+  const res = await apiFetch(`/projects/${projectId}/facts`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 // ===== 日本クラファン適性ゲート（メール探索の事前判定） =====
 export type ContactSearchGate = {
   eligible_for_contact_search: boolean;
   contact_search_gate_decision: "eligible" | "needs_review" | "not_eligible";
-  contact_search_gate_reason: string;
-  japan_crowdfunding_score: number | null;
-  japan_crowdfunding_threshold: number;
-  gate_checked_at: string | null;
-  reasons: string[];
+  // 探索しなかった具体的理由（スコアは含まない）。
+  user_reasons: string[];
   blockers: string[];
-  rationale: string;
+  gate_checked_at: string | null;
   campaign_url: string | null;
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
@@ -1925,11 +1959,8 @@ export type ProductContext = {
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
   official_site_url: string | null;
-  japan_crowdfunding_score: number | null;
   eligible_for_contact_search: boolean;
-  contact_search_gate_reason: string;
-  gate_reasons: string[];
-  contact_search_rationale: string;
+  contact_search_reasons: string[];
 };
 
 export async function fetchContactSearchGate(
@@ -1944,7 +1975,7 @@ export async function fetchContactSearchGate(
 export class ContactSearchGateError extends Error {
   gate: ContactSearchGate;
   constructor(gate: ContactSearchGate) {
-    super(gate.contact_search_gate_reason || "メール探索を開始できません");
+    super(gate.user_reasons?.join(" / ") || "メール探索を開始できません");
     this.name = "ContactSearchGateError";
     this.gate = gate;
   }
@@ -2229,6 +2260,19 @@ export const RANKING_STATUS_FILTER_LABELS: Record<RankingStatusFilter, string> =
   negotiating: "商談中",
 };
 
+// カード・一覧に出す確認可能な事実（予測値・スコアは含まない）。
+export type CompactFacts = {
+  category: string | null;
+  image_url: string | null;
+  campaign_state: string | null;   // 募集中 / 終了
+  days_remaining: number | null;
+  funding_rate: number | null;     // 支援率（%）
+  backers_count: number | null;
+  raised_amount: number | null;
+  currency: string | null;
+};
+
+
 export type RankingItem = {
   project_id: number;
   rank: number;
@@ -2241,6 +2285,7 @@ export type RankingItem = {
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
   official_site_url: string | null;
+  facts: CompactFacts | null;
   score: number;
   stars: number;
   sales_target: SalesTarget;
@@ -2278,6 +2323,7 @@ export type SalesTask = {
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
   official_site_url: string | null;
+  facts: CompactFacts | null;
   sales_status: SalesStatus;
   latest_score: number | null;
   priority_score: number;
@@ -2371,6 +2417,7 @@ export type CopilotCard = {
   campaign_url_missing: boolean;
   campaign_url_missing_reason: string | null;
   official_site_url: string | null;
+  facts: CompactFacts | null;
   decision: CopilotDecision;
   decision_label: string;
   next_action: string;
@@ -2507,9 +2554,10 @@ export type JapanSalesCheck = {
 
 export const CHANNEL_STATUS_LABELS: Record<ChannelStatus, string> = {
   found: "販売・掲載あり",
-  limited: "一部のみ",
-  not_found: "未確認",
-  unknown: "不明",
+  limited: "一部のみ確認",
+  // 「日本未発売」と断定しない。検索で見つからなかった事実だけを述べる。
+  not_found: "確認した範囲では見つからず",
+  unknown: "未確認",
 };
 
 // 最新の日本販売状況チェックを取得（未実行なら 204 → null）。

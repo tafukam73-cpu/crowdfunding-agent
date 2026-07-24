@@ -80,10 +80,9 @@ class ProjectOut(ProjectBase):
     campaign_url_missing_reason: str | None = None
     # メーカー/商品の公式サイト URL（campaign_url とは別物）
     official_site_url: str | None = None
-    # 日本クラファン適性ゲート（メール探索の事前判定）の結果
+    # 日本クラファン適性ゲート（メール探索の事前判定）の結果。
+    # 内部スコア（japan_crowdfunding_score）と内部向け判定理由は画面に出さない。
     eligible_for_contact_search: bool | None = None
-    contact_search_gate_reason: str | None = None
-    japan_crowdfunding_score: int | None = None
     gate_checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

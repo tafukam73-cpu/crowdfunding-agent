@@ -231,9 +231,8 @@ def build(db: Session, project: Project, *, gate: dict | None = None) -> dict:
         "key_features": features,
         "source_site": project.source_site,
         **urls,
-        "japan_crowdfunding_score": gate.get("japan_crowdfunding_score"),
+        # 内部スコア（japan_crowdfunding_score）は画面へ出さない。ゲートの
+        # 具体的な理由（確認可能な事実・ルールに基づく文言）だけを返す。
         "eligible_for_contact_search": gate.get("eligible_for_contact_search"),
-        "contact_search_gate_reason": gate.get("contact_search_gate_reason"),
-        "gate_reasons": gate.get("reasons", []),
-        "contact_search_rationale": gate.get("rationale"),
+        "contact_search_reasons": gate.get("user_reasons") or [],
     }

@@ -9,7 +9,6 @@ import CrmRegisterButton from "@/components/CrmRegisterButton";
 import ExecutionTasksPanel from "@/components/ExecutionTasksPanel";
 import Header from "@/components/Header";
 import RankingPanel from "@/components/RankingPanel";
-import RecBadge from "@/components/RecBadge";
 import SalesCopilotPanel from "@/components/SalesCopilotPanel";
 import TodayTasksPanel from "@/components/TodayTasksPanel";
 import ScheduleStatusPanel from "@/components/ScheduleStatusPanel";
@@ -32,6 +31,7 @@ import {
   SITE_LABELS,
   STATUS_LABELS,
   type ListParams,
+  type Project,
   type ProjectList,
   type ProjectStatus,
   type Recommendation,
@@ -39,6 +39,17 @@ import {
 } from "@/lib/api";
 
 const PAGE_SIZE = 10;
+
+/** 募集状況（事実）。終了日が無ければ「未取得」。予測は行わない。 */
+function campaignState(p: Project): string {
+  if (!p.end_date) return "未取得";
+  const end = new Date(p.end_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (end < today) return "終了";
+  const days = Math.ceil((end.getTime() - today.getTime()) / 86400000);
+  return `募集中（残り${days}日）`;
+}
 
 export default function Home() {
   const [data, setData] = useState<ProjectList | null>(null);
@@ -190,24 +201,6 @@ export default function Home() {
               で確認できます。
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {unevaluated != null && unevaluated > 0 && (
-              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                未評価 {unevaluated} 件
-              </span>
-            )}
-            <button
-              onClick={onEvaluateAll}
-              disabled={evaluating || unevaluated === 0}
-              className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {evaluating
-                ? "評価中…"
-                : unevaluated && unevaluated > 0
-                ? `未評価 ${unevaluated} 件をAI評価`
-                : "未評価をAI評価"}
-            </button>
-          </div>
         </div>
 
         {/* フィルタ */}
@@ -275,7 +268,6 @@ export default function Home() {
               onChange={(e) => setSort(e.target.value)}
             >
               <option value="created_at">登録日</option>
-              <option value="latest_score">AI総合スコア</option>
               <option value="raised_amount">調達額</option>
               <option value="backers_count">支援者数</option>
               <option value="end_date">終了日</option>
@@ -322,9 +314,8 @@ export default function Home() {
               <tr>
                 <th className="px-4 py-2">案件名</th>
                 <th className="px-4 py-2">サイト</th>
-                <th className="px-4 py-2">スコア</th>
-                <th className="px-4 py-2">推奨度</th>
-                <th className="px-4 py-2">日本判定</th>
+                <th className="px-4 py-2">募集状況</th>
+                <th className="px-4 py-2">日本販売確認</th>
                 <th className="px-4 py-2">調達額</th>
                 <th className="px-4 py-2">達成率</th>
                 <th className="px-4 py-2">支援者</th>
@@ -353,22 +344,8 @@ export default function Home() {
                     <td className="px-4 py-3">
                       <SourceBadge site={p.source_site} />
                     </td>
-                    <td className="px-4 py-3">
-                      {p.latest_score != null ? (
-                        <span className="font-semibold text-slate-800">
-                          {p.latest_score}
-                        </span>
-                      ) : (
-                        <span
-                          className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
-                          title="AI未評価。「未評価をAI評価」で評価できます"
-                        >
-                          未評価
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <RecBadge recommendation={p.latest_recommendation} />
+                    <td className="px-4 py-3 text-xs text-slate-600">
+                      {campaignState(p)}
                     </td>
                     <td className="px-4 py-3">
                       {p.latest_availability ? (
@@ -418,11 +395,7 @@ export default function Home() {
         {/* ページング */}
         <div className="mt-4 flex items-center justify-between text-sm text-slate-500">
           <span>
-            {data
-              ? `全 ${data.total} 件${
-                  unevaluated != null ? `（うち未評価 ${unevaluated} 件）` : ""
-                }`
-              : ""}
+            {data ? `全 ${data.total} 件` : ""}
             {loading && "（読み込み中…）"}
           </span>
           <div className="flex items-center gap-2">

@@ -33,6 +33,9 @@ CHANNELS: list[tuple[str, str]] = [
     ("subsidiary", "日本法人"),
     ("makuake", "Makuake掲載歴"),
     ("greenfunding", "GREEN FUNDING掲載歴"),
+    ("campfire", "CAMPFIRE掲載歴"),
+    ("jp_official_site", "日本語公式サイト"),
+    ("jp_official_shop", "日本の公式販売ページ"),
 ]
 CHANNEL_KEYS = [k for k, _ in CHANNELS]
 CHANNEL_LABELS = dict(CHANNELS)
@@ -112,6 +115,15 @@ def search_url(channel: str, *, product: str | None, maker: str | None) -> str:
             "https://www.google.com/search?q="
             f"{quote_plus('site:greenfunding.jp ' + ec_q)}"
         )
+    if channel == "campfire":
+        return (
+            "https://www.google.com/search?q="
+            f"{quote_plus('site:camp-fire.jp ' + ec_q)}"
+        )
+    if channel == "jp_official_site":
+        return f"https://www.google.com/search?q={quote_plus(biz_q + ' 公式 日本語')}"
+    if channel == "jp_official_shop":
+        return f"https://www.google.com/search?q={quote_plus(biz_q + ' 公式 通販 購入')}"
     # 未知のチャネルは汎用 Google 検索
     return f"https://www.google.com/search?q={quote_plus(ec_q)}"
 

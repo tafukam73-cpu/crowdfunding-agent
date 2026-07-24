@@ -3514,7 +3514,7 @@ async function startJobWithGate(
     const reason = window.prompt(
       [
         "日本クラファン適性ゲートによりメール探索を開始できません。",
-        `理由: ${e.gate.contact_search_gate_reason}`,
+        `理由: ${e.gate.user_reasons.join(" / ")}`,
         "",
         "それでも実行する場合は理由を入力してください（記録されます）。",
       ].join("\n"),
@@ -3978,13 +3978,14 @@ export default function ContactDiscoveryPanel({
 
       {completed && data && (
         <div className="mt-3 space-y-4 rounded-lg border border-slate-200 bg-white p-5 text-sm">
-          {/* スコア & 推奨 */}
+          {/* 取得できた連絡手段（スコアではなく事実を出す） */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
               自動抽出
             </span>
-            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
-              営業可能性スコア: {data.contactability_score ?? 0} / 100
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
+              メール {data.discovered_emails?.length ?? 0}件 ・ フォーム{" "}
+              {data.discovered_forms?.length ?? 0}件
             </span>
             {data.recommended_channel && (
               <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">

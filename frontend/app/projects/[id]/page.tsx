@@ -1,5 +1,6 @@
 "use client";
 
+import ProductFactsPanel from "@/components/ProductFactsPanel";
 import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -233,25 +234,8 @@ export default function ProjectDetail() {
             <OutreachPanel projectId={id} />
           </Collapsible>
 
-          <Collapsible title="📊 AI評価" hint={evaluation ? `${evaluation.total_score}点` : "未評価"}>
-            <div className="flex items-center justify-end">
-              <button
-                onClick={onEvaluate}
-                disabled={evaluating}
-                className="rounded bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-              >
-                {evaluating ? "評価中…" : evaluation ? "再評価" : "AI評価する"}
-              </button>
-            </div>
-            <div className="mt-3">
-              {evaluation ? (
-                <EvaluationCard ev={evaluation} />
-              ) : (
-                <p className="text-sm text-slate-400">
-                  まだ評価されていません。「AI評価する」を押すと評価が生成されます。
-                </p>
-              )}
-            </div>
+          <Collapsible title="📄 商品ファクトシート（確認可能な事実）" hint="取得元・最終確認日時つき">
+            <ProductFactsPanel projectId={id} />
           </Collapsible>
 
           <Collapsible title="🇯🇵 日本販売状況（詳細）">

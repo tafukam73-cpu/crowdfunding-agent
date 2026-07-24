@@ -47,6 +47,20 @@ class TodayListOut(BaseModel):
     items: list[TodayProject]
 
 
+
+class CompactFacts(BaseModel):
+    """カード・一覧に出す確認可能な事実（予測値・スコアは含めない）。"""
+
+    category: str | None = None
+    image_url: str | None = None
+    campaign_state: str | None = None      # 募集中 / 終了（終了日不明なら None）
+    days_remaining: int | None = None
+    funding_rate: int | None = None        # 支援率（%）
+    backers_count: int | None = None
+    raised_amount: float | None = None
+    currency: str | None = None
+
+
 class RankingItem(BaseModel):
     """AI 営業優先ランキングの 1 件（Executive Summary を統合）。"""
 
@@ -61,6 +75,7 @@ class RankingItem(BaseModel):
     campaign_url_missing: bool = True
     campaign_url_missing_reason: str | None = None
     official_site_url: str | None = None
+    facts: CompactFacts | None = None
     score: int
     stars: int
     sales_target: str            # "yes" / "no" / "要確認"
@@ -92,6 +107,7 @@ class TaskItem(BaseModel):
     campaign_url_missing: bool = True
     campaign_url_missing_reason: str | None = None
     official_site_url: str | None = None
+    facts: CompactFacts | None = None
     sales_status: SalesStatus
     latest_score: int | None = None
     # 営業優先度（0〜100）と星評価。
@@ -180,6 +196,7 @@ class CopilotCard(BaseModel):
     campaign_url_missing: bool = True
     campaign_url_missing_reason: str | None = None
     official_site_url: str | None = None
+    facts: CompactFacts | None = None
     decision: str          # sell_now / needs_contact / needs_followup / ...
     decision_label: str    # 日本語ラベル
     next_action: str       # 次の一手（短い命令形）

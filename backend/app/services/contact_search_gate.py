@@ -15,6 +15,10 @@
   5. 日本での訴求点（問題解決 / 利便性 / デザイン性 / 新規性 のいずれか）を説明できる
 
 適性が低い案件は削除せず ``not_eligible`` / ``needs_review`` に分類する。
+
+**表示方針**: 内部スコア（japan_crowdfunding_score）はゲート判定と並び順のために
+保持するが、ユーザー向け画面には出さない。画面には ``user_reasons``（探索しなかった
+具体的理由。確認可能な事実・ルールに基づく文言）だけを表示する。
 """
 from __future__ import annotations
 
@@ -207,6 +211,9 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
     else:
         blockers.append("日本での訴求点（問題解決/利便性/デザイン性/新規性）を説明できない")
 
+    # --- ユーザーに見せる理由（スコアを出さず、確認可能な事実・ルールで説明する） ---
+    user_reasons: list[str] = list(blockers)
+
     # --- 判定 ---
     if blockers:
         # 商品ページ URL・商品内容の欠落は「要確認」ではなく明確に対象外にする
@@ -217,6 +224,7 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
     elif score is None:
         decision = GATE_NEEDS_REVIEW
         gate_reason = "日本クラファン適性スコアを算出できない（要確認）"
+        user_reasons.append("商品情報が不足しており判定できないため要確認")
     elif score >= JAPAN_CF_SCORE_THRESHOLD:
         decision = GATE_ELIGIBLE
         gate_reason = f"日本クラファン適性 {score} が基準 {JAPAN_CF_SCORE_THRESHOLD} 以上"
@@ -225,10 +233,16 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
         gate_reason = (
             f"日本クラファン適性 {score} が基準 {JAPAN_CF_SCORE_THRESHOLD} 未満（要確認）"
         )
+        user_reasons.append(
+            "日本のクラウドファンディング向けの商品性を確認できないため要確認"
+        )
     else:
         decision = GATE_NOT_ELIGIBLE
         gate_reason = (
             f"日本クラファン適性 {score} が下限 {JAPAN_CF_SCORE_REVIEW_FLOOR} 未満"
+        )
+        user_reasons.append(
+            "日本のクラウドファンディング向けの商品性を確認できない"
         )
 
     eligible = decision == GATE_ELIGIBLE
@@ -236,7 +250,10 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
     result = {
         "eligible_for_contact_search": eligible,
         "contact_search_gate_decision": decision,
+        # gate_reason は内部ログ・監査用（スコアを含む）。画面には user_reasons を使う。
         "contact_search_gate_reason": gate_reason,
+        # ユーザーに見せる「探索しなかった具体的理由」。スコアは含めない。
+        "user_reasons": user_reasons,
         "japan_crowdfunding_score": score,
         "japan_crowdfunding_threshold": JAPAN_CF_SCORE_THRESHOLD,
         "gate_checked_at": checked_at,
