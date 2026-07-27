@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.project import ProjectOut
 from app.schemas.sales import (
+    BulkSalesStatusResult,
+    BulkSalesStatusUpdate,
     CopilotCard,
     CopilotDashboardOut,
     ExecutionTasksOut,
@@ -28,12 +30,14 @@ from app.schemas.sales import (
     ReplyIn,
     ReplyPreviewOut,
     SalesDashboardOut,
+    SalesStatusEventListOut,
     SalesStatusUpdate,
     TodayListOut,
     TodayPriorityOut,
     TodayTasksOut,
     WorkflowOut,
 )
+from app.services.project_service import InvalidStatusTransition
 from app.services import (
     project_service,
     sales_assessment_service,
@@ -61,7 +65,42 @@ def update_sales_status(
     project = project_service.get_project(db, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
-    return project_service.update_sales_status(db, project, payload.sales_status)
+    try:
+        return project_service.update_sales_status(
+            db, project, payload.sales_status, note=payload.note,
+        )
+    except InvalidStatusTransition as exc:
+        # 不正な状態遷移は 409。
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/projects/sales-status", response_model=BulkSalesStatusResult)
+def bulk_update_sales_status(
+    payload: BulkSalesStatusUpdate, db: Session = Depends(get_db)
+) -> BulkSalesStatusResult:
+    """複数案件の営業状況を一括更新する（不正遷移はスキップして件数を返す）。"""
+    updated, skipped = project_service.bulk_update_sales_status(
+        db, payload.ids, payload.sales_status, note=payload.note,
+    )
+    return BulkSalesStatusResult(
+        updated=updated, skipped=len(skipped), skipped_ids=skipped
+    )
+
+
+@router.get(
+    "/projects/{project_id}/status-events", response_model=SalesStatusEventListOut
+)
+def get_status_events(
+    project_id: int,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> SalesStatusEventListOut:
+    """案件の営業状況（sales_status）変更履歴を新しい順に返す。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    events = project_service.list_status_events(db, project_id, limit=limit)
+    return SalesStatusEventListOut(items=events)
 
 
 @router.get("/sales/today", response_model=TodayListOut)

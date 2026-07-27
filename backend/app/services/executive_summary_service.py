@@ -23,7 +23,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.models.japanese_success import JapaneseSuccessProject
-from app.models.project import Project, SalesStatus
+from app.models.project import SALES_STATUS_DONE, Project, SalesStatus
 from app.services import (
     company_research_service,
     contact_discovery_service,
@@ -61,10 +61,9 @@ _ENGAGED_STATUSES = (
     SalesStatus.awaiting_reply.value,
     SalesStatus.replied.value,
     SalesStatus.negotiating.value,
-    SalesStatus.won.value,
-    SalesStatus.rejected.value,
-)
-_CLOSED_STATUSES = (SalesStatus.won.value, SalesStatus.rejected.value)
+) + SALES_STATUS_DONE
+# 新規営業対象外（契約後 or 決着）。旧 {won, rejected} を置き換える。
+_CLOSED_STATUSES = SALES_STATUS_DONE
 _READY_STATUSES = (SalesStatus.not_started.value, SalesStatus.ready.value)
 
 # 日本販売状況のテキスト（ランキングの「日本未販売のみ」フィルタ等で参照）

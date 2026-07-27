@@ -18,7 +18,7 @@ import ScrapeStatsPanel from "@/components/ScrapeStatsPanel";
 import SourceBadge from "@/components/SourceBadge";
 import TodayPriorityPanel from "@/components/TodayPriorityPanel";
 import TodaySalesPanel from "@/components/TodaySalesPanel";
-import StatusBadge from "@/components/StatusBadge";
+import SalesStatusBadge from "@/components/SalesStatusBadge";
 import {
   AVAILABILITY_COLORS,
   AVAILABILITY_LABELS,
@@ -30,15 +30,16 @@ import {
   fundingRate,
   formatDateTime,
   formatMoney,
+  SALES_STATUS_LABELS,
+  SALES_STATUS_ORDER,
   SALES_TARGET_SITES,
   SITE_LABELS,
-  STATUS_LABELS,
   unarchiveProject,
   type ListParams,
   type Project,
   type ProjectList,
-  type ProjectStatus,
   type Recommendation,
+  type SalesStatus,
   type SourceSite,
 } from "@/lib/api";
 
@@ -61,7 +62,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
 
   const [site, setSite] = useState<SourceSite | "">("");
-  const [status, setStatus] = useState<ProjectStatus | "">("");
+  const [salesStatus, setSalesStatus] = useState<SalesStatus | "">("");
   const [q, setQ] = useState("");
   const [recommendation, setRecommendation] = useState<Recommendation | "">("");
   const [sort, setSort] = useState("created_at");
@@ -83,7 +84,7 @@ export default function Home() {
   useEffect(() => {
     const params: ListParams = {
       site,
-      status,
+      sales_status: salesStatus,
       q,
       recommendation,
       archived: showArchived,
@@ -100,12 +101,12 @@ export default function Home() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [site, status, q, recommendation, showArchived, sort, order, page, reloadKey]);
+  }, [site, salesStatus, q, recommendation, showArchived, sort, order, page, reloadKey]);
 
   // 表示条件が変わったら選択をクリア（別ページ/別ビューの選択を持ち越さない）。
   useEffect(() => {
     setSelected(new Set());
-  }, [site, status, q, recommendation, showArchived, page, reloadKey]);
+  }, [site, salesStatus, q, recommendation, showArchived, page, reloadKey]);
 
   function toggleSelected(id: number) {
     setSelected((prev) => {
@@ -345,19 +346,19 @@ export default function Home() {
           </label>
 
           <label className="flex flex-col text-xs text-slate-500">
-            ステータス
+            営業状況
             <select
               className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
-              value={status}
+              value={salesStatus}
               onChange={(e) => {
                 setPage(1);
-                setStatus(e.target.value as ProjectStatus | "");
+                setSalesStatus(e.target.value as SalesStatus | "");
               }}
             >
               <option value="">すべて</option>
-              {Object.entries(STATUS_LABELS).map(([v, label]) => (
+              {SALES_STATUS_ORDER.map((v) => (
                 <option key={v} value={v}>
-                  {label}
+                  {SALES_STATUS_LABELS[v]}
                 </option>
               ))}
             </select>
@@ -452,7 +453,7 @@ export default function Home() {
                 <th className="px-4 py-2">調達額</th>
                 <th className="px-4 py-2">達成率</th>
                 <th className="px-4 py-2">支援者</th>
-                <th className="px-4 py-2">ステータス</th>
+                <th className="px-4 py-2">営業状況</th>
                 <th className="px-4 py-2">取得日時</th>
                 <th className="px-4 py-2">CRM</th>
                 <th className="px-4 py-2">操作</th>
@@ -510,7 +511,7 @@ export default function Home() {
                       {p.backers_count?.toLocaleString() ?? "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={p.status} />
+                      <SalesStatusBadge status={p.sales_status} />
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {formatDateTime(p.updated_at)}

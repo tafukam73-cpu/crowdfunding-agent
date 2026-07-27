@@ -35,9 +35,12 @@ from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery
 from app.models.email_draft import EmailDraft
 from app.models.project import (
+    SALES_STATUS_DONE,
+    SALES_STATUS_SECURED,
     SALES_TARGET_SITES,
     Project,
     SalesStatus,
+    normalize_sales_status,
     not_archived_clause,
 )
 from app.services import (
@@ -51,7 +54,8 @@ from app.services import (
 
 _SALES_TARGET_VALUES = [s.value for s in SALES_TARGET_SITES]
 _READY = (SalesStatus.not_started.value, SalesStatus.ready.value)
-_CLOSED = (SalesStatus.won.value, SalesStatus.rejected.value)
+# 新規営業対象外（契約後 or 決着）。旧 {won, rejected} を置き換える。
+_CLOSED = SALES_STATUS_DONE
 
 # フォローアップ対象になり得る営業状況（メール送信済み・返信待ち）。
 _ENGAGED_WAIT = (SalesStatus.contacted.value, SalesStatus.awaiting_reply.value)
@@ -143,7 +147,8 @@ def classify(sig: dict) -> dict:
     返り値: {decision, decision_label, primary_reason, next_action, actions, urgency}
     `primary_reason` は「なぜそう判断したか」の中心的理由（必ず 1 つ返る＝要件 3）。
     """
-    status = sig.get("sales_status")
+    # 永続値を正規化（won→contract_agreed）してから判断する。
+    status = normalize_sales_status(sig.get("sales_status"))
     score = sig.get("latest_score")
     days = sig.get("days_since_last_outreach")
 
@@ -168,9 +173,14 @@ def classify(sig: dict) -> dict:
 
 def _decide(sig: dict, status, score, days) -> tuple[str, str]:
     """判断カテゴリと中心的理由を返す（最初に一致した規則を採用）。"""
-    # 1. 成約 / 見送りは営業対象から除外
+    # 1. 契約後（契約合意〜販売中）/ 見送り / 終了は新規営業対象から除外
     if status in _CLOSED:
-        label = "成約済み" if status == SalesStatus.won.value else "見送り済み"
+        if status in SALES_STATUS_SECURED:
+            label = "成約済み"
+        elif status == SalesStatus.closed.value:
+            label = "終了"
+        else:
+            label = "見送り済み"
         return "closed", f"{label}のため営業対象外"
 
     # 2. 商談フェーズ（返信あり／商談中）は最優先で対応

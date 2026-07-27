@@ -28,6 +28,7 @@ from app.models.japan_sales_check import JapanSalesCheck, JapanSalesStatus
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
 from app.models.project import Project, ProjectStatus, SalesStatus, SourceSite
+from app.models.project_status_event import ProjectStatusEvent, StatusChangeSource
 from app.models.reply_assistant import ReplyAssistant, ReplyStatus
 from app.models.sales_assessment import SalesAssessment
 from app.models.sales_opportunity import SalesOpportunity, SalesOpportunityStatus
@@ -41,6 +42,8 @@ __all__ = [
     "ProjectStatus",
     "SalesStatus",
     "SourceSite",
+    "ProjectStatusEvent",
+    "StatusChangeSource",
     "ScrapeRun",
     "ScrapeStatus",
     "AiEvaluation",

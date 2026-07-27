@@ -66,20 +66,125 @@ class ProjectStatus(str, enum.Enum):
 
 
 class SalesStatus(str, enum.Enum):
-    """営業ワークフロー上の営業状況。
+    """営業ワークフロー上の営業状況（案件単位パイプラインの単一正本）。
 
-    既存の status（ProjectStatus）とは別軸で、営業ワークフローカードが案内する
-    「次に何をするか」の進捗を表す。
+    既存の status（ProjectStatus）とは別軸で、調査→契約→輸入準備→日本クラファン
+    準備→販売中→終了 までを一貫管理する。既存値は後方互換のため温存し、契約後
+    フェーズ（contract_agreed 以降）を追加している。
+
+    won は非推奨（後方互換のため enum には残すが、新規コードでは contract_agreed を
+    正とする）。永続値の読み取り時は normalize_sales_status() で won→contract_agreed に
+    正規化する。
     """
 
-    not_started = "not_started"        # 未営業
-    ready = "ready"                    # 営業準備完了
-    contacted = "contacted"            # 営業済み
-    awaiting_reply = "awaiting_reply"  # 返信待ち
-    replied = "replied"                # 返信あり
-    negotiating = "negotiating"        # 商談中
-    won = "won"                        # 契約
-    rejected = "rejected"              # 見送り
+    not_started = "not_started"          # 未着手（営業前）
+    ready = "ready"                      # 営業準備完了（連絡先取得済で送信可）
+    contacted = "contacted"              # 初回営業済み（メール送信済み）
+    awaiting_reply = "awaiting_reply"    # 返信待ち（フォロー期間中）
+    replied = "replied"                  # 返信あり（返信登録済み）
+    negotiating = "negotiating"          # 商談中（面談/やり取り）
+    contract_agreed = "contract_agreed"  # 契約合意（独占販売権等合意）
+    import_prep = "import_prep"          # 輸入準備（認証/物流/在庫手配）
+    jp_cf_prep = "jp_cf_prep"            # 日本クラファン準備（Makuake 等）
+    selling = "selling"                  # 販売中（日本販売開始）
+    rejected = "rejected"                # 成約見送り（失注/見送り）
+    closed = "closed"                    # 終了（案件クローズ）
+    won = "won"                          # 【非推奨】旧「契約」。contract_agreed に正規化
+
+
+# won（非推奨）→ contract_agreed への正規化マップ。永続値の読み取り時に適用する。
+_SALES_STATUS_ALIASES: dict[str, str] = {
+    SalesStatus.won.value: SalesStatus.contract_agreed.value,
+}
+
+
+def normalize_sales_status(value: str | None) -> str:
+    """永続化された sales_status を正規化する（won → contract_agreed）。
+
+    新規コードでは contract_agreed を正とする。未知値・None はそのまま返す。
+    """
+    if value is None:
+        return SalesStatus.not_started.value
+    return _SALES_STATUS_ALIASES.get(value, value)
+
+
+# 契約確保（deal secured）以降の「契約後の進行中」フェーズ。
+# 新規営業対象（ranking/today/copilot）からは外すが、dashboard 等の件数には含める。
+SALES_STATUS_SECURED: tuple[str, ...] = (
+    SalesStatus.contract_agreed.value,
+    SalesStatus.import_prep.value,
+    SalesStatus.jp_cf_prep.value,
+    SalesStatus.selling.value,
+)
+
+# 完全に決着した終端状態（見送り・終了）。
+SALES_STATUS_CLOSED: tuple[str, ...] = (
+    SalesStatus.rejected.value,
+    SalesStatus.closed.value,
+)
+
+# 新規営業アクションの対象外（契約後 or 決着）。旧実装の {won, rejected} を置き換える。
+SALES_STATUS_DONE: tuple[str, ...] = SALES_STATUS_SECURED + SALES_STATUS_CLOSED
+
+# 許可する状態遷移（正規化後の値で判定）。各状態から「次に進める」∪「戻せる」の集合。
+# 厳密な状態機械：ここに無い遷移は不正（API/サービスで 409/ValueError）。
+SALES_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    SalesStatus.not_started.value: {
+        SalesStatus.ready.value, SalesStatus.contacted.value, SalesStatus.rejected.value,
+    },
+    SalesStatus.ready.value: {
+        SalesStatus.contacted.value, SalesStatus.rejected.value,
+        SalesStatus.not_started.value,
+    },
+    SalesStatus.contacted.value: {
+        SalesStatus.awaiting_reply.value, SalesStatus.replied.value,
+        SalesStatus.rejected.value, SalesStatus.ready.value,
+    },
+    SalesStatus.awaiting_reply.value: {
+        SalesStatus.replied.value, SalesStatus.rejected.value,
+        SalesStatus.contacted.value,
+    },
+    SalesStatus.replied.value: {
+        SalesStatus.negotiating.value, SalesStatus.rejected.value,
+        SalesStatus.awaiting_reply.value,
+    },
+    SalesStatus.negotiating.value: {
+        SalesStatus.contract_agreed.value, SalesStatus.rejected.value,
+        SalesStatus.replied.value,
+    },
+    SalesStatus.contract_agreed.value: {
+        SalesStatus.import_prep.value, SalesStatus.rejected.value,
+        SalesStatus.negotiating.value,
+    },
+    SalesStatus.import_prep.value: {
+        SalesStatus.jp_cf_prep.value, SalesStatus.selling.value,
+        SalesStatus.contract_agreed.value,
+    },
+    SalesStatus.jp_cf_prep.value: {
+        SalesStatus.selling.value, SalesStatus.import_prep.value,
+    },
+    SalesStatus.selling.value: {
+        SalesStatus.closed.value, SalesStatus.jp_cf_prep.value,
+    },
+    SalesStatus.rejected.value: {
+        SalesStatus.not_started.value,  # 復活
+    },
+    SalesStatus.closed.value: {
+        SalesStatus.selling.value,  # 終了の取り消し
+    },
+}
+
+
+def can_transition_sales_status(from_status: str | None, to_status: str) -> bool:
+    """from → to の sales_status 遷移が許可されているか（正規化後で判定）。
+
+    同一状態への遷移（冪等）は常に許可する。won 等の別名は正規化してから判定する。
+    """
+    src = normalize_sales_status(from_status)
+    dst = normalize_sales_status(to_status)
+    if src == dst:
+        return True
+    return dst in SALES_STATUS_TRANSITIONS.get(src, set())
 
 
 class Project(Base):

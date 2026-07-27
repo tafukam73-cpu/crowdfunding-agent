@@ -1,7 +1,9 @@
 """営業ワークフロー / 今日営業する案件 / ダッシュボードのスキーマ（pydantic v2）。"""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.project import SalesStatus
 
@@ -31,6 +33,42 @@ class WorkflowOut(BaseModel):
 
 class SalesStatusUpdate(BaseModel):
     sales_status: SalesStatus
+    # 任意のメモ（履歴に残る）。
+    note: str | None = Field(None, max_length=500)
+
+
+class BulkSalesStatusUpdate(BaseModel):
+    """複数案件の sales_status を一括更新する。"""
+
+    ids: list[int] = Field(..., min_length=1)
+    sales_status: SalesStatus
+    note: str | None = Field(None, max_length=500)
+
+
+class BulkSalesStatusResult(BaseModel):
+    """一括更新の結果。updated=遷移した件数、skipped=不正遷移で見送った件数。"""
+
+    updated: int
+    skipped: int
+    skipped_ids: list[int] = []
+
+
+class SalesStatusEventOut(BaseModel):
+    """sales_status 変更履歴の 1 件。"""
+
+    id: int
+    project_id: int
+    from_status: str | None = None
+    to_status: str
+    change_source: str
+    note: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SalesStatusEventListOut(BaseModel):
+    items: list[SalesStatusEventOut]
 
 
 class TodayProject(BaseModel):

@@ -262,7 +262,13 @@ def generate_followup(
 
     # 営業状況：フォロー後は「返信待ち」に寄せる（返信あり/商談中/契約/見送りは変えない）
     if set_awaiting_reply and project.sales_status in _FOLLOWUP_SETTABLE_FROM:
-        project_service.update_sales_status(db, project, SalesStatus.awaiting_reply)
+        from app.models.project_status_event import StatusChangeSource
+
+        project_service.update_sales_status(
+            db, project, SalesStatus.awaiting_reply,
+            source=StatusChangeSource.followup.value,
+            enforce_transition=False,
+        )
 
     return {
         "draft": draft,
