@@ -286,6 +286,39 @@ def update_sales_status(
     return project
 
 
+def bulk_update_sales_status(
+    db: Session,
+    project_ids: list[int],
+    sales_status: SalesStatus,
+    *,
+    source: str = StatusChangeSource.manual.value,
+    note: str | None = None,
+) -> tuple[int, list[int]]:
+    """複数案件の sales_status を一括更新する。
+
+    許可されない遷移の案件はスキップし、その id を返す（一括で全体を止めない）。
+    Returns: (updated_count, skipped_ids)
+    """
+    updated = 0
+    skipped: list[int] = []
+    projects = list(
+        db.scalars(select(Project).where(Project.id.in_(project_ids)))
+    )
+    for project in projects:
+        try:
+            before = normalize_sales_status(project.sales_status)
+            update_sales_status(
+                db, project, sales_status, source=source, note=note,
+            )
+            # 同一状態（no-op）はスキップ扱いにしない＝更新カウントに含めない。
+            if normalize_sales_status(project.sales_status) != before:
+                updated += 1
+        except InvalidStatusTransition:
+            db.rollback()
+            skipped.append(project.id)
+    return updated, skipped
+
+
 def sync_sales_status(
     db: Session,
     project: Project,
