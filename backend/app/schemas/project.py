@@ -59,6 +59,35 @@ class ProjectStatusUpdate(BaseModel):
     status: ProjectStatus
 
 
+class ProjectArchiveRequest(BaseModel):
+    """案件を営業対象外にするときの理由（任意）。
+
+    reason は選択式ラベル（商品ではない / 日本市場に不向き など）または自由入力。
+    将来の分析に使えるよう保存する。
+    """
+
+    reason: str | None = Field(None, max_length=500)
+
+
+class ProjectBulkArchiveRequest(BaseModel):
+    """複数案件を一括で営業対象外にする。"""
+
+    ids: list[int] = Field(..., min_length=1)
+    reason: str | None = Field(None, max_length=500)
+
+
+class ProjectBulkArchiveResult(BaseModel):
+    """一括操作の結果（更新できた件数）。"""
+
+    updated: int
+
+
+class ProjectBulkUnarchiveRequest(BaseModel):
+    """複数案件を一括で復元する。"""
+
+    ids: list[int] = Field(..., min_length=1)
+
+
 class ProjectOut(ProjectBase):
     id: int
     status: ProjectStatus
@@ -84,6 +113,10 @@ class ProjectOut(ProjectBase):
     # 内部スコア（japan_crowdfunding_score）と内部向け判定理由は画面に出さない。
     eligible_for_contact_search: bool | None = None
     gate_checked_at: datetime | None = None
+    # 営業対象外（ソフトデリート）。archived_at があれば対象外、is_archived で導出。
+    archived_at: datetime | None = None
+    archive_reason: str | None = None
+    is_archived: bool = False
     created_at: datetime
     updated_at: datetime
 

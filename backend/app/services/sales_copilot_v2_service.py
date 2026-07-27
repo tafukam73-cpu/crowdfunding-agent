@@ -558,13 +558,13 @@ def copilot_v2_dashboard(
 
     from app.models.contact_discovery import ContactDiscovery
     from app.models.japan_sales_check import JapanSalesCheck
-    from app.models.project import SALES_TARGET_SITES
+    from app.models.project import SALES_TARGET_SITES, not_archived_clause
     from app.models.sales_assessment import SalesAssessment
 
     values = [s.value for s in SALES_TARGET_SITES]
     stmt = (
         select(Project)
-        .where(Project.source_site.in_(values))
+        .where(Project.source_site.in_(values), not_archived_clause())
         .order_by(Project.latest_score.desc().nullslast(), Project.updated_at.desc())
         .limit(scan_limit)
     )

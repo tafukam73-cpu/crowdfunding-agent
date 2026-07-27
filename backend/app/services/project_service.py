@@ -4,6 +4,8 @@ from __future__ import annotations
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timezone
+
 from app.models.project import (
     JAPANESE_SUCCESS_SITES,
     SALES_TARGET_SITES,
@@ -11,6 +13,7 @@ from app.models.project import (
     ProjectStatus,
     SalesStatus,
     SourceSite,
+    not_archived_clause,
 )
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.util.text import clean_description
@@ -44,6 +47,7 @@ def list_projects(
     q: str | None = None,
     min_score: int | None = None,
     recommendation: str | None = None,
+    archived: bool = False,
     sort: str = "created_at",
     order: str = "desc",
     page: int = 1,
@@ -51,11 +55,19 @@ def list_projects(
 ) -> tuple[list[Project], int]:
     """フィルタ・ソート・ページング付きで案件を取得する。
 
+    archived=False（既定）は営業対象内（未除外）のみ、archived=True は営業対象外
+    （除外済み）案件のみを返す（「除外済み案件」画面用）。
+
     Returns: (items, total)
     """
     # 営業対象（Kickstarter / Indiegogo / Wadiz）のみ。日本の成功事例
     # （Makuake / GreenFunding）が混入していても一覧には出さない。
     conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
+    # 営業対象外（ソフトデリート）の絞り込み。除外済み一覧のときだけ archived を出す。
+    if archived:
+        conditions.append(Project.archived_at.is_not(None))
+    else:
+        conditions.append(not_archived_clause())
     if site is not None:
         conditions.append(Project.source_site == site.value)
     if status is not None:
@@ -190,6 +202,69 @@ def update_sales_status(
 
     db.refresh(project)
     return project
+
+
+def archive_project(
+    db: Session, project: Project, reason: str | None = None
+) -> Project:
+    """案件を営業対象外にする（ソフトデリート）。
+
+    archived_at に現在時刻を入れ、理由を保存する。既に対象外なら日時は変えず、
+    理由が渡されたときだけ更新する（冪等）。関連データは一切削除しない。
+    """
+    if project.archived_at is None:
+        project.archived_at = datetime.now(timezone.utc)
+    if reason is not None:
+        project.archive_reason = reason
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def unarchive_project(db: Session, project: Project) -> Project:
+    """営業対象外を解除して通常一覧へ戻す（復元）。理由もクリアする。"""
+    project.archived_at = None
+    project.archive_reason = None
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def archive_projects(
+    db: Session, project_ids: list[int], reason: str | None = None
+) -> int:
+    """複数案件を一括で営業対象外にする。更新した件数を返す。
+
+    既に対象外の案件は archived_at を変えない（理由が渡されたときだけ更新）。
+    存在しない ID は無視する。
+    """
+    if not project_ids:
+        return 0
+    now = datetime.now(timezone.utc)
+    projects = list(
+        db.scalars(select(Project).where(Project.id.in_(project_ids)))
+    )
+    for project in projects:
+        if project.archived_at is None:
+            project.archived_at = now
+        if reason is not None:
+            project.archive_reason = reason
+    db.commit()
+    return len(projects)
+
+
+def unarchive_projects(db: Session, project_ids: list[int]) -> int:
+    """複数案件を一括で復元する。更新した件数を返す。"""
+    if not project_ids:
+        return 0
+    projects = list(
+        db.scalars(select(Project).where(Project.id.in_(project_ids)))
+    )
+    for project in projects:
+        project.archived_at = None
+        project.archive_reason = None
+    db.commit()
+    return len(projects)
 
 
 def delete_project(db: Session, project: Project) -> None:

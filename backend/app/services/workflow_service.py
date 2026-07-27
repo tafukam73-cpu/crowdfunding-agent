@@ -29,7 +29,12 @@ from app.models.contact_discovery import ContactDiscovery
 from app.models.crm import SalesActivity
 from app.models.email_draft import EmailDraft
 from app.models.japanese_success import JapaneseSuccessProject
-from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
+from app.models.project import (
+    SALES_TARGET_SITES,
+    Project,
+    SalesStatus,
+    not_archived_clause,
+)
 from app.services import campaign_url as campaign_url_mod
 from app.services import product_facts_service as facts
 
@@ -282,6 +287,7 @@ def today_projects(db: Session, *, limit: int = 10) -> list[dict]:
         select(Project)
         .where(
             Project.source_site.in_(_SALES_TARGET_VALUES),
+            not_archived_clause(),
             Project.sales_status.in_(_READY_STATUSES),
             prepared,
         )
@@ -522,7 +528,8 @@ def today_tasks(db: Session, *, per_group: int = 5) -> dict:
     フォロー優先度（normal/high/final）を含む dict で返す。
     """
     now = datetime.now(timezone.utc)
-    target = Project.source_site.in_(_SALES_TARGET_VALUES)
+    # 営業対象サイト かつ 営業対象外（除外済み）でない案件のみ。
+    target = and_(Project.source_site.in_(_SALES_TARGET_VALUES), not_archived_clause())
     scan_cap = max(per_group * 6, 40)
 
     def _fetch(statuses: tuple[str, ...]) -> list[Project]:
@@ -756,7 +763,7 @@ def ranking(
         effective_filter = _DEFAULT_RANKING_STATUS_FILTER
     status_values = _RANKING_STATUS_FILTERS[effective_filter]
 
-    conditions = [Project.source_site.in_(_SALES_TARGET_VALUES)]
+    conditions = [Project.source_site.in_(_SALES_TARGET_VALUES), not_archived_clause()]
     if site:
         conditions.append(Project.source_site == site)
     # 既定で営業アクション済みステータスを除外（"all" のときは絞り込まない）。
@@ -807,7 +814,9 @@ def dashboard_summary(db: Session) -> dict:
     """営業ダッシュボード用の集計（準備完了・今日営業件数・返信待ち・商談中・契約数）。"""
 
     def _count(*conds) -> int:
-        stmt = select(Project).where(Project.source_site.in_(_SALES_TARGET_VALUES))
+        stmt = select(Project).where(
+            Project.source_site.in_(_SALES_TARGET_VALUES), not_archived_clause()
+        )
         for c in conds:
             stmt = stmt.where(c)
         # COUNT に置き換え（サブクエリ EXISTS を含むため from select 経由）

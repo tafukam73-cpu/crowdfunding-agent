@@ -34,7 +34,12 @@ from sqlalchemy.orm import Session
 from app.models.company_research import CompanyResearch, ResearchStatus
 from app.models.contact_discovery import ContactDiscovery
 from app.models.email_draft import EmailDraft
-from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
+from app.models.project import (
+    SALES_TARGET_SITES,
+    Project,
+    SalesStatus,
+    not_archived_clause,
+)
 from app.services import (
     campaign_url as campaign_url_mod,
     product_facts_service as facts,
@@ -402,7 +407,7 @@ def copilot_dashboard(db: Session, *, per_bucket: int = 5, scan_limit: int = 200
     """
     stmt = (
         select(Project)
-        .where(Project.source_site.in_(_SALES_TARGET_VALUES))
+        .where(Project.source_site.in_(_SALES_TARGET_VALUES), not_archived_clause())
         .order_by(Project.latest_score.desc().nullslast(), Project.updated_at.desc())
         .limit(scan_limit)
     )

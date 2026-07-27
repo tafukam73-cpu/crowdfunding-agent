@@ -20,7 +20,9 @@ import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
 import StatusBadge from "@/components/StatusBadge";
 import WadizImportPanel from "@/components/WadizImportPanel";
 import WorkflowCard from "@/components/WorkflowCard";
+import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
 import {
+  archiveProject,
   createMakerFromProject,
   evaluateProject,
   fetchEvaluations,
@@ -31,6 +33,7 @@ import {
   isValidBusinessUrl,
   siteLabel,
   STATUS_LABELS,
+  unarchiveProject,
   updateProjectStatus,
   type Evaluation,
   type Project,
@@ -107,6 +110,36 @@ export default function ProjectDetail() {
     }
   }
 
+  // 営業対象外（ソフトデリート）
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+
+  async function onArchive(reason?: string) {
+    setArchiveBusy(true);
+    try {
+      const updated = await archiveProject(id, reason);
+      setProject(updated);
+      setArchiveDialogOpen(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  async function onRestore() {
+    if (!window.confirm("この案件を営業対象に戻しますか？")) return;
+    setArchiveBusy(true);
+    try {
+      const updated = await unarchiveProject(id);
+      setProject(updated);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
   if (error) {
     return (
       <>
@@ -159,8 +192,47 @@ export default function ProjectDetail() {
 
         <div className="mt-4 flex items-start justify-between gap-4">
           <h1 className="text-2xl font-bold">{project.title}</h1>
-          <StatusBadge status={project.status} />
+          <div className="flex shrink-0 items-center gap-2">
+            <StatusBadge status={project.status} />
+            {!project.is_archived && (
+              <button
+                className="rounded border border-red-200 px-3 py-1 text-sm text-red-600 hover:bg-red-50"
+                onClick={() => setArchiveDialogOpen(true)}
+              >
+                営業対象外にする
+              </button>
+            )}
+          </div>
         </div>
+
+        {project.is_archived && (
+          <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+            <div className="text-sm text-amber-800">
+              <span className="font-semibold">この案件は営業対象外です</span>
+              （一覧・ランキング・Today Tasks・営業対象一覧から除外されています）。
+              {project.archive_reason && (
+                <span className="block text-xs text-amber-700">
+                  理由：{project.archive_reason}
+                </span>
+              )}
+            </div>
+            <button
+              className="shrink-0 rounded border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-40"
+              onClick={onRestore}
+              disabled={archiveBusy}
+            >
+              営業対象に戻す
+            </button>
+          </div>
+        )}
+
+        <ArchiveReasonDialog
+          open={archiveDialogOpen}
+          targetLabel={project.title}
+          busy={archiveBusy}
+          onCancel={() => setArchiveDialogOpen(false)}
+          onConfirm={onArchive}
+        />
 
         {/* 🚀 Sales Mode：ここだけ見れば営業判断でき、営業開始でフローが進む */}
         <div className="mt-4">
