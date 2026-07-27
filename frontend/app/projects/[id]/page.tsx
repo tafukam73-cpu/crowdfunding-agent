@@ -17,7 +17,7 @@ import OutreachPanel from "@/components/OutreachPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SalesModeGuide from "@/components/SalesModeGuide";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
-import StatusBadge from "@/components/StatusBadge";
+import SalesStatusBadge from "@/components/SalesStatusBadge";
 import WadizImportPanel from "@/components/WadizImportPanel";
 import WorkflowCard from "@/components/WorkflowCard";
 import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
@@ -193,7 +193,7 @@ export default function ProjectDetail() {
         <div className="mt-4 flex items-start justify-between gap-4">
           <h1 className="text-2xl font-bold">{project.title}</h1>
           <div className="flex shrink-0 items-center gap-2">
-            <StatusBadge status={project.status} />
+            <SalesStatusBadge status={project.sales_status} />
             {!project.is_archived && (
               <button
                 className="rounded border border-red-200 px-3 py-1 text-sm text-red-600 hover:bg-red-50"

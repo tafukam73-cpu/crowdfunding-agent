@@ -95,6 +95,7 @@ def list_projects(
     *,
     site: SourceSite | None = None,
     status: ProjectStatus | None = None,
+    sales_status: str | None = None,
     category: str | None = None,
     q: str | None = None,
     min_score: int | None = None,
@@ -124,6 +125,16 @@ def list_projects(
         conditions.append(Project.source_site == site.value)
     if status is not None:
         conditions.append(Project.status == status.value)
+    if sales_status:
+        # contract_agreed で絞る場合は後方互換のため旧 won も含める。
+        if sales_status == SalesStatus.contract_agreed.value:
+            conditions.append(
+                Project.sales_status.in_(
+                    [SalesStatus.contract_agreed.value, SalesStatus.won.value]
+                )
+            )
+        else:
+            conditions.append(Project.sales_status == sales_status)
     if category:
         conditions.append(Project.category == category)
     if q:

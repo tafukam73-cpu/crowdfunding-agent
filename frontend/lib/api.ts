@@ -49,7 +49,8 @@ export type ProjectStatus =
   | "won"
   | "rejected";
 
-// 営業ワークフロー上の営業状況（既存の status とは別軸）
+// 営業ワークフロー上の営業状況（案件単位パイプラインの単一正本）。
+// won は非推奨（後方互換）。表示・判定前に normalizeSalesStatus() で contract_agreed に寄せる。
 export type SalesStatus =
   | "not_started"
   | "ready"
@@ -57,8 +58,13 @@ export type SalesStatus =
   | "awaiting_reply"
   | "replied"
   | "negotiating"
-  | "won"
-  | "rejected";
+  | "contract_agreed"
+  | "import_prep"
+  | "jp_cf_prep"
+  | "selling"
+  | "rejected"
+  | "closed"
+  | "won"; // 【非推奨】contract_agreed に正規化
 
 export type Recommendation = "high" | "mid" | "low";
 
@@ -294,6 +300,7 @@ export type JapaneseSuccessList = {
 export type ListParams = {
   site?: SourceSite | "";
   status?: ProjectStatus | "";
+  sales_status?: SalesStatus | "";
   q?: string;
   min_score?: number;
   recommendation?: Recommendation | "";
@@ -490,14 +497,19 @@ export const STATUS_COLORS: Record<ProjectStatus, string> = {
 
 // --- 営業ワークフローの営業状況 ---
 export const SALES_STATUS_LABELS: Record<SalesStatus, string> = {
-  not_started: "未営業",
+  not_started: "未着手",
   ready: "営業準備完了",
-  contacted: "営業済み",
+  contacted: "初回営業済み",
   awaiting_reply: "返信待ち",
   replied: "返信あり",
   negotiating: "商談中",
-  won: "契約",
-  rejected: "見送り",
+  contract_agreed: "契約合意",
+  import_prep: "輸入準備",
+  jp_cf_prep: "日本クラファン準備",
+  selling: "販売中",
+  rejected: "成約見送り",
+  closed: "終了",
+  won: "契約合意", // 【非推奨】旧「契約」。表示は contract_agreed と同じ
 };
 
 export const SALES_STATUS_COLORS: Record<SalesStatus, string> = {
@@ -507,8 +519,82 @@ export const SALES_STATUS_COLORS: Record<SalesStatus, string> = {
   awaiting_reply: "bg-yellow-100 text-yellow-700",
   replied: "bg-indigo-100 text-indigo-700",
   negotiating: "bg-purple-100 text-purple-700",
-  won: "bg-green-100 text-green-700",
+  contract_agreed: "bg-green-100 text-green-700",
+  import_prep: "bg-teal-100 text-teal-700",
+  jp_cf_prep: "bg-cyan-100 text-cyan-700",
+  selling: "bg-emerald-100 text-emerald-700",
   rejected: "bg-red-100 text-red-700",
+  closed: "bg-slate-200 text-slate-700",
+  won: "bg-green-100 text-green-700",
+};
+
+// 表示・パイプライン順（未着手→…→販売中→終了、最後に見送り）。
+export const SALES_STATUS_ORDER: SalesStatus[] = [
+  "not_started",
+  "ready",
+  "contacted",
+  "awaiting_reply",
+  "replied",
+  "negotiating",
+  "contract_agreed",
+  "import_prep",
+  "jp_cf_prep",
+  "selling",
+  "closed",
+  "rejected",
+];
+
+// won（非推奨）→ contract_agreed へ正規化（バックエンドの normalize_sales_status と対）。
+export function normalizeSalesStatus(s: SalesStatus | string | null | undefined): SalesStatus {
+  if (!s) return "not_started";
+  return (s === "won" ? "contract_agreed" : s) as SalesStatus;
+}
+
+// 許可する状態遷移（バックエンドの SALES_STATUS_TRANSITIONS と対）。UI のボタン活性に使う。
+export const SALES_STATUS_TRANSITIONS: Record<SalesStatus, SalesStatus[]> = {
+  not_started: ["ready", "contacted", "rejected"],
+  ready: ["contacted", "rejected", "not_started"],
+  contacted: ["awaiting_reply", "replied", "rejected", "ready"],
+  awaiting_reply: ["replied", "rejected", "contacted"],
+  replied: ["negotiating", "rejected", "awaiting_reply"],
+  negotiating: ["contract_agreed", "rejected", "replied"],
+  contract_agreed: ["import_prep", "rejected", "negotiating"],
+  import_prep: ["jp_cf_prep", "selling", "contract_agreed"],
+  jp_cf_prep: ["selling", "import_prep"],
+  selling: ["closed", "jp_cf_prep"],
+  rejected: ["not_started"],
+  closed: ["selling"],
+  won: ["import_prep", "rejected", "negotiating"], // = contract_agreed
+};
+
+// from → to が許可されているか（正規化後・同一状態は許可）。
+export function canTransitionSalesStatus(from: SalesStatus, to: SalesStatus): boolean {
+  const src = normalizeSalesStatus(from);
+  const dst = normalizeSalesStatus(to);
+  if (src === dst) return true;
+  return (SALES_STATUS_TRANSITIONS[src] ?? []).map(normalizeSalesStatus).includes(dst);
+}
+
+// sales_status 変更履歴の 1 件。
+export type SalesStatusEvent = {
+  id: number;
+  project_id: number;
+  from_status: string | null;
+  to_status: string;
+  change_source: string;
+  note: string | null;
+  created_at: string;
+};
+
+export const CHANGE_SOURCE_LABELS: Record<string, string> = {
+  manual: "手動",
+  workflow: "ワークフロー",
+  copilot: "コパイロット",
+  gmail: "メール送信",
+  reply: "返信登録",
+  followup: "フォロー",
+  archive_restore: "アーカイブ/復元",
+  system: "システム",
 };
 
 // 営業ワークフロー
@@ -563,15 +649,46 @@ export async function fetchWorkflow(id: number): Promise<Workflow> {
 
 export async function updateSalesStatus(
   id: number,
-  sales_status: SalesStatus
+  sales_status: SalesStatus,
+  note?: string
 ): Promise<Project> {
   const res = await fetch(`${API_BASE}/projects/${id}/sales-status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sales_status }),
+    body: JSON.stringify({ sales_status, note: note ?? null }),
   });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (res.status === 409) {
+    // 不正な状態遷移。呼び出し側で分かるようにメッセージを含めて投げる。
+    throw new Error(`不正な状態遷移です: ${await res.text()}`);
+  }
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
   return res.json();
+}
+
+// 複数案件の営業状況を一括更新（不正遷移はスキップ）。
+export async function bulkUpdateSalesStatus(
+  ids: number[],
+  sales_status: SalesStatus,
+  note?: string
+): Promise<{ updated: number; skipped: number; skipped_ids: number[] }> {
+  const res = await fetch(`${API_BASE}/projects/sales-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, sales_status, note: note ?? null }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// 案件の営業状況（sales_status）変更履歴を新しい順に取得。
+export async function fetchStatusEvents(
+  id: number,
+  limit = 100
+): Promise<SalesStatusEvent[]> {
+  const res = await apiFetch(`/projects/${id}/status-events?limit=${limit}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  const data = await res.json();
+  return data.items as SalesStatusEvent[];
 }
 
 export async function fetchTodayProjects(
@@ -865,6 +982,7 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   const qs = new URLSearchParams();
   if (params.site) qs.set("site", params.site);
   if (params.status) qs.set("status", params.status);
+  if (params.sales_status) qs.set("sales_status", params.sales_status);
   if (params.q) qs.set("q", params.q);
   if (params.min_score != null) qs.set("min_score", String(params.min_score));
   if (params.recommendation) qs.set("recommendation", params.recommendation);

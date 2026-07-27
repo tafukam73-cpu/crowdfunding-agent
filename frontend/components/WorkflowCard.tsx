@@ -3,23 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  CHANGE_SOURCE_LABELS,
+  fetchStatusEvents,
   fetchWorkflow,
+  formatDateTime,
+  normalizeSalesStatus,
   SALES_STATUS_COLORS,
   SALES_STATUS_LABELS,
+  SALES_STATUS_ORDER,
+  SALES_STATUS_TRANSITIONS,
   updateSalesStatus,
   type SalesStatus,
+  type SalesStatusEvent,
   type Workflow,
 } from "@/lib/api";
-
-// 「営業状況を変更」ボタンに出す遷移先（表示順）。
-const STATUS_ACTIONS: { status: SalesStatus; label: string }[] = [
-  { status: "contacted", label: "営業済みにする" },
-  { status: "awaiting_reply", label: "返信待ち" },
-  { status: "replied", label: "返信あり" },
-  { status: "negotiating", label: "商談中" },
-  { status: "won", label: "契約成立" },
-  { status: "rejected", label: "見送り" },
-];
 
 function Stars({ n }: { n: number }) {
   const full = Math.max(0, Math.min(5, n));
@@ -46,6 +43,8 @@ export default function WorkflowCard({
   const [wf, setWf] = useState<Workflow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<SalesStatus | null>(null);
+  const [events, setEvents] = useState<SalesStatusEvent[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const load = useCallback(() => {
     fetchWorkflow(projectId)
@@ -54,6 +53,9 @@ export default function WorkflowCard({
         setError(null);
       })
       .catch((e) => setError(String(e)));
+    fetchStatusEvents(projectId, 50)
+      .then(setEvents)
+      .catch(() => setEvents([]));
   }, [projectId]);
 
   useEffect(() => {
@@ -73,6 +75,14 @@ export default function WorkflowCard({
     }
   }
 
+  // 現在状態から許可された遷移先だけをパイプライン順に並べる（厳密な状態機械）。
+  const current = wf ? normalizeSalesStatus(wf.sales_status) : "not_started";
+  const allowedNext = wf
+    ? SALES_STATUS_ORDER.filter((s) =>
+        (SALES_STATUS_TRANSITIONS[current] ?? []).map(normalizeSalesStatus).includes(s)
+      )
+    : [];
+
   return (
     <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -82,9 +92,9 @@ export default function WorkflowCard({
             <Stars n={wf.stars} />
             <span className="text-slate-500">優先度 {wf.priority_score}/100</span>
             <span
-              className={`rounded px-2 py-0.5 font-medium ${SALES_STATUS_COLORS[wf.sales_status]}`}
+              className={`rounded px-2 py-0.5 font-medium ${SALES_STATUS_COLORS[normalizeSalesStatus(wf.sales_status)]}`}
             >
-              {SALES_STATUS_LABELS[wf.sales_status]}
+              {SALES_STATUS_LABELS[normalizeSalesStatus(wf.sales_status)]}
             </span>
           </div>
         )}
@@ -156,31 +166,65 @@ export default function WorkflowCard({
             )}
           </div>
 
-          {/* ⑥ 営業状況の変更 */}
+          {/* ⑥ 営業状況の変更（現在状態から進める/戻せる先だけ表示＝厳密な状態機械） */}
           <div className="mt-4">
             <p className="text-xs font-semibold text-slate-500">
-              ⑥ 営業状況を更新（CRMに営業履歴を自動記録）
+              ⑥ 営業状況を更新（許可された遷移のみ・CRMに営業履歴を自動記録）
             </p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {STATUS_ACTIONS.map((a) => {
-                const current = wf.sales_status === a.status;
-                return (
+            {allowedNext.length === 0 ? (
+              <p className="mt-1 text-xs text-slate-400">
+                これ以上進められる状態はありません。
+              </p>
+            ) : (
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {allowedNext.map((s) => (
                   <button
-                    key={a.status}
-                    disabled={current || busy !== null}
-                    onClick={() => onChange(a.status)}
-                    className={`rounded border px-3 py-1 text-xs transition ${
-                      current
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
-                    } disabled:opacity-50`}
+                    key={s}
+                    disabled={busy !== null}
+                    onClick={() => onChange(s)}
+                    className="rounded border border-slate-300 px-3 py-1 text-xs text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                   >
-                    {busy === a.status ? "更新中…" : a.label}
+                    {busy === s ? "更新中…" : `→ ${SALES_STATUS_LABELS[s]}`}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* ⑦ 状態変更の履歴（いつ・どの経路で変わったか） */}
+          {events.length > 0 && (
+            <div className="mt-4">
+              <button
+                className="text-xs font-semibold text-indigo-700 hover:underline"
+                onClick={() => setShowHistory((v) => !v)}
+              >
+                {showHistory ? "▼" : "▶"} 状態変更の履歴（{events.length}件）
+              </button>
+              {showHistory && (
+                <ul className="mt-2 space-y-1 border-l-2 border-indigo-200 pl-3">
+                  {events.map((e) => (
+                    <li key={e.id} className="text-xs text-slate-600">
+                      <span className="text-slate-400">
+                        {formatDateTime(e.created_at)}
+                      </span>{" "}
+                      {e.from_status
+                        ? `${SALES_STATUS_LABELS[normalizeSalesStatus(e.from_status)]} → `
+                        : ""}
+                      <span className="font-medium text-slate-800">
+                        {SALES_STATUS_LABELS[normalizeSalesStatus(e.to_status)]}
+                      </span>
+                      <span className="ml-1 text-slate-400">
+                        （{CHANGE_SOURCE_LABELS[e.change_source] ?? e.change_source}）
+                      </span>
+                      {e.note && (
+                        <span className="ml-1 text-slate-400">— {e.note}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
