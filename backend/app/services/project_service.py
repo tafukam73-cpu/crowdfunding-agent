@@ -13,10 +13,62 @@ from app.models.project import (
     ProjectStatus,
     SalesStatus,
     SourceSite,
+    can_transition_sales_status,
+    normalize_sales_status,
     not_archived_clause,
 )
+from app.models.project_status_event import ProjectStatusEvent, StatusChangeSource
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.util.text import clean_description
+
+
+class InvalidStatusTransition(ValueError):
+    """許可されていない sales_status 遷移。ルーターで 409 に変換する。"""
+
+    def __init__(self, from_status: str | None, to_status: str) -> None:
+        self.from_status = normalize_sales_status(from_status)
+        self.to_status = normalize_sales_status(to_status)
+        super().__init__(
+            f"営業状況を {self.from_status} から {self.to_status} へは変更できません"
+        )
+
+
+def record_status_event(
+    db: Session,
+    project: Project,
+    *,
+    from_status: str | None,
+    to_status: str,
+    source: str = StatusChangeSource.manual.value,
+    note: str | None = None,
+    commit: bool = True,
+) -> ProjectStatusEvent:
+    """sales_status の遷移履歴を 1 行追記する（正規化後の値で保存）。"""
+    event = ProjectStatusEvent(
+        project_id=project.id,
+        from_status=normalize_sales_status(from_status) if from_status else None,
+        to_status=normalize_sales_status(to_status),
+        change_source=source,
+        note=note,
+    )
+    db.add(event)
+    if commit:
+        db.commit()
+    return event
+
+
+def list_status_events(
+    db: Session, project_id: int, *, limit: int = 100
+) -> list[ProjectStatusEvent]:
+    """案件の sales_status 変更履歴を新しい順に取得する。"""
+    return list(
+        db.scalars(
+            select(ProjectStatusEvent)
+            .where(ProjectStatusEvent.project_id == project_id)
+            .order_by(ProjectStatusEvent.created_at.desc(), ProjectStatusEvent.id.desc())
+            .limit(limit)
+        )
+    )
 
 # 営業対象サイトの値（一覧クエリ用）。Makuake / GreenFunding は除外する。
 _SALES_TARGET_VALUES = [s.value for s in SALES_TARGET_SITES]
@@ -144,32 +196,58 @@ _SALES_ACTIVITY_SUMMARY: dict[str, str] = {
     SalesStatus.awaiting_reply.value: "返信待ちに変更しました。",
     SalesStatus.replied.value: "先方から返信がありました。",
     SalesStatus.negotiating.value: "商談中になりました。",
-    SalesStatus.won.value: "契約成立しました。",
+    SalesStatus.contract_agreed.value: "契約合意しました。",
+    SalesStatus.import_prep.value: "輸入準備を開始しました。",
+    SalesStatus.jp_cf_prep.value: "日本クラファン準備を開始しました。",
+    SalesStatus.selling.value: "日本販売を開始しました（販売中）。",
+    SalesStatus.closed.value: "案件を終了しました。",
     SalesStatus.rejected.value: "見送りにしました。",
 }
 
 
 def update_sales_status(
-    db: Session, project: Project, sales_status: SalesStatus
+    db: Session,
+    project: Project,
+    sales_status: SalesStatus,
+    *,
+    source: str = StatusChangeSource.manual.value,
+    note: str | None = None,
+    enforce_transition: bool = True,
 ) -> Project:
-    """営業ワークフローの営業状況を更新し、CRM に営業履歴を自動記録する。
+    """営業ワークフローの営業状況を更新し、履歴記録と CRM 反映を行う。
 
-    意味のある遷移（営業済み・返信あり・商談中・契約 など）のときは、
-    必要に応じてメーカーを作成・リンクしたうえで SalesActivity を追加し、
-    メーカーの交渉ステータスも同期する。
+    - 厳密な状態機械：許可されていない遷移は InvalidStatusTransition を送出する
+      （enforce_transition=False で自動同期など内部呼び出しはガードを緩められる）。
+    - 遷移ごとに project_status_events に 1 行追記する（change_source つき）。
+    - 意味のある遷移では、メーカーを作成・リンクして SalesActivity を追加し、
+      メーカーの交渉ステータスも同期する。
     """
     # 遅延 import で循環参照を避ける
     from app.models.crm import ActivityKind, CrmStatus
     from app.schemas.crm import ActivityCreate
     from app.services import crm_service
 
-    prev = project.sales_status
-    project.sales_status = sales_status.value
+    prev = normalize_sales_status(project.sales_status)
+    target = normalize_sales_status(sales_status.value)
+
+    # 同一状態への遷移は冪等（履歴・CRM 反映もしない）。
+    if prev == target:
+        return project
+
+    if enforce_transition and not can_transition_sales_status(prev, target):
+        raise InvalidStatusTransition(prev, target)
+
+    project.sales_status = target
+    # 履歴を追記（本更新と同一トランザクションでコミット）。
+    record_status_event(
+        db, project, from_status=prev, to_status=target, source=source, note=note,
+        commit=False,
+    )
     db.commit()
     db.refresh(project)
 
-    summary = _SALES_ACTIVITY_SUMMARY.get(sales_status.value)
-    if not summary or prev == sales_status.value:
+    summary = _SALES_ACTIVITY_SUMMARY.get(target)
+    if not summary:
         return project
 
     # CRM 反映：メーカーが無ければ案件情報から作成・リンク
@@ -177,7 +255,7 @@ def update_sales_status(
 
     kind = (
         ActivityKind.email
-        if sales_status.value in (SalesStatus.contacted.value, SalesStatus.replied.value)
+        if target in (SalesStatus.contacted.value, SalesStatus.replied.value)
         else ActivityKind.note
     )
     crm_service.add_activity(
@@ -186,21 +264,49 @@ def update_sales_status(
         ActivityCreate(kind=kind, summary=summary, project_id=project.id),
     )
 
-    # メーカーの交渉ステータスも同期
+    # メーカーの交渉ステータスも同期（契約後フェーズはすべて won 扱い）。
     crm_map = {
         SalesStatus.contacted.value: CrmStatus.contacted,
         SalesStatus.awaiting_reply.value: CrmStatus.contacted,
         SalesStatus.replied.value: CrmStatus.contacted,
         SalesStatus.negotiating.value: CrmStatus.negotiating,
-        SalesStatus.won.value: CrmStatus.won,
+        SalesStatus.contract_agreed.value: CrmStatus.won,
+        SalesStatus.import_prep.value: CrmStatus.won,
+        SalesStatus.jp_cf_prep.value: CrmStatus.won,
+        SalesStatus.selling.value: CrmStatus.won,
+        SalesStatus.closed.value: CrmStatus.won,
         SalesStatus.rejected.value: CrmStatus.lost,
     }
-    crm_status = crm_map.get(sales_status.value)
+    crm_status = crm_map.get(target)
     if crm_status is not None:
         maker.status = crm_status.value
         db.commit()
 
     db.refresh(project)
+    return project
+
+
+def sync_sales_status(
+    db: Session,
+    project: Project,
+    target: str,
+    *,
+    source: str,
+    only_from: set[str],
+    note: str | None = None,
+) -> Project:
+    """営業アクションに伴う sales_status の自動前進（後退・上書きはしない）。
+
+    現在の状態が only_from（前進を許す出発状態）に含まれるときだけ target へ進める。
+    それ以外（既により先・契約後・決着済み）は変更しない。状態機械ガードは緩める
+    （自動同期は 409 を投げず、後退だけを only_from で防ぐ）。
+    """
+    cur = normalize_sales_status(project.sales_status)
+    if cur in only_from and cur != normalize_sales_status(target):
+        return update_sales_status(
+            db, project, SalesStatus(target), source=source, note=note,
+            enforce_transition=False,
+        )
     return project
 
 

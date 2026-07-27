@@ -26,19 +26,21 @@ from app.ai.sales_outreach import (
 )
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
 from app.models.project import (
+    SALES_STATUS_DONE,
     SALES_TARGET_SITES,
     Project,
     SalesStatus,
     not_archived_clause,
 )
+from app.models.project_status_event import StatusChangeSource
 from app.models.sales_assessment import SalesAssessment
 from app.models.sales_outreach import OutreachStatus, SalesOutreach
 from app.services import campaign_url as campaign_url_mod
 
 logger = logging.getLogger("sales_outreach")
 
-# 営業対象外（既に決着した）営業状況。today-priority から除外する。
-_CLOSED_SALES_STATUS = {SalesStatus.won.value, SalesStatus.rejected.value}
+# 営業対象外（契約後 or 決着済み）の営業状況。today-priority から除外する。
+_CLOSED_SALES_STATUS = set(SALES_STATUS_DONE)
 
 # 終端の outreach 状態（生成し直しても状態は変えない）。
 _TERMINAL_OUTREACH = {OutreachStatus.contract.value, OutreachStatus.lost.value}
@@ -592,6 +594,15 @@ def mark_sent(
     db.commit()
     db.refresh(row)
 
+    # 案件の sales_status を「初回営業済み」へ自動前進（未着手/準備完了のときのみ）。
+    from app.services import project_service
+    project_service.sync_sales_status(
+        db, project, SalesStatus.contacted.value,
+        source=StatusChangeSource.gmail.value,
+        only_from={SalesStatus.not_started.value, SalesStatus.ready.value},
+        note="営業メール送信済み登録による自動遷移",
+    )
+
     lang_label = LANGUAGE_LABELS.get(lang, lang)
     _reflect_crm_status(
         db, project, next_action="返信を待つ（5 営業日後にフォロー）",
@@ -812,6 +823,18 @@ def reply_confirm(db: Session, project: Project, *, incoming_subject=None,
         row.outreach_status = OutreachStatus.replied.value
     db.commit()
     db.refresh(row)
+
+    # 案件の sales_status を「返信あり」へ自動前進（返信前の状態のときのみ）。
+    from app.services import project_service
+    project_service.sync_sales_status(
+        db, project, SalesStatus.replied.value,
+        source=StatusChangeSource.reply.value,
+        only_from={
+            SalesStatus.not_started.value, SalesStatus.ready.value,
+            SalesStatus.contacted.value, SalesStatus.awaiting_reply.value,
+        },
+        note="返信登録による自動遷移",
+    )
 
     intent_label = _INTENT_LABELS.get(analysis["intent"], analysis["intent"])
     _reflect_crm_status(

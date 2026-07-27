@@ -30,6 +30,8 @@ from app.models.crm import SalesActivity
 from app.models.email_draft import EmailDraft
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.project import (
+    SALES_STATUS_DONE,
+    SALES_STATUS_SECURED,
     SALES_TARGET_SITES,
     Project,
     SalesStatus,
@@ -134,7 +136,7 @@ def compute_priority_score(
         score -= 40
     elif sales_status == SalesStatus.awaiting_reply.value:
         score -= 20
-    elif sales_status in (SalesStatus.won.value, SalesStatus.rejected.value):
+    elif sales_status in SALES_STATUS_DONE:
         score -= 60
 
     return int(max(0, min(100, round(score))))
@@ -346,7 +348,7 @@ _FOLLOWUP_STATUSES = (SalesStatus.contacted.value, SalesStatus.awaiting_reply.va
 # 日本未販売の可能性が高いと見なす availability（未上陸 / 可能性あり）。
 _JAPAN_UNSOLD_AVAILABILITY = ("not_landed", "possible")
 # 「今日やること」から完全に除外する終了ステータス（成約 / 見送り）。
-_TASK_DONE_STATUSES = (SalesStatus.won.value, SalesStatus.rejected.value)
+_TASK_DONE_STATUSES = SALES_STATUS_DONE
 
 
 def _followup_level(days: int | None) -> str | None:
@@ -844,7 +846,12 @@ def dashboard_summary(db: Session) -> dict:
         "negotiating_count": _count(
             Project.sales_status == SalesStatus.negotiating.value
         ),
-        "won_count": _count(Project.sales_status == SalesStatus.won.value),
+        # 契約以降（契約合意〜販売中）＋旧 won を「契約数」として数える。
+        "won_count": _count(
+            Project.sales_status.in_(
+                list(SALES_STATUS_SECURED) + [SalesStatus.won.value]
+            )
+        ),
         "contacted_count": _count(
             Project.sales_status == SalesStatus.contacted.value
         ),
