@@ -9,6 +9,8 @@ canonical カテゴリ名 -> マッチする部分文字列（小文字化した
 """
 from __future__ import annotations
 
+from typing import Any
+
 # 高評価（小型・軽量・日用品系）。日本クラファンで受けやすい物販カテゴリ。
 HIGH_FIT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "small gadget": ("small gadget", "gadget", "mini ", "compact", "小型", "ガジェット"),
@@ -45,6 +47,21 @@ CAUTION_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# 技適 / PSE 等、物流・輸入面でも重いカテゴリ（CAUTION_KEYWORDS の一部）。
+LOGISTICS_HEAVY: tuple[str, ...] = ("wireless", "radio", "large battery")
+
+
 def match_categories(text: str, table: dict[str, tuple[str, ...]]) -> list[str]:
     """text（小文字化済み想定）に一致する canonical カテゴリ名の一覧を返す。"""
     return [name for name, kws in table.items() if any(k in text for k in kws)]
+
+
+def clamp(value: Any, default: int = 50) -> int:
+    """0〜100 の整数に正規化する。None / 不正値は default に丸める。"""
+    try:
+        if value is None:
+            return default
+        v = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(100, v))

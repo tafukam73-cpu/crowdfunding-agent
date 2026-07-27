@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import TYPE_CHECKING
 
 from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.crm import Contact, CrmStatus, Maker, SalesActivity
 from app.models.project import Project
-
-if TYPE_CHECKING:
-    from app.models.discovered_product import DiscoveredProduct
 from app.schemas.crm import (
     ActivityCreate,
     ContactCreate,
@@ -172,46 +168,6 @@ def create_from_project(db: Session, project: Project) -> tuple[Maker, bool]:
 
     project.maker_id = maker.id
     db.commit()
-    return maker, True
-
-
-def create_from_discovered_product(
-    db: Session, product: "DiscoveredProduct"
-) -> tuple[Maker, bool]:
-    """発掘商品（DiscoveredProduct）のメーカー情報からメーカーを作成する。
-
-    二重登録防止：website_url（official_website_url→source_url）/ 会社名で既存を照合し、
-    見つかればそれを返す。戻り値は (maker, created)。
-    """
-    name = (
-        product.creator_name
-        or product.product_name
-        or product.project_title
-        or "(名称未設定)"
-    )[:255]
-    website_url = product.official_website_url or product.source_url
-
-    existing = find_existing_maker(db, website_url=website_url, name=name)
-    if existing is not None:
-        return existing, False
-
-    note_parts = []
-    if product.source_url:
-        note_parts.append(f"発掘元: {product.source_url}")
-    if product.product_name:
-        note_parts.append(f"商品名: {product.product_name}")
-    notes = "\n".join(note_parts) or None
-
-    maker = Maker(
-        name=name,
-        website_url=website_url,
-        country=product.country,
-        status=CrmStatus.lead.value,
-        notes=notes,
-    )
-    db.add(maker)
-    db.commit()
-    db.refresh(maker)
     return maker, True
 
 

@@ -24,12 +24,12 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models.project import Project
-from app.services.discovery_scoring_service import (
-    _CAUTION_KEYWORDS,
-    _HIGH_FIT_KEYWORDS,
-    _LOGISTICS_HEAVY,
-    _clamp,
-    _match_categories,
+from app.services.category_keywords import (
+    CAUTION_KEYWORDS as _CAUTION_KEYWORDS,
+    HIGH_FIT_KEYWORDS as _HIGH_FIT_KEYWORDS,
+    LOGISTICS_HEAVY as _LOGISTICS_HEAVY,
+    clamp as _clamp,
+    match_categories as _match_categories,
 )
 
 logger = logging.getLogger("sales_assessment")
