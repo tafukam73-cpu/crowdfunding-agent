@@ -25,7 +25,12 @@ from app.ai.sales_outreach import (
     recommended_language,
 )
 from app.models.contact_discovery import ContactDiscovery, DiscoveryStatus
-from app.models.project import SALES_TARGET_SITES, Project, SalesStatus
+from app.models.project import (
+    SALES_TARGET_SITES,
+    Project,
+    SalesStatus,
+    not_archived_clause,
+)
 from app.models.sales_assessment import SalesAssessment
 from app.models.sales_outreach import OutreachStatus, SalesOutreach
 from app.services import campaign_url as campaign_url_mod
@@ -169,7 +174,7 @@ def today_priority(db: Session, *, limit: int = 20, scan_limit: int = 200) -> li
     values = [s.value for s in SALES_TARGET_SITES]
     stmt = (
         select(Project)
-        .where(Project.source_site.in_(values))
+        .where(Project.source_site.in_(values), not_archived_clause())
         .order_by(Project.latest_score.desc().nullslast(), Project.updated_at.desc())
         .limit(scan_limit)
     )
@@ -851,9 +856,14 @@ def execution_tasks(db: Session, *, limit: int = 50) -> dict:
         )
     )
     project_ids = [r.project_id for r in rows]
+    # 営業対象外（除外済み）案件は送信後フォローの一覧にも出さない。
     proj_map = {
         p.id: p
-        for p in db.scalars(select(Project).where(Project.id.in_(project_ids)))
+        for p in db.scalars(
+            select(Project).where(
+                Project.id.in_(project_ids), not_archived_clause()
+            )
+        )
     } if project_ids else {}
 
     follow_today: list[dict] = []
@@ -863,6 +873,9 @@ def execution_tasks(db: Session, *, limit: int = 50) -> dict:
 
     for r in rows:
         p = proj_map.get(r.project_id)
+        # 営業対象外（proj_map から除外済み）はスキップする。
+        if p is None:
+            continue
         item = _execution_item(db, r, p, now)
         status = r.outreach_status
         if status in (OutreachStatus.replied.value, OutreachStatus.negotiating.value):

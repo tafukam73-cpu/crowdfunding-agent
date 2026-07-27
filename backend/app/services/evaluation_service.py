@@ -15,7 +15,7 @@ from app.ai.evaluator import Evaluator
 from app.config import settings
 from app.db.session import SessionLocal
 from app.models.evaluation import AiEvaluation
-from app.models.project import Project
+from app.models.project import Project, not_archived_clause
 from app.services import usage_service
 
 logger = logging.getLogger("evaluation")
@@ -71,7 +71,8 @@ def evaluate_unevaluated_background(only_unevaluated: bool = True) -> None:
     db = SessionLocal()
     try:
         evaluator = get_evaluator()
-        stmt = select(Project)
+        # 営業対象外（除外済み）案件は AI 評価しない（コストを無駄にしない）。
+        stmt = select(Project).where(not_archived_clause())
         if only_unevaluated:
             stmt = stmt.where(Project.latest_score.is_(None))
         for project in db.scalars(stmt):
@@ -91,7 +92,7 @@ def count_unevaluated(db: Session) -> int:
         db.scalar(
             select(func.count())
             .select_from(Project)
-            .where(Project.latest_score.is_(None))
+            .where(Project.latest_score.is_(None), not_archived_clause())
         )
         or 0
     )

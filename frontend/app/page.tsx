@@ -4,6 +4,7 @@ import CampaignLink from "@/components/CampaignLink";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
 import CostPanel from "@/components/CostPanel";
 import CrmRegisterButton from "@/components/CrmRegisterButton";
 import ExecutionTasksPanel from "@/components/ExecutionTasksPanel";
@@ -21,6 +22,8 @@ import StatusBadge from "@/components/StatusBadge";
 import {
   AVAILABILITY_COLORS,
   AVAILABILITY_LABELS,
+  archiveProject,
+  bulkArchiveProjects,
   evaluateRun,
   fetchEvaluateEstimate,
   fetchProjects,
@@ -30,6 +33,7 @@ import {
   SALES_TARGET_SITES,
   SITE_LABELS,
   STATUS_LABELS,
+  unarchiveProject,
   type ListParams,
   type Project,
   type ProjectList,
@@ -69,12 +73,20 @@ export default function Home() {
   // 未評価（AI未評価）件数。件数の内訳を明示して収集履歴との矛盾をなくす。
   const [unevaluated, setUnevaluated] = useState<number | null>(null);
 
+  // 営業対象外（ソフトデリート）関連
+  const [showArchived, setShowArchived] = useState(false); // 除外済み案件を表示
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  // ダイアログ対象：単体案件 / "bulk"（複数選択）/ null（閉じている）
+  const [archiveTarget, setArchiveTarget] = useState<Project | "bulk" | null>(null);
+
   useEffect(() => {
     const params: ListParams = {
       site,
       status,
       q,
       recommendation,
+      archived: showArchived,
       sort,
       order,
       page,
@@ -88,7 +100,72 @@ export default function Home() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [site, status, q, recommendation, sort, order, page, reloadKey]);
+  }, [site, status, q, recommendation, showArchived, sort, order, page, reloadKey]);
+
+  // 表示条件が変わったら選択をクリア（別ページ/別ビューの選択を持ち越さない）。
+  useEffect(() => {
+    setSelected(new Set());
+  }, [site, status, q, recommendation, showArchived, page, reloadKey]);
+
+  function toggleSelected(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const ids = data?.items.map((p) => p.id) ?? [];
+    setSelected((prev) =>
+      ids.every((id) => prev.has(id)) ? new Set() : new Set(ids)
+    );
+  }
+
+  // 単体：営業対象外にする（理由つき）。ダイアログの確定から呼ぶ。
+  async function doArchiveOne(project: Project, reason?: string) {
+    setArchiveBusy(true);
+    try {
+      await archiveProject(project.id, reason);
+      setArchiveTarget(null);
+      setReloadKey((k) => k + 1);
+      setCostKey((k) => k + 1);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  // 一括：選択案件を営業対象外にする（理由つき）。
+  async function doArchiveBulk(reason?: string) {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setArchiveBusy(true);
+    try {
+      await bulkArchiveProjects(ids, reason);
+      setArchiveTarget(null);
+      setSelected(new Set());
+      setReloadKey((k) => k + 1);
+      setCostKey((k) => k + 1);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  // 復元（除外済み一覧から通常一覧へ戻す）。
+  async function doRestore(project: Project) {
+    if (!window.confirm(`「${project.title}」を営業対象に戻しますか？`)) return;
+    try {
+      await unarchiveProject(project.id);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   // 未評価件数を取得（件数内訳の表示・「未評価をAI評価」の目安に使う）。
   useEffect(() => {
@@ -189,19 +266,62 @@ export default function Home() {
         {/* AI 利用コスト */}
         <CostPanel reloadKey={costKey} />
 
-        <div className="mt-8 flex items-center justify-between">
+        <div className="mt-8 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold">海外営業対象案件</h1>
+            <h1 className="text-xl font-bold">
+              {showArchived ? "除外済み案件（営業対象外）" : "海外営業対象案件"}
+            </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Kickstarter / Indiegogo / Wadiz の案件のみ。日本の成功事例（Makuake /
-              GreenFunding）は
-              <Link href="/japanese-success" className="text-blue-700 hover:underline">
-                日本の成功事例
-              </Link>
-              で確認できます。
+              {showArchived ? (
+                <>
+                  営業対象外にした案件です。「復元」で通常の営業対象に戻せます（調査結果や
+                  営業履歴は削除されていません）。
+                </>
+              ) : (
+                <>
+                  Kickstarter / Indiegogo / Wadiz の案件のみ。日本の成功事例（Makuake /
+                  GreenFunding）は
+                  <Link href="/japanese-success" className="text-blue-700 hover:underline">
+                    日本の成功事例
+                  </Link>
+                  で確認できます。
+                </>
+              )}
             </p>
           </div>
+          <button
+            className="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              setPage(1);
+              setShowArchived((v) => !v);
+            }}
+          >
+            {showArchived ? "← 営業対象一覧へ戻る" : "除外済み案件を表示"}
+          </button>
         </div>
+
+        {/* 一括操作バー：選択があるときだけ表示（件数を明示） */}
+        {!showArchived && selected.size > 0 && (
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2">
+            <span className="text-sm text-amber-800">
+              {selected.size} 件を選択中
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+                onClick={() => setSelected(new Set())}
+              >
+                選択解除
+              </button>
+              <button
+                className="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700"
+                onClick={() => setArchiveTarget("bulk")}
+              >
+                選択した {selected.size} 件を営業対象外にする
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* フィルタ */}
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -312,6 +432,19 @@ export default function Home() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
+                {!showArchived && (
+                  <th className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label="すべて選択"
+                      checked={
+                        (data?.items.length ?? 0) > 0 &&
+                        data!.items.every((p) => selected.has(p.id))
+                      }
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                )}
                 <th className="px-4 py-2">案件名</th>
                 <th className="px-4 py-2">サイト</th>
                 <th className="px-4 py-2">募集状況</th>
@@ -322,6 +455,7 @@ export default function Home() {
                 <th className="px-4 py-2">ステータス</th>
                 <th className="px-4 py-2">取得日時</th>
                 <th className="px-4 py-2">CRM</th>
+                <th className="px-4 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -329,6 +463,16 @@ export default function Home() {
                 const rate = fundingRate(p);
                 return (
                   <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
+                    {!showArchived && (
+                      <td className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`${p.title} を選択`}
+                          checked={selected.has(p.id)}
+                          onChange={() => toggleSelected(p.id)}
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <Link
                         href={`/projects/${p.id}`}
@@ -378,13 +522,39 @@ export default function Home() {
                         initialMakerId={p.maker_id}
                       />
                     </td>
+                    <td className="px-4 py-3">
+                      {showArchived ? (
+                        <div className="flex flex-col gap-1">
+                          <button
+                            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                            onClick={() => doRestore(p)}
+                          >
+                            復元
+                          </button>
+                          {p.archive_reason && (
+                            <span className="text-[11px] text-slate-400">
+                              理由：{p.archive_reason}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          onClick={() => setArchiveTarget(p)}
+                        >
+                          営業対象外
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
               {!loading && data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
-                    該当する案件がありません
+                  <td colSpan={12} className="px-4 py-8 text-center text-slate-400">
+                    {showArchived
+                      ? "除外済みの案件はありません"
+                      : "該当する案件がありません"}
                   </td>
                 </tr>
               )}
@@ -419,6 +589,21 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      {/* 営業対象外の確認ダイアログ（単体 / 一括で共用） */}
+      <ArchiveReasonDialog
+        open={archiveTarget !== null}
+        targetLabel={
+          archiveTarget && archiveTarget !== "bulk" ? archiveTarget.title : undefined
+        }
+        count={archiveTarget === "bulk" ? selected.size : undefined}
+        busy={archiveBusy}
+        onCancel={() => setArchiveTarget(null)}
+        onConfirm={(reason) => {
+          if (archiveTarget === "bulk") doArchiveBulk(reason);
+          else if (archiveTarget) doArchiveOne(archiveTarget, reason);
+        }}
+      />
     </>
   );
 }

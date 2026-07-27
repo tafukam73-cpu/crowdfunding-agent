@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.project import ProjectStatus, SourceSite
 from app.schemas.project import (
+    ProjectArchiveRequest,
+    ProjectBulkArchiveRequest,
+    ProjectBulkArchiveResult,
+    ProjectBulkUnarchiveRequest,
     ProjectCreate,
     ProjectListOut,
     ProjectOut,
@@ -37,6 +41,10 @@ def list_projects(
     recommendation: str | None = Query(
         None, pattern="^(high|mid|low)$", description="推奨度で絞り込み"
     ),
+    archived: bool = Query(
+        False,
+        description="true なら営業対象外（除外済み）案件のみ、false（既定）なら対象内のみ",
+    ),
     sort: str = Query("created_at", description="並び替えキー"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -50,6 +58,7 @@ def list_projects(
         q=q,
         min_score=min_score,
         recommendation=recommendation,
+        archived=archived,
         sort=sort,
         order=order,
         page=page,
@@ -61,6 +70,24 @@ def list_projects(
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectOut:
     return project_service.create_project(db, payload)
+
+
+@router.post("/archive", response_model=ProjectBulkArchiveResult)
+def bulk_archive(
+    payload: ProjectBulkArchiveRequest, db: Session = Depends(get_db)
+) -> ProjectBulkArchiveResult:
+    """複数案件を一括で営業対象外にする（更新件数を返す）。"""
+    updated = project_service.archive_projects(db, payload.ids, payload.reason)
+    return ProjectBulkArchiveResult(updated=updated)
+
+
+@router.post("/unarchive", response_model=ProjectBulkArchiveResult)
+def bulk_unarchive(
+    payload: ProjectBulkUnarchiveRequest, db: Session = Depends(get_db)
+) -> ProjectBulkArchiveResult:
+    """複数案件を一括で復元する（更新件数を返す）。"""
+    updated = project_service.unarchive_projects(db, payload.ids)
+    return ProjectBulkArchiveResult(updated=updated)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -89,6 +116,28 @@ def update_status(
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
     return project_service.update_status(db, project, payload.status)
+
+
+@router.patch("/{project_id}/archive", response_model=ProjectOut)
+def archive_project(
+    project_id: int,
+    payload: ProjectArchiveRequest,
+    db: Session = Depends(get_db),
+) -> ProjectOut:
+    """案件を営業対象外にする（ソフトデリート。理由は任意で保存）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return project_service.archive_project(db, project, payload.reason)
+
+
+@router.patch("/{project_id}/unarchive", response_model=ProjectOut)
+def unarchive_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
+    """営業対象外を解除して通常一覧へ戻す（復元）。"""
+    project = project_service.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="案件が見つかりません")
+    return project_service.unarchive_project(db, project)
 
 
 @router.delete(

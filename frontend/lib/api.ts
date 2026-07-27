@@ -91,6 +91,10 @@ export type Project = {
   // 日本クラファン適性ゲート（メール探索の事前判定）。内部スコアは返さない。
   eligible_for_contact_search: boolean | null;
   gate_checked_at: string | null;
+  // 営業対象外（ソフトデリート）。archived_at があれば対象外。is_archived で導出。
+  archived_at: string | null;
+  archive_reason: string | null;
+  is_archived: boolean;
   contact_info: string | null;
   status: ProjectStatus;
   sales_status: SalesStatus;
@@ -293,11 +297,26 @@ export type ListParams = {
   q?: string;
   min_score?: number;
   recommendation?: Recommendation | "";
+  // true なら営業対象外（除外済み）案件のみ、false（既定）なら対象内のみ。
+  archived?: boolean;
   sort?: string;
   order?: "asc" | "desc";
   page?: number;
   page_size?: number;
 };
+
+// 営業対象外にする理由（選択式）。最後の「その他」は自由入力欄を出す。
+// 将来の分析に使えるよう、選んだラベルをそのまま archive_reason に保存する。
+export const ARCHIVE_REASONS: string[] = [
+  "商品ではない",
+  "日本市場に不向き",
+  "既に日本販売中",
+  "規制・認証負担が高い",
+  "メーカー連絡先なし",
+  "B2B専用",
+  "重量・物流コスト",
+  "その他（自由入力）",
+];
 
 export const SITE_LABELS: Record<SourceSite, string> = {
   kickstarter: "Kickstarter",
@@ -849,6 +868,7 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   if (params.q) qs.set("q", params.q);
   if (params.min_score != null) qs.set("min_score", String(params.min_score));
   if (params.recommendation) qs.set("recommendation", params.recommendation);
+  if (params.archived) qs.set("archived", "true");
   if (params.sort) qs.set("sort", params.sort);
   if (params.order) qs.set("order", params.order);
   qs.set("page", String(params.page ?? 1));
@@ -875,6 +895,57 @@ export async function updateProjectStatus(
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+// 案件を営業対象外にする（ソフトデリート。理由は任意で保存）。
+export async function archiveProject(
+  id: number,
+  reason?: string
+): Promise<Project> {
+  const res = await fetch(`${API_BASE}/projects/${id}/archive`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason ?? null }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// 営業対象外を解除して通常一覧へ戻す（復元）。
+export async function unarchiveProject(id: number): Promise<Project> {
+  const res = await fetch(`${API_BASE}/projects/${id}/unarchive`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// 複数案件を一括で営業対象外にする（更新件数を返す）。
+export async function bulkArchiveProjects(
+  ids: number[],
+  reason?: string
+): Promise<{ updated: number }> {
+  const res = await fetch(`${API_BASE}/projects/archive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, reason: reason ?? null }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// 複数案件を一括で復元する（更新件数を返す）。
+export async function bulkUnarchiveProjects(
+  ids: number[]
+): Promise<{ updated: number }> {
+  const res = await fetch(`${API_BASE}/projects/unarchive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${await res.text()}`);
   return res.json();
 }
 

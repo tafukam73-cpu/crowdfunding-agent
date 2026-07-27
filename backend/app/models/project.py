@@ -165,6 +165,16 @@ class Project(Base):
         String(10), nullable=True, index=True
     )
 
+    # --- 営業対象外（ソフトデリート） ---
+    # 営業価値の低い案件を一覧・ランキング・Today Tasks・Sales Copilot・営業対象一覧・
+    # 送信後フォローから除外する。NULL なら対象内、値があれば対象外（除外した日時）。
+    # 完全削除ではないため、関連する調査結果・営業履歴は温存する。復元は値を NULL に戻す。
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    # 営業対象外にした理由（選択式ラベルまたは自由入力）。将来の分析用に保存する。
+    archive_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # --- メタ ---
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -201,3 +211,17 @@ class Project(Base):
         from app.services.campaign_url import official_site_url_of
 
         return official_site_url_of(self)
+
+    # 営業対象外かどうか（archived_at が入っていれば対象外）。
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
+
+
+def not_archived_clause():
+    """営業対象外（ソフトデリート済み）案件を除外する SQL 条件。
+
+    一覧・ランキング・Today Tasks・Sales Copilot・営業対象一覧・送信後フォローなど、
+    「通常の営業対象」を返す全クエリで共通して使う。
+    """
+    return Project.archived_at.is_(None)

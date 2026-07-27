@@ -627,13 +627,17 @@ def list_unevaluated(db: Session, *, site: str | None = None, limit: int | None 
     """営業対象で sales_assessment がまだ無い案件を返す（未評価バッチ対象）。"""
     from sqlalchemy import exists, select
 
-    from app.models.project import SALES_TARGET_SITES, Project
+    from app.models.project import (
+        SALES_TARGET_SITES,
+        Project,
+        not_archived_clause,
+    )
     from app.models.sales_assessment import SalesAssessment
 
     values = [s.value for s in SALES_TARGET_SITES]
     has_assessment = exists().where(SalesAssessment.project_id == Project.id)
     stmt = select(Project).where(
-        Project.source_site.in_(values), ~has_assessment
+        Project.source_site.in_(values), not_archived_clause(), ~has_assessment
     )
     if site:
         stmt = stmt.where(Project.source_site == site)
