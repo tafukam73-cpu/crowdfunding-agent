@@ -25,7 +25,7 @@ from app.schemas.crm import (
     MakerUpdate,
     ReminderOut,
 )
-from app.services import crm_service, discovery_service, project_service
+from app.services import crm_service, project_service
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -69,23 +69,6 @@ def create_maker_from_project(
     if project is None:
         raise HTTPException(status_code=404, detail="案件が見つかりません")
     maker, created = crm_service.create_from_project(db, project)
-    response.status_code = 201 if created else 200
-    return maker
-
-
-@router.post("/makers/from-discovered-product/{product_id}", response_model=MakerOut)
-def create_maker_from_discovered_product(
-    product_id: int, response: Response, db: Session = Depends(get_db)
-) -> MakerOut:
-    """発掘商品（Discovery）のメーカー情報からメーカーを作成する。
-
-    二重登録防止のため website_url / 会社名で既存を照合する。
-    新規作成時は 201、既存メーカー再利用時は 200 を返す。
-    """
-    product = discovery_service.get(db, product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="商品候補が見つかりません")
-    maker, created = crm_service.create_from_discovered_product(db, product)
     response.status_code = 201 if created else 200
     return maker
 

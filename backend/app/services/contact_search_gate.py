@@ -29,10 +29,10 @@ from sqlalchemy.orm import Session
 
 from app.models.project import Project
 from app.services import campaign_url as campaign_url_mod
-from app.services.discovery_scoring_service import (
-    _CAUTION_KEYWORDS,
-    _HIGH_FIT_KEYWORDS,
-    _match_categories,
+from app.services.category_keywords import (
+    CAUTION_KEYWORDS,
+    HIGH_FIT_KEYWORDS,
+    match_categories,
 )
 
 logger = logging.getLogger("contact_search_gate")
@@ -152,7 +152,7 @@ def _excluded_categories(text: str) -> list[str]:
         out.append("医療効果・治療効果を強くうたう商品（薬機法リスク）")
     if any(h in text for h in _DANGEROUS_HINTS):
         out.append("武器・危険物に該当する可能性")
-    heavy = [c for c in _match_categories(text, _CAUTION_KEYWORDS) if c in _HEAVY_REGULATION]
+    heavy = [c for c in match_categories(text, CAUTION_KEYWORDS) if c in _HEAVY_REGULATION]
     if heavy:
         out.append(f"輸入規制負担が大きいカテゴリ: {', '.join(heavy)}")
     return out
@@ -161,7 +161,7 @@ def _excluded_categories(text: str) -> list[str]:
 def _appeal_points(text: str) -> list[str]:
     """日本での訴求点（問題解決/利便性/デザイン性/新規性）。"""
     points = [name for name, kws in _APPEAL_HINTS.items() if any(k in text for k in kws)]
-    if not points and _match_categories(text, _HIGH_FIT_KEYWORDS):
+    if not points and match_categories(text, HIGH_FIT_KEYWORDS):
         # 日本クラファンで受けやすい物販カテゴリに該当すれば「利便性」を訴求点とみなす。
         points = ["利便性"]
     return points

@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from app.models.project import Project
 from app.services import campaign_url as campaign_url_mod
-from app.services.discovery_scoring_service import (
-    _CAUTION_KEYWORDS,
-    _HIGH_FIT_KEYWORDS,
-    _match_categories,
+from app.services.category_keywords import (
+    CAUTION_KEYWORDS as _CAUTION_KEYWORDS,
+    HIGH_FIT_KEYWORDS as _HIGH_FIT_KEYWORDS,
+    match_categories as _match_categories,
 )
 
 logger = logging.getLogger("product_context")

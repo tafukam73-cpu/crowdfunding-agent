@@ -3,18 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import {
-  createMakerFromDiscoveredProduct,
-  createMakerFromProject,
-} from "@/lib/api";
+import { createMakerFromProject } from "@/lib/api";
 
-// 「CRMに登録」ボタン。Discovery / 案件ランキング / 案件一覧で共通利用する。
-// - source="project"           : 海外案件（Project）から登録
-// - source="discovered_product": 発掘商品（DiscoveredProduct）から登録
+// 「CRMに登録」ボタン。案件ランキング / 案件一覧 / 案件詳細で共通利用する。
+// - source="project" : 海外案件（Project）から登録
 // 二重登録はバックエンドが website_url / 会社名で防止する（冪等）。
 // 既存メーカー再利用時は「すでにCRM登録済みです」を表示する。
 type Props = {
-  source: "project" | "discovered_product";
+  source: "project";
   id: number;
   // Project で既に maker_id がリンク済みなら渡す（初期状態で「登録済み」を表示）。
   initialMakerId?: number | null;
@@ -25,7 +21,6 @@ type Props = {
 type Phase = "idle" | "loading" | "created" | "exists" | "error";
 
 export default function CrmRegisterButton({
-  source,
   id,
   initialMakerId = null,
   size = "sm",
@@ -43,10 +38,7 @@ export default function CrmRegisterButton({
   async function register() {
     setPhase("loading");
     try {
-      const result =
-        source === "project"
-          ? await createMakerFromProject(id)
-          : await createMakerFromDiscoveredProduct(id);
+      const result = await createMakerFromProject(id);
       setMakerId(result.maker.id);
       setPhase(result.created ? "created" : "exists");
     } catch {
