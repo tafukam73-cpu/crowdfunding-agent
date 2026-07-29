@@ -9,7 +9,7 @@ export default function Header() {
             クラファン案件発掘ダッシュボード
           </Link>
           <nav className="flex items-center gap-4 text-sm">
-            <Link href="/" className="text-slate-600 hover:text-slate-900">
+            <Link href="/projects" className="text-slate-600 hover:text-slate-900">
               海外案件
             </Link>
             <Link
