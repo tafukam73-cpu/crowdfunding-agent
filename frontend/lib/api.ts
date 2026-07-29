@@ -637,7 +637,12 @@ export type SalesDashboard = {
   awaiting_reply_count: number;
   replied_count: number;
   negotiating_count: number;
+  // 契約以降（契約合意〜販売中）の合計。後方互換のため名称据え置き。
   won_count: number;
+  // 契約目前＝契約合意のみ（ホーム KPI 用）
+  contract_agreed_count: number;
+  // 販売中（日本販売開始済み。ホーム KPI 用）
+  selling_count: number;
   contacted_count: number;
 };
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import Header from "@/components/Header";
+import SalesCopilotPanel from "@/components/SalesCopilotPanel";
 import {
   fetchSalesCopilotV2,
   fetchProjectCopilotV2,
@@ -312,7 +312,6 @@ export default function SalesCopilotV2Page() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
       <main className="mx-auto max-w-6xl px-6 py-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
@@ -327,6 +326,11 @@ export default function SalesCopilotV2Page() {
           >
             再読み込み
           </button>
+        </div>
+
+        {/* 横断判断サマリ（旧コパイロット）。ホームから AI 秘書側へ移設した。 */}
+        <div className="mb-4">
+          <SalesCopilotPanel />
         </div>
 
         {data && (

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import Header from "@/components/Header";
 import {
   fetchEmailSettings,
   updateEmailSettings,
@@ -99,7 +98,6 @@ export default function EmailSettingsPage() {
 
   return (
     <main>
-      <Header />
       <div className="mx-auto max-w-3xl px-6 py-8">
         <h1 className="text-xl font-bold text-slate-900">メール設定</h1>
         <p className="mt-1 text-sm text-slate-500">

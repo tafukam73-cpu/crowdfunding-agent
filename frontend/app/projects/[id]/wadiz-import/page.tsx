@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import Header from "@/components/Header";
 import WadizImportPanel from "@/components/WadizImportPanel";
 import { fetchProject, siteLabel, type Project } from "@/lib/api";
 
@@ -28,7 +27,6 @@ export default function WadizImportPage({
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
       <main className="mx-auto max-w-3xl px-6 py-6">
         <div className="mb-4 flex items-center justify-between">
           <div>

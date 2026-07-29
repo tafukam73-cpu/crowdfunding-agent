@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import CompanyIntelligence from "@/components/CompanyIntelligence";
-import Header from "@/components/Header";
 import SalesActivityTimeline from "@/components/SalesActivityTimeline";
 import SalesMakerPanel from "@/components/SalesMakerPanel";
 import {
@@ -143,7 +142,6 @@ export default function MakerDetailPage() {
   if (error) {
     return (
       <>
-        <Header />
         <main className="mx-auto max-w-3xl px-6 py-8">
           <p className="text-red-600">読み込み失敗：{error}</p>
           <Link href="/crm" className="mt-4 inline-block text-blue-700 hover:underline">
@@ -157,7 +155,6 @@ export default function MakerDetailPage() {
   if (!maker) {
     return (
       <>
-        <Header />
         <main className="mx-auto max-w-3xl px-6 py-8 text-slate-400">読み込み中…</main>
       </>
     );
@@ -168,7 +165,6 @@ export default function MakerDetailPage() {
 
   return (
     <>
-      <Header />
       <main className="mx-auto max-w-3xl px-6 py-8">
         <Link href="/crm" className="text-sm text-blue-700 hover:underline">
           ← 営業管理へ戻る
