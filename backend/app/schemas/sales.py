@@ -181,7 +181,9 @@ class SalesDashboardOut(BaseModel):
     awaiting_reply_count: int # 返信待ち
     replied_count: int        # 返信あり
     negotiating_count: int    # 商談中
-    won_count: int            # 契約数
+    won_count: int            # 契約数（契約合意〜販売中の合計）
+    contract_agreed_count: int = 0  # 契約目前（契約合意のみ）
+    selling_count: int = 0    # 販売中
     contacted_count: int      # 営業済み
 
 

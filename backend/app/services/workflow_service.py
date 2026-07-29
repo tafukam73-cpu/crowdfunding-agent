@@ -813,7 +813,11 @@ def ranking(
 
 
 def dashboard_summary(db: Session) -> dict:
-    """営業ダッシュボード用の集計（準備完了・今日営業件数・返信待ち・商談中・契約数）。"""
+    """営業ダッシュボード用の集計（準備完了・今日営業件数・返信待ち・商談中・契約数）。
+
+    ホーム（Home Dashboard v2）の KPI カード用に、契約目前（contract_agreed）と
+    販売中（selling）の内訳も返す。won_count（契約以降の合計）は後方互換のため据え置き。
+    """
 
     def _count(*conds) -> int:
         stmt = select(Project).where(
@@ -852,6 +856,14 @@ def dashboard_summary(db: Session) -> dict:
                 list(SALES_STATUS_SECURED) + [SalesStatus.won.value]
             )
         ),
+        # 契約目前＝契約合意（旧 won を含む）。輸入準備以降は含めない。
+        "contract_agreed_count": _count(
+            Project.sales_status.in_(
+                [SalesStatus.contract_agreed.value, SalesStatus.won.value]
+            )
+        ),
+        # 販売中（日本販売開始済み）。
+        "selling_count": _count(Project.sales_status == SalesStatus.selling.value),
         "contacted_count": _count(
             Project.sales_status == SalesStatus.contacted.value
         ),
