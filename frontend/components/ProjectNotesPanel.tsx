@@ -10,9 +10,11 @@ import {
   updateMaker,
 } from "@/lib/api";
 
-// 営業メモ。保存先は CRM のメーカー（crm_makers.notes）で、既存の
+// メーカー共通メモ。保存先は CRM のメーカー（crm_makers.notes）で、既存の
 // GET/PATCH /crm/makers/{id} のみを使う（DB 変更・新規 API なし）。
+// 案件単位ではなくメーカー単位で共有される点を画面上で明示する。
 // CRM 未登録の案件は、その場で登録してからメモを書けるようにする。
+const SHARED_NOTE = "このメモは同じメーカーに紐づく案件で共有されます。";
 export default function ProjectNotesPanel({
   projectId,
   makerId,
@@ -85,7 +87,10 @@ export default function ProjectNotesPanel({
   if (linkedId == null) {
     return (
       <div className="text-sm text-slate-600">
-        <p>
+        <p className="rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-600">
+          ℹ️ {SHARED_NOTE}
+        </p>
+        <p className="mt-2">
           メモは CRM のメーカー単位で保存します。この案件はまだ CRM
           に登録されていません。
         </p>
@@ -107,6 +112,9 @@ export default function ProjectNotesPanel({
         <p className="text-sm text-slate-400">読み込み中…</p>
       ) : (
         <>
+          <p className="mb-2 rounded-md bg-slate-100 px-3 py-2 text-xs text-slate-600">
+            ℹ️ {SHARED_NOTE}
+          </p>
           <textarea
             value={notes}
             onChange={(e) => {

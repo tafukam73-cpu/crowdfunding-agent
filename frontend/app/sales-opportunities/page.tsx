@@ -295,12 +295,14 @@ export default function SalesOpportunitiesPage() {
     <div className="min-h-screen bg-slate-50">
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-900">営業案件管理</h1>
+          <h1 className="text-xl font-bold text-slate-900">
+            営業候補管理（Contact Intelligence案件）
+          </h1>
           <span className="text-sm text-slate-500">{items.length} 件</span>
         </div>
         <p className="mt-1 text-sm text-slate-500">
-          Contact Intelligence の結果から作成した営業案件を、ステータス・次アクション・
-          期限・メモで管理します。
+          Contact Intelligence の結果から作成した営業候補を、ステータス・次アクション・
+          期限・メモで管理します（左メニューの「営業案件」＝案件一覧とは別の管理画面です）。
         </p>
 
         {/* フィルター */}
@@ -360,8 +362,8 @@ export default function SalesOpportunitiesPage() {
             <p className="py-8 text-center text-sm text-slate-400">読み込み中…</p>
           ) : items.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">
-              営業案件がありません。案件詳細の Contact Intelligence
-              で「＋ 営業案件に追加」を押すと、ここに表示されます。
+              営業候補がありません。案件詳細の Contact Intelligence
+              で「＋ 営業候補に追加」を押すと、ここに表示されます。
             </p>
           ) : (
             items.map((o) => (

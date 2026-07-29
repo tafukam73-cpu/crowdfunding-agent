@@ -427,8 +427,8 @@ export default function ProjectDetail() {
           <ProjectHistoryPanel projectId={id} refreshKey={statusVersion} />
         </Section>
 
-        {/* ⑥ メモ */}
-        <Section num="⑥" title="メモ">
+        {/* ⑥ メーカー共通メモ（保存先は CRM のメーカー単位） */}
+        <Section num="⑥" title="メーカー共通メモ">
           <ProjectNotesPanel
             projectId={id}
             makerId={project.maker_id}

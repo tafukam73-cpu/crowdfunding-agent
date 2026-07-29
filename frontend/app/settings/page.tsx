@@ -11,26 +11,46 @@ import { evaluateRun, fetchEvaluateEstimate } from "@/lib/api";
 
 // 設定。左メニューから外した管理系（収集・コスト・CRM・成功事例）の入口を
 // ここに集約し、日々の営業動線（ホーム / 営業案件 / 今日のタスク / AI秘書）と分ける。
-const LINKS: { href: string; label: string; desc: string }[] = [
+//
+// 「営業管理ツール」は独立セクションにする。左メニューの「営業案件」＝案件一覧
+// （/projects）と紛らわしくならないよう、連絡先探索由来のものは「営業候補管理」
+// と呼び分ける（ルート・機能はそのまま）。
+const LINK_GROUPS: {
+  title: string;
+  desc: string;
+  links: { href: string; label: string; desc: string }[];
+}[] = [
   {
-    href: "/email-settings",
-    label: "メール設定",
-    desc: "差出人・署名・会社概要（営業メール生成に反映）",
+    title: "営業管理ツール",
+    desc: "案件一覧（営業案件）とは別に、連絡先・企業単位で管理する画面です。",
+    links: [
+      {
+        href: "/sales-opportunities",
+        label: "営業候補管理（Contact Intelligence案件）",
+        desc: "連絡先探索から作成した営業候補のステータス・次アクション・期限管理",
+      },
+      {
+        href: "/crm",
+        label: "CRM（メーカー・連絡先）",
+        desc: "メーカー単位の連絡先・活動履歴・メーカー共通メモ",
+      },
+    ],
   },
   {
-    href: "/sales-opportunities",
-    label: "営業案件管理（Contact Intelligence 由来）",
-    desc: "連絡先探索から作成した営業案件のステータス・次アクション管理",
-  },
-  {
-    href: "/crm",
-    label: "CRM（メーカー・連絡先）",
-    desc: "メーカー単位の連絡先・活動履歴",
-  },
-  {
-    href: "/japanese-success",
-    label: "日本の成功事例",
-    desc: "Makuake / GreenFunding の成功案件（比較用）",
+    title: "メール・参考データ",
+    desc: "営業メールの生成設定と、比較に使う日本の成功事例です。",
+    links: [
+      {
+        href: "/email-settings",
+        label: "メール設定",
+        desc: "差出人・署名・会社概要（営業メール生成に反映）",
+      },
+      {
+        href: "/japanese-success",
+        label: "日本の成功事例",
+        desc: "Makuake / GreenFunding の成功案件（比較用）",
+      },
+    ],
   },
 ];
 
@@ -82,19 +102,25 @@ export default function SettingsPage() {
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
-      {/* 各設定・管理画面への入口 */}
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {LINKS.map((l) => (
-          <Link
-            key={l.href}
-            href={l.href}
-            className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
-          >
-            <p className="text-sm font-semibold text-slate-800">{l.label} →</p>
-            <p className="mt-1 text-xs text-slate-500">{l.desc}</p>
-          </Link>
-        ))}
-      </div>
+      {/* 各設定・管理画面への入口（用途ごとのセクションに分ける） */}
+      {LINK_GROUPS.map((g) => (
+        <section key={g.title} className="mt-6">
+          <h2 className="text-sm font-bold text-slate-800">{g.title}</h2>
+          <p className="mt-0.5 text-xs text-slate-500">{g.desc}</p>
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {g.links.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="rounded-lg border border-slate-200 bg-white p-4 transition hover:border-slate-400 hover:bg-slate-50"
+              >
+                <p className="text-sm font-semibold text-slate-800">{l.label} →</p>
+                <p className="mt-1 text-xs text-slate-500">{l.desc}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
 
       {/* AI 評価の一括実行（コストの目安を確認してから実行する） */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
