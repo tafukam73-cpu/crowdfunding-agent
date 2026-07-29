@@ -11,7 +11,6 @@ import Collapsible from "@/components/Collapsible";
 import CompanyResearchPanel from "@/components/CompanyResearchPanel";
 import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EvaluationCard from "@/components/EvaluationCard";
-import Header from "@/components/Header";
 import JapanSalesPanel from "@/components/JapanSalesPanel";
 import OutreachPanel from "@/components/OutreachPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
@@ -143,7 +142,6 @@ export default function ProjectDetail() {
   if (error) {
     return (
       <>
-        <Header />
         <main className="mx-auto max-w-3xl px-6 py-8">
           <p className="text-red-600">読み込み失敗：{error}</p>
           <Link href="/" className="mt-4 inline-block text-blue-700 hover:underline">
@@ -157,7 +155,6 @@ export default function ProjectDetail() {
   if (!project) {
     return (
       <>
-        <Header />
         <main className="mx-auto max-w-3xl px-6 py-8 text-slate-400">読み込み中…</main>
       </>
     );
@@ -184,7 +181,6 @@ export default function ProjectDetail() {
 
   return (
     <>
-      <Header />
       <main className="mx-auto max-w-3xl px-6 py-8">
         <Link href="/" className="text-sm text-blue-700 hover:underline">
           ← 一覧へ戻る

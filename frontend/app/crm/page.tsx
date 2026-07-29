@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import Header from "@/components/Header";
 import {
   createMaker,
   CRM_STATUS_COLORS,
@@ -65,7 +64,6 @@ export default function CrmPage() {
 
   return (
     <>
-      <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
         <h1 className="text-xl font-bold">営業管理（CRM）</h1>
 

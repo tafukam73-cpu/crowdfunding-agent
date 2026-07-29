@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 
 import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
 import CrmRegisterButton from "@/components/CrmRegisterButton";
-import Header from "@/components/Header";
 import SourceBadge from "@/components/SourceBadge";
 import SalesStatusBadge from "@/components/SalesStatusBadge";
 import {
@@ -198,7 +197,6 @@ export default function ProjectsPage() {
 
   return (
     <>
-      <Header />
       <main className="mx-auto max-w-6xl px-6 py-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>

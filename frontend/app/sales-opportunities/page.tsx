@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import Header from "@/components/Header";
 import {
   fetchSalesOpportunities,
   formatDateTime,
@@ -294,7 +293,6 @@ export default function SalesOpportunitiesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-slate-900">営業案件管理</h1>

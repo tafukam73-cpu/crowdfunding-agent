@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import Header from "@/components/Header";
 import {
   collectJapaneseSuccess,
   fetchJapaneseSuccess,
@@ -82,7 +81,6 @@ export default function JapaneseSuccessPage() {
 
   return (
     <>
-      <Header />
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="flex items-center justify-between">
           <div>

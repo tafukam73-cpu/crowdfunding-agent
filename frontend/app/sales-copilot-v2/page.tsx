@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import Header from "@/components/Header";
 import {
   fetchSalesCopilotV2,
   fetchProjectCopilotV2,
@@ -312,7 +311,6 @@ export default function SalesCopilotV2Page() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
       <main className="mx-auto max-w-6xl px-6 py-6">
         <div className="mb-4 flex items-center justify-between">
           <div>
