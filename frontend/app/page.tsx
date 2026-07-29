@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import HomeAiSecretary from "@/components/HomeAiSecretary";
 import HomeKpiCards from "@/components/HomeKpiCards";
 import HomePriorityTop5 from "@/components/HomePriorityTop5";
 import HomeRecentProjects from "@/components/HomeRecentProjects";
@@ -40,10 +41,13 @@ export default function Home() {
         <HomeKpiCards reloadKey={reloadKey} />
       </div>
 
-      {/* ③ 優先案件 TOP5 ／ ④ 最近更新された案件 */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <HomePriorityTop5 reloadKey={reloadKey} />
-        <HomeRecentProjects reloadKey={reloadKey} />
+      {/* ③ 優先案件 TOP5 ／ ④ 最近更新された案件 ／ ⑤ AI秘書（土台） */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="space-y-4 lg:col-span-2">
+          <HomePriorityTop5 reloadKey={reloadKey} />
+          <HomeRecentProjects reloadKey={reloadKey} />
+        </div>
+        <HomeAiSecretary reloadKey={reloadKey} />
       </div>
     </main>
   );
