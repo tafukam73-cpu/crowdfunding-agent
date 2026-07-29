@@ -13,6 +13,8 @@ import ContactDiscoveryPanel from "@/components/ContactDiscoveryPanel";
 import EvaluationCard from "@/components/EvaluationCard";
 import JapanSalesPanel from "@/components/JapanSalesPanel";
 import OutreachPanel from "@/components/OutreachPanel";
+import ProjectHistoryPanel from "@/components/ProjectHistoryPanel";
+import ProjectNotesPanel from "@/components/ProjectNotesPanel";
 import ReplyAssistPanel from "@/components/ReplyAssistPanel";
 import SalesModeGuide from "@/components/SalesModeGuide";
 import SimilarSuccessPanel from "@/components/SimilarSuccessPanel";
@@ -20,9 +22,9 @@ import SalesStatusBadge from "@/components/SalesStatusBadge";
 import WadizImportPanel from "@/components/WadizImportPanel";
 import WorkflowCard from "@/components/WorkflowCard";
 import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
+import type { ReactNode } from "react";
 import {
   archiveProject,
-  createMakerFromProject,
   evaluateProject,
   fetchEvaluations,
   fetchProject,
@@ -39,6 +41,29 @@ import {
   type ProjectStatus,
 } from "@/lib/api";
 
+// 案件詳細の 1 セクション。番号つきの見出しで、上から営業の思考順に並べる。
+function Section({
+  num,
+  title,
+  id,
+  children,
+}: {
+  num: string;
+  title: string;
+  id?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="mt-6 scroll-mt-4">
+      <h2 className="flex items-baseline gap-2 border-b border-slate-200 pb-1 text-sm font-bold text-slate-800">
+        <span className="text-slate-400">{num}</span>
+        {title}
+      </h2>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
 export default function ProjectDetail() {
   const params = useParams();
   const id = Number(params.id);
@@ -54,6 +79,8 @@ export default function ProjectDetail() {
   const [discoveryVersion, setDiscoveryVersion] = useState(0);
   // ランキング等から ?sales=1 で来たら営業フローを自動開始する
   const [autoStart, setAutoStart] = useState(false);
+  // 営業状況が変わったら営業履歴セクションを取り直すための signal
+  const [statusVersion, setStatusVersion] = useState(0);
 
   useEffect(() => {
     fetchProject(id)
@@ -84,24 +111,12 @@ export default function ProjectDetail() {
     }
   }
 
-  const [linking, setLinking] = useState(false);
-
-  async function onLinkMaker() {
-    setLinking(true);
-    try {
-      const { maker } = await createMakerFromProject(id);
-      window.location.href = `/crm/makers/${maker.id}`;
-    } catch (e) {
-      setError(String(e));
-      setLinking(false);
-    }
-  }
-
   async function onChangeStatus(status: ProjectStatus) {
     setSaving(true);
     try {
       const updated = await updateProjectStatus(id, status);
       setProject(updated);
+      setStatusVersion((v) => v + 1);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -144,8 +159,11 @@ export default function ProjectDetail() {
       <>
         <main className="mx-auto max-w-3xl px-6 py-8">
           <p className="text-red-600">読み込み失敗：{error}</p>
-          <Link href="/" className="mt-4 inline-block text-blue-700 hover:underline">
-            ← 一覧へ戻る
+          <Link
+            href="/projects"
+            className="mt-4 inline-block text-blue-700 hover:underline"
+          >
+            ← 営業案件へ戻る
           </Link>
         </main>
       </>
@@ -168,6 +186,7 @@ export default function ProjectDetail() {
     project.description_clean?.trim() || htmlToText(project.description);
 
   const rows: [string, string][] = [
+    ["メーカー名", project.maker_name ?? "—"],
     ["サイト", siteLabel(project.source_site)],
     ["カテゴリ", project.category ?? "—"],
     ["目標金額", formatMoney(project.goal_amount, project.currency)],
@@ -175,15 +194,14 @@ export default function ProjectDetail() {
     ["達成率", rate != null ? `${rate}%` : "—"],
     ["支援者数", project.backers_count?.toLocaleString() ?? "—"],
     ["掲載期間", `${project.start_date ?? "—"} 〜 ${project.end_date ?? "—"}`],
-    ["メーカー名", project.maker_name ?? "—"],
     ["連絡先候補", project.contact_info ?? "—"],
   ];
 
   return (
     <>
       <main className="mx-auto max-w-3xl px-6 py-8">
-        <Link href="/" className="text-sm text-blue-700 hover:underline">
-          ← 一覧へ戻る
+        <Link href="/projects" className="text-sm text-blue-700 hover:underline">
+          ← 営業案件へ戻る
         </Link>
 
         <div className="mt-4 flex items-start justify-between gap-4">
@@ -230,84 +248,62 @@ export default function ProjectDetail() {
           onConfirm={onArchive}
         />
 
-        {/* 🚀 Sales Mode：ここだけ見れば営業判断でき、営業開始でフローが進む */}
-        <div className="mt-4">
-          <SalesModeGuide
-            projectId={id}
-            project={project}
-            researchVersion={researchVersion}
-            discoveryVersion={discoveryVersion}
-            autoStart={autoStart}
-            onDiscoveryChanged={() => setDiscoveryVersion((v) => v + 1)}
-            onSalesStatusChange={(s) =>
-              setProject((p) => (p ? { ...p, sales_status: s } : p))
-            }
-          />
-        </div>
+        {/* 案件詳細は「会社情報 → 営業状況 → 連絡先 → AI提案 → 営業履歴 → メモ」
+            の順に並べる。まず相手を知り、次に自分の進捗を確認し、連絡手段を得て、
+            AI の提案で動き、履歴とメモで引き継ぐ、という営業の思考順に対応する。 */}
 
-        {/* ここから下は営業で今すぐ必要ない詳細（折りたたみ） */}
-        <div className="mt-6">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            詳細情報（必要なときに開く）
-          </h2>
-
-          {/* 連絡先（Contact Intelligence）。パネル本体はここに一本化する（Sales Mode
-              STEP2 はこのセクションへ誘導するだけ）。「じっくり調査」をメイン導線とし、
-              個別ツールは「詳細ツール（上級者向け）」の折りたたみ内に格納。 */}
-          <div id="contact-intelligence" className="scroll-mt-4">
-            <Collapsible
-              title="📇 連絡先（Contact Intelligence）"
-              hint="じっくり調査 / 個別ツールは折りたたみ内"
-              defaultOpen
-            >
-              <ContactDiscoveryPanel
-                projectId={id}
-                searchKeyword={project.maker_name?.trim() || project.title}
-                onChanged={() => setDiscoveryVersion((v) => v + 1)}
-              />
-              {project.source_site === "wadiz" && (
-                <div className="mt-3">
-                  <div className="mb-1 text-right">
-                    <Link
-                      href={`/projects/${id}/wadiz-import`}
-                      className="text-xs text-emerald-700 underline"
-                    >
-                      専用画面で開く ↗
-                    </Link>
-                  </div>
-                  <WadizImportPanel
-                    projectId={id}
-                    defaultSourceUrl={project.source_url}
-                    onImported={() => setDiscoveryVersion((v) => v + 1)}
-                  />
-                </div>
-              )}
-            </Collapsible>
+        {/* ① 会社情報 */}
+        <Section num="①" title="会社情報">
+          {project.image_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={project.image_url}
+              alt={project.title}
+              className="w-full rounded-lg border border-slate-200 object-cover"
+            />
+          )}
+          {summary && (
+            <p className="mt-4 whitespace-pre-wrap text-sm text-slate-700">{summary}</p>
+          )}
+          <dl className="mt-4 grid grid-cols-[8rem_1fr] gap-y-3 text-sm">
+            {rows.map(([label, value]) => (
+              <div key={label} className="contents">
+                <dt className="text-slate-500">{label}</dt>
+                <dd className="text-slate-900">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
+            {/* 海外クラファンの商品ページ（公式サイトで代用しない。未取得なら未確認表示） */}
+            <CampaignLink source={project} size="md" />
+            {/* メーカー公式サイトは商品ページとは別に表示する */}
+            {isValidBusinessUrl(project.official_site_url ?? project.maker_url) && (
+              <a
+                className="text-blue-700 hover:underline"
+                href={(project.official_site_url ?? project.maker_url) as string}
+                target="_blank"
+                rel="noreferrer"
+              >
+                メーカー公式 ↗
+              </a>
+            )}
+            {isValidBusinessUrl(project.video_url) && (
+              <a
+                className="text-blue-700 hover:underline"
+                href={project.video_url as string}
+                target="_blank"
+                rel="noreferrer"
+              >
+                動画 ↗
+              </a>
+            )}
           </div>
 
-          <Collapsible title="🧭 営業ワークフロー" hint="ステップ・チャネル・優先度">
-            <WorkflowCard
-              projectId={id}
-              refreshKey={researchVersion + discoveryVersion}
-              onSalesStatusChange={(s) =>
-                setProject((p) => (p ? { ...p, sales_status: s } : p))
-              }
-            />
-          </Collapsible>
-
           <Collapsible
-            title="✉️ 営業実行（メール生成・送信）"
-            hint="4言語生成・下書き・営業状況"
+            title="📄 商品ファクトシート（確認可能な事実）"
+            hint="取得元・最終確認日時つき"
           >
-            <OutreachPanel projectId={id} />
-          </Collapsible>
-
-          <Collapsible title="📄 商品ファクトシート（確認可能な事実）" hint="取得元・最終確認日時つき">
             <ProductFactsPanel projectId={id} />
-          </Collapsible>
-
-          <Collapsible title="🇯🇵 日本販売状況（詳細）">
-            <JapanSalesPanel projectId={id} />
           </Collapsible>
 
           <Collapsible title="🏢 企業リサーチ全文">
@@ -316,101 +312,131 @@ export default function ProjectDetail() {
               onResearched={() => setResearchVersion((v) => v + 1)}
             />
           </Collapsible>
+        </Section>
+
+        {/* ② 営業状況 */}
+        <Section num="②" title="営業状況">
+          <div className="flex flex-wrap items-center gap-3">
+            <SalesStatusBadge status={project.sales_status} />
+            <span className="text-xs text-slate-500">
+              営業ワークフロー上の現在地。変更すると営業履歴に記録されます。
+            </span>
+          </div>
+
+          <div className="mt-3">
+            <p className="text-sm font-semibold text-slate-700">営業ステータス変更</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(Object.keys(STATUS_LABELS) as ProjectStatus[]).map((s) => (
+                <button
+                  key={s}
+                  disabled={saving || project.status === s}
+                  onClick={() => onChangeStatus(s)}
+                  className={`rounded border px-3 py-1 text-sm transition ${
+                    project.status === s
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                  } disabled:opacity-50`}
+                >
+                  {STATUS_LABELS[s]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Collapsible title="🧭 営業ワークフロー" hint="ステップ・チャネル・優先度">
+            <WorkflowCard
+              projectId={id}
+              refreshKey={researchVersion + discoveryVersion}
+              onSalesStatusChange={(s) => {
+                setProject((p) => (p ? { ...p, sales_status: s } : p));
+                setStatusVersion((v) => v + 1);
+              }}
+            />
+          </Collapsible>
+
+          <Collapsible title="🇯🇵 日本販売状況（詳細）">
+            <JapanSalesPanel projectId={id} />
+          </Collapsible>
 
           <Collapsible title="🛫 日本未上陸判定">
             <AvailabilityPanel projectId={id} />
           </Collapsible>
+        </Section>
 
-          <Collapsible title="📈 類似する日本の成功事例">
-            <SimilarSuccessPanel projectId={id} />
+        {/* ③ 連絡先（Contact Intelligence）。パネル本体はここに一本化する
+            （Sales Mode STEP2 はこのセクションへ誘導するだけ）。 */}
+        <Section num="③" title="連絡先" id="contact-intelligence">
+          <ContactDiscoveryPanel
+            projectId={id}
+            searchKeyword={project.maker_name?.trim() || project.title}
+            onChanged={() => setDiscoveryVersion((v) => v + 1)}
+          />
+          {project.source_site === "wadiz" && (
+            <div className="mt-3">
+              <div className="mb-1 text-right">
+                <Link
+                  href={`/projects/${id}/wadiz-import`}
+                  className="text-xs text-emerald-700 underline"
+                >
+                  専用画面で開く ↗
+                </Link>
+              </div>
+              <WadizImportPanel
+                projectId={id}
+                defaultSourceUrl={project.source_url}
+                onImported={() => setDiscoveryVersion((v) => v + 1)}
+              />
+            </div>
+          )}
+        </Section>
+
+        {/* ④ AI提案 */}
+        <Section num="④" title="AI提案">
+          {/* 🚀 Sales Mode：ここだけ見れば営業判断でき、営業開始でフローが進む */}
+          <SalesModeGuide
+            projectId={id}
+            project={project}
+            researchVersion={researchVersion}
+            discoveryVersion={discoveryVersion}
+            autoStart={autoStart}
+            onDiscoveryChanged={() => setDiscoveryVersion((v) => v + 1)}
+            onSalesStatusChange={(s) => {
+              setProject((p) => (p ? { ...p, sales_status: s } : p));
+              setStatusVersion((v) => v + 1);
+            }}
+          />
+
+          <Collapsible
+            title="✉️ 営業実行（メール生成・送信）"
+            hint="4言語生成・下書き・営業状況"
+          >
+            <OutreachPanel projectId={id} />
           </Collapsible>
 
           <Collapsible title="✉️ 返信メールAIサポート">
             <ReplyAssistPanel projectId={id} />
           </Collapsible>
 
-          <Collapsible title="📋 案件情報・スクレイピング情報">
-            {project.image_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={project.image_url}
-                alt={project.title}
-                className="w-full rounded-lg border border-slate-200 object-cover"
-              />
-            )}
-            {summary && (
-              <p className="mt-4 whitespace-pre-wrap text-sm text-slate-700">
-                {summary}
-              </p>
-            )}
-            <dl className="mt-4 grid grid-cols-[8rem_1fr] gap-y-3 text-sm">
-              {rows.map(([label, value]) => (
-                <div key={label} className="contents">
-                  <dt className="text-slate-500">{label}</dt>
-                  <dd className="text-slate-900">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="mt-4 flex flex-wrap gap-4 text-sm">
-              {/* 海外クラファンの商品ページ（公式サイトで代用しない。未取得なら未確認表示） */}
-              <CampaignLink source={project} size="md" />
-              {/* メーカー公式サイトは商品ページとは別に表示する */}
-              {isValidBusinessUrl(project.official_site_url ?? project.maker_url) && (
-                <a
-                  className="text-blue-700 hover:underline"
-                  href={(project.official_site_url ?? project.maker_url) as string}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  メーカー公式 ↗
-                </a>
-              )}
-              {isValidBusinessUrl(project.video_url) && (
-                <a className="text-blue-700 hover:underline" href={project.video_url as string} target="_blank" rel="noreferrer">
-                  動画 ↗
-                </a>
-              )}
-            </div>
+          <Collapsible title="📈 類似する日本の成功事例">
+            <SimilarSuccessPanel projectId={id} />
           </Collapsible>
+        </Section>
 
-          <Collapsible title="🤝 営業管理（CRM）・ステータス変更">
-            <div className="flex items-center gap-3 text-sm">
-              <span className="font-semibold text-slate-700">CRM</span>
-              {project.maker_id ? (
-                <Link href={`/crm/makers/${project.maker_id}`} className="text-blue-700 hover:underline">
-                  メーカーを開く →
-                </Link>
-              ) : (
-                <button
-                  onClick={onLinkMaker}
-                  disabled={linking}
-                  className="rounded border border-slate-300 px-3 py-1 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {linking ? "登録中…" : "CRMにメーカー登録"}
-                </button>
-              )}
-            </div>
-            <div className="mt-4">
-              <p className="text-sm font-semibold text-slate-700">営業ステータス変更</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(Object.keys(STATUS_LABELS) as ProjectStatus[]).map((s) => (
-                  <button
-                    key={s}
-                    disabled={saving || project.status === s}
-                    onClick={() => onChangeStatus(s)}
-                    className={`rounded border px-3 py-1 text-sm transition ${
-                      project.status === s
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
-                    } disabled:opacity-50`}
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </Collapsible>
-        </div>
+        {/* ⑤ 営業履歴 */}
+        <Section num="⑤" title="営業履歴">
+          <ProjectHistoryPanel projectId={id} refreshKey={statusVersion} />
+        </Section>
+
+        {/* ⑥ メモ */}
+        <Section num="⑥" title="メモ">
+          <ProjectNotesPanel
+            projectId={id}
+            makerId={project.maker_id}
+            onMakerLinked={(mid) =>
+              setProject((p) => (p ? { ...p, maker_id: mid } : p))
+            }
+          />
+        </Section>
       </main>
     </>
   );
