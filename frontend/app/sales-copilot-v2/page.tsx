@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import SalesCopilotPanel from "@/components/SalesCopilotPanel";
 import {
   fetchSalesCopilotV2,
   fetchProjectCopilotV2,
@@ -325,6 +326,11 @@ export default function SalesCopilotV2Page() {
           >
             再読み込み
           </button>
+        </div>
+
+        {/* 横断判断サマリ（旧コパイロット）。ホームから AI 秘書側へ移設した。 */}
+        <div className="mb-4">
+          <SalesCopilotPanel />
         </div>
 
         {data && (

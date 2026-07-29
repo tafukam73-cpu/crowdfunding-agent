@@ -5,6 +5,7 @@ import { useState } from "react";
 import ExecutionTasksPanel from "@/components/ExecutionTasksPanel";
 import RankingPanel from "@/components/RankingPanel";
 import TodayPriorityPanel from "@/components/TodayPriorityPanel";
+import TodaySalesPanel from "@/components/TodaySalesPanel";
 import TodayTasksPanel from "@/components/TodayTasksPanel";
 
 // 今日のタスク。ホームは「今日やることの要約」に絞り、実行用の詳細リストは
@@ -42,6 +43,11 @@ export default function TasksPage() {
       {/* 営業実行パイプライン：今日営業する案件（優先度順） */}
       <div className="mt-6">
         <TodayPriorityPanel reloadKey={reloadKey} />
+      </div>
+
+      {/* 営業準備完了の内訳（ホームの KPI では扱わない準備段階の件数） */}
+      <div className="mt-6">
+        <TodaySalesPanel reloadKey={reloadKey} />
       </div>
 
       {/* AI 営業優先ランキング（Executive Summary 統合） */}
