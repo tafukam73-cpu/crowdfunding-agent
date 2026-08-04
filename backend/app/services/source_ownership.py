@@ -222,11 +222,95 @@ EXCLUDE_LOCALS = frozenset({
     "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "privacy",
     "abuse", "webmaster", "postmaster", "security", "careers", "career", "jobs",
     "recruit", "legal", "copyright", "dmca", "dpo", "gdpr", "unsubscribe",
+    # 広報・メディア窓口。提携提案の宛先としては不適切（転送されず終わる）。
+    "press", "media", "publicity", "pressroom", "influencer", "influencers",
 })
 
 
-def email_role(email: str) -> str:
-    """メール local-part の営業役割を返す：high / mid / support / person / exclude / other。"""
+# --- ページ上のラベルによる役割判定 ------------------------------------------ #
+# Contact ページでは各アドレスの用途がラベルで明示されることが多い。
+#   例: "Press & Influencers  ethan@example.com" / "Reseller  sales@example.com"
+# local-part の見た目（"ethan" → 人物）より **ラベルが示す実際の機能**が優先される。
+# 判定は保守的に「除外 → 高価値 → サポート → 汎用」の順で評価する
+# （"Media Sales" のような複合ラベルは送らない側に倒す）。
+_LABEL_ROLE_GROUPS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "press", "media", "influencer", "publicity", "journalist",
+            "recruit", "career", "hiring", "job", "legal", "privacy", "abuse",
+            "広報", "報道", "取材", "採用", "求人", "法務",
+        ),
+        "exclude",
+    ),
+    (
+        (
+            "reseller", "distributor", "distribution", "wholesale", "dealer",
+            "partnership", "partner", "b2b", "export", "oem", "sales",
+            "business development", "international",
+            "代理店", "卸", "販売店", "提携", "法人", "取引",
+        ),
+        "high",
+    ),
+    (
+        (
+            "support", "customer service", "customer care", "after-sales",
+            "after sales", "technical", "warranty", "repair",
+            "サポート", "カスタマー", "保証", "修理",
+        ),
+        "support",
+    ),
+    (
+        ("general", "inquiry", "enquiries", "enquiry", "contact", "お問い合わせ", "問い合わせ"),
+        "mid",
+    ),
+)
+
+
+def role_from_label(label: str | None) -> str | None:
+    """ページ上のラベル文字列から営業役割を返す（判定不能なら None）。"""
+    if not label:
+        return None
+    text = str(label).lower()
+    for terms, role in _LABEL_ROLE_GROUPS:
+        if any(term in text for term in terms):
+            return role
+    return None
+
+
+def label_near_email(text: str, email: str, *, window: int = 60) -> str | None:
+    """本文中でメールアドレスの直前に現れるラベルを抽出する。
+
+    Contact ページは "Press & Influencers ethan@example.com" のように
+    ラベル→アドレスの順で並ぶことが多いため、直前 ``window`` 文字を見る。
+    見つからなければ None。
+    """
+    if not text or not email:
+        return None
+    idx = text.lower().find(email.lower())
+    if idx < 0:
+        return None
+    before = text[max(0, idx - window):idx]
+    # 直前に別のメールアドレスがあれば、それ以降だけを見る。
+    # （"... hello@x.com Press & Influencers ethan@x.com" で hello 側の文脈を拾わない）
+    prev = list(re.finditer(r"[\w.+-]+@[\w.-]+\.\w+", before))
+    if prev:
+        before = before[prev[-1].end():]
+    # 直前の区切り（改行・中黒・記号）以降をラベル候補とする
+    parts = re.split(r"[\n\r\t|•·・>]+", before)
+    cand = (parts[-1] if parts else "").strip(" -–—:：,、")
+    return cand or None
+
+
+def email_role(email: str, *, label: str | None = None) -> str:
+    """メールの営業役割を返す：high / mid / support / person / exclude / other。
+
+    ``label`` にページ上の用途ラベルを渡すと、**local-part の推論より優先**される。
+    例: "ethan@..." は local-part では person だが、ラベルが "Press & Influencers"
+    なら exclude（提携提案の宛先にしてはいけない）。
+    """
+    labeled = role_from_label(label)
+    if labeled is not None:
+        return labeled
     local = (email or "").split("@", 1)[0].strip().lower()
     base = re.split(r"[.+_-]", local)[0] if local else ""
     if local in EXCLUDE_LOCALS or base in EXCLUDE_LOCALS:
