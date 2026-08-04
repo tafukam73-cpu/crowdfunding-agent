@@ -12,6 +12,10 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from app.models.project import SourceSite
+from app.services.source_ownership import (
+    CROWDFUNDING_MARKETING,
+    CROWDFUNDING_PLATFORMS,
+)
 from app.services.url_validation import is_valid_business_url
 
 # source_site → 商品ページとして認める host のサフィックス。
@@ -73,10 +77,35 @@ def campaign_url_of(project) -> str | None:
     return str(url).strip()
 
 
+def is_platform_host(url: str | None) -> bool:
+    """URL がクラファンプラットフォーム／支援代行のドメイン配下かを返す。
+
+    `maker_url` には Kickstarter の `/profile/<slug>` のような **プラットフォーム内の
+    プロフィールページ**が入ることが多い。これは公式サイトではないため、公式サイト
+    判定から除外する必要がある。
+    """
+    if not url:
+        return False
+    host = _host(url)
+    if not host:
+        return False
+    return any(
+        host == d or host.endswith("." + d)
+        for d in (*CROWDFUNDING_PLATFORMS, *CROWDFUNDING_MARKETING)
+    )
+
+
 def official_site_url_of(project) -> str | None:
-    """メーカー/商品の公式サイト URL を返す（案件ページとは別物）。"""
+    """メーカー/商品の公式サイト URL を返す（案件ページとは別物）。
+
+    `maker_url` がクラファンプラットフォーム配下（例: kickstarter.com/profile/xxx）の
+    場合は **公式サイトではない**ため None を返す。公式サイトが必要な呼び出し側は
+    `official_site_verifier.verify_candidate()` で別途確定すること。
+    """
     url = getattr(project, "maker_url", None)
     if not url or not is_valid_business_url(url):
+        return None
+    if is_platform_host(url):
         return None
     return str(url).strip()
 
