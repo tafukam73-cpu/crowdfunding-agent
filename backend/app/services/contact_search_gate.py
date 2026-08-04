@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -55,16 +56,45 @@ GATE_NOT_ELIGIBLE = "not_eligible"
 
 # --- 除外カテゴリ（原則除外または保留） -------------------------------------- #
 # 物理商品でない / 一般消費者向け物販でない企画。
-_NON_PHYSICAL_HINTS = (
-    "app ", "mobile app", "saas", "software only", "web service", "plugin",
-    "subscription service", "アプリ", "ソフトウェア", "サブスクリプション",
-    "movie", "film", "documentary", "short film", "game", "video game",
-    "board game", "tabletop", "book", "novel", "comic", "manga", "album",
-    "music", "song", "concert", "festival", "exhibition", "event",
+# 単独で「非物理」と判断してよい語（物理商品の説明にはまず出ない）。
+_NON_PHYSICAL_STRONG = (
+    "mobile app", "saas", "software only", "web service", "subscription service",
+    "アプリ", "ソフトウェア", "サブスクリプション",
+    "documentary", "short film", "video game", "board game", "tabletop",
+    "concert", "festival", "exhibition",
     "donation", "charity", "fundraiser", "nonprofit", "ngo", "scholarship",
-    "course", "workshop", "membership", "coaching", "consulting", "retreat",
-    "映画", "ゲーム", "書籍", "音楽", "イベント", "寄付", "募金", "講座",
+    "membership", "coaching", "consulting", "retreat", "workshop",
+    "映画", "書籍", "寄付", "募金", "講座",
 )
+# 物理商品の**付随機能・用途**としても出る語。単独では非物理と断定できず、
+# 物理商品を示す語が無い場合にだけ非物理とみなす。
+# 例: "companion app"（ヘッドホン）、"music player"、"gaming headset"、"bookshelf speaker"
+_NON_PHYSICAL_WEAK = (
+    "app", "plugin", "movie", "film", "game", "book", "novel", "comic", "manga",
+    "album", "music", "song", "event", "course",
+    "ゲーム", "音楽", "イベント",
+)
+# 物理商品であることを示す語（_NON_PHYSICAL_WEAK の打ち消しに使う）。
+_PHYSICAL_PRODUCT_HINTS = (
+    "headphone", "headset", "earbud", "earphone", "speaker", "soundbar",
+    "watch", "camera", "lens", "lamp", "flashlight", "lantern", "projector",
+    "bottle", "mug", "tumbler", "cookware", "grill", "cooler", "kettle",
+    "bag", "backpack", "wallet", "case", "pouch", "luggage",
+    "knife", "multitool", "screwdriver", "wrench", "toolkit",
+    "charger", "power bank", "powerbank", "battery", "cable", "adapter",
+    "keyboard", "mouse", "monitor", "printer", "scanner", "drone", "robot",
+    "ring", "bracelet", "pendant", "glasses", "helmet", "shoe", "jacket",
+    "chair", "desk", "mat", "pillow", "blanket",
+    "vacuum", "purifier", "humidifier", "fan", "heater", "massager",
+    "razor", "toothbrush", "trimmer", "brush",
+    "tracker", "sensor", "telescope", "binocular", "microphone", "turntable",
+    "device", "gadget", "hardware", "wearable", "stainless", "aluminum",
+    "titanium", "waterproof", "rechargeable", "bluetooth",
+    "ヘッドホン", "イヤホン", "スピーカー", "時計", "カメラ", "ライト",
+    "ボトル", "バッグ", "充電", "電池", "キーボード", "財布", "ナイフ",
+)
+# 後方互換：既存の参照が壊れないよう全語を残す。
+_NON_PHYSICAL_HINTS = _NON_PHYSICAL_STRONG + _NON_PHYSICAL_WEAK
 # B2B 専用（一般消費者向けでない）。
 _B2B_HINTS = (
     "b2b", "enterprise only", "for businesses only", "wholesale only",
@@ -100,6 +130,36 @@ _APPEAL_HINTS: dict[str, tuple[str, ...]] = {
     "新規性": ("world's first", "first ever", "innovative", "patented", "new type",
                "世界初", "新開発", "特許"),
 }
+
+
+def _has_term(text: str, term: str) -> bool:
+    """語が含まれるかを判定する。
+
+    ラテン文字を含む語は**単語境界**で照合する（"app" が "companion app" には
+    一致し、"application" や "happy" には一致しない）。日本語など単語境界の概念が
+    無い語は従来どおり部分一致で照合する。
+    """
+    if not term:
+        return False
+    if any("a" <= ch <= "z" for ch in term):
+        return re.search(
+            rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text
+        ) is not None
+    return term in text
+
+
+def is_non_physical(text: str) -> bool:
+    """テキストが「物理商品でない企画」を示すかを返す。
+
+    - STRONG 語が1つでもあれば非物理
+    - WEAK 語しかない場合は、物理商品を示す語が**無い**ときにのみ非物理
+      （"companion app" を持つヘッドホンを非物理と誤判定しないため）
+    """
+    if any(_has_term(text, h) for h in _NON_PHYSICAL_STRONG):
+        return True
+    if any(_has_term(text, h) for h in _NON_PHYSICAL_WEAK):
+        return not any(_has_term(text, h) for h in _PHYSICAL_PRODUCT_HINTS)
+    return False
 
 
 def _text_of(project: Project) -> str:
@@ -142,7 +202,7 @@ def japan_crowdfunding_score(db: Session, project: Project) -> tuple[int | None,
 def _excluded_categories(text: str) -> list[str]:
     """原則除外・保留に該当する理由のリスト（該当なしなら空）。"""
     out: list[str] = []
-    if any(h in text for h in _NON_PHYSICAL_HINTS):
+    if is_non_physical(text):
         out.append("物理商品ではない企画（アプリ/映画/ゲーム/書籍/音楽/イベント/寄付 等）の可能性")
     if any(h in text for h in _B2B_HINTS):
         out.append("B2B 専用品の可能性（一般消費者向けではない）")
