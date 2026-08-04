@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git fetch:*)",
+      "Bash(git remote -v)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch --list:*)",
+      "Bash(git branch -a)",
+      "Bash(git branch -vv)",
+      "Bash(git stash list)",
+
+      "Bash(docker ps:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+
+      "Bash(docker compose exec -T backend python -m pytest:*)",
+      "Bash(docker compose exec -T backend alembic current:*)",
+      "Bash(docker compose exec -T backend alembic heads:*)",
+      "Bash(docker compose exec -T backend alembic history:*)",
+      "Bash(docker compose exec -T db pg_dump:*)",
+      "Bash(./scripts/backup-db.sh:*)",
+
+      "Bash(npm run build:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx tsc --noEmit:*)",
+
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)",
+      "Bash(git branch -d:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git checkout main:*)",
+      "Bash(git switch main:*)",
+
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr close:*)",
+      "Bash(gh repo delete:*)",
+
+      "Bash(docker compose exec -T db psql:*)",
+      "Bash(docker exec cfagent-db psql:*)",
+      "Bash(docker compose exec -T backend alembic upgrade:*)",
+      "Bash(docker compose exec -T backend alembic downgrade:*)",
+      "Bash(docker compose down:*)",
+      "Bash(docker compose restart:*)",
+      "Bash(docker compose up:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -r -f:*)",
+      "Bash(Remove-Item -Recurse -Force:*)",
+
+      "Bash(git reset --hard:*)",
+      "Bash(git clean:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(git commit --amend:*)",
+
+      "Bash(npx -y:*)",
+      "Bash(npx --yes:*)",
+
+      "Bash(cat .env:*)",
+      "Bash(cat ./.env:*)",
+      "Bash(type .env:*)",
+      "Bash(Get-Content .env:*)",
+      "Bash(Get-Content ./.env:*)",
+
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./backend/.env)",
+      "Read(./backend/.env.*)",
+      "Read(./frontend/.env)",
+      "Read(./frontend/.env.*)",
+      "Read(./**/credentials.json)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/id_rsa*)",
+      "Read(./**/service-account*.json)",
+
+      "Edit(./.env)",
+      "Edit(./.env.*)",
+      "Edit(./backend/.env)",
+      "Edit(./frontend/.env)",
+
+      "Edit(./backend/tests/contact_intel_eval/WORKLOG_official_site_fp.md)",
+      "Edit(./backend/tests/contact_intel_eval/_final_compare.py)",
+      "Edit(./backend/tests/contact_intel_eval/_measure_eval30.py)",
+      "Edit(./backend/tests/contact_intel_eval/_probe_eval.py)",
+      "Edit(./backend/tests/contact_intel_eval/_reanalyze_prefix.py)",
+      "Edit(./backend/tests/contact_intel_eval/_report_live.py)",
+      "Edit(./backend/tests/contact_intel_eval/_report_phase2.py)",
+      "Edit(./backend/tests/contact_intel_eval/_report_v2.py)",
+      "Edit(./backend/tests/contact_intel_eval/_select_eval30.py)",
+
+      "Bash(docker compose -f docker-compose.prod.yml:*)",
+      "Bash(docker compose -f docker-compose.production.yml:*)",
+      "Bash(docker compose --profile prod:*)"
+    ]
+  }
+}
