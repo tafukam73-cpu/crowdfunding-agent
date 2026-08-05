@@ -56,7 +56,10 @@ def test_label_absent_falls_back():
     check("label なし: sales@ → high", so.email_role("sales@x.com") == "high")
     check("label なし: hello@ → mid", so.email_role("hello@x.com") == "mid")
     check("label なし: support@ → support", so.email_role("support@x.com") == "support")
-    check("label なし: ethan@ → person", so.email_role("ethan@x.com") == "person")
+    # ラベルも氏名一致も無い個人名アドレスは person へ昇格させない（unknown）。
+    check("label なし: ethan@ → unknown", so.email_role("ethan@x.com") == "unknown")
+    check("氏名一致が取れたときだけ person",
+          so.email_role("ethan@x.com", person_confirmed=True) == "person")
     check("label なし: noreply@ → exclude", so.email_role("noreply@x.com") == "exclude")
     check("label=None は従来どおり", so.email_role("sales@x.com", label=None) == "high")
     check("無関係ラベルは無視", so.email_role("sales@x.com", label="Our Office") == "high")
@@ -118,6 +121,8 @@ def test_rank_ordering_unchanged():
     check("high が最優先", r["high"] == 0)
     check("exclude が最下位", r["exclude"] == 9)
     check("high < person < mid < support", r["high"] < r["person"] < r["mid"] < r["support"])
+    check("unknown は support より後ろ", r["unknown"] > r["support"])
+    check("unknown は exclude より前", r["unknown"] < r["exclude"])
 
 
 def main():
