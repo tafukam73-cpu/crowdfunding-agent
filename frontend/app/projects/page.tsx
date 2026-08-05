@@ -8,6 +8,7 @@ import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
 import CrmRegisterButton from "@/components/CrmRegisterButton";
 import SourceBadge from "@/components/SourceBadge";
 import SalesStatusBadge from "@/components/SalesStatusBadge";
+import QualificationBadge from "@/components/QualificationBadge";
 import {
   AVAILABILITY_COLORS,
   AVAILABILITY_LABELS,
@@ -17,6 +18,7 @@ import {
   fundingRate,
   formatDateTime,
   formatMoney,
+  QUALIFICATION_LABELS,
   REC_LABELS,
   SALES_STATUS_LABELS,
   SALES_STATUS_ORDER,
@@ -26,6 +28,7 @@ import {
   type ListParams,
   type Project,
   type ProjectList,
+  type QualificationDecision,
   type Recommendation,
   type SalesStatus,
   type SourceSite,
@@ -74,6 +77,8 @@ export default function ProjectsPage() {
   const [salesStatus, setSalesStatus] = useState<SalesStatus | "">("");
   const [q, setQ] = useState("");
   const [recommendation, setRecommendation] = useState<Recommendation | "">("");
+  // 営業対象判定（**pre_research スナップショット**）での絞り込み。
+  const [qualification, setQualification] = useState<QualificationDecision | "">("");
   const [sort, setSort] = useState("created_at");
   const [order, setOrder] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -104,6 +109,7 @@ export default function ProjectsPage() {
       sales_status: salesStatus,
       q,
       recommendation,
+      qualification,
       archived: showArchived,
       sort,
       order,
@@ -118,12 +124,12 @@ export default function ProjectsPage() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [site, salesStatus, q, recommendation, showArchived, sort, order, page, reloadKey]);
+  }, [site, salesStatus, q, recommendation, qualification, showArchived, sort, order, page, reloadKey]);
 
   // 表示条件が変わったら選択をクリア（別ページ/別ビューの選択を持ち越さない）。
   useEffect(() => {
     setSelected(new Set());
-  }, [site, salesStatus, q, recommendation, showArchived, page, reloadKey]);
+  }, [site, salesStatus, q, recommendation, qualification, showArchived, page, reloadKey]);
 
   function toggleSelected(id: number) {
     setSelected((prev) => {
@@ -147,6 +153,7 @@ export default function ProjectsPage() {
     setSalesStatus("");
     setQ("");
     setRecommendation("");
+    setQualification("");
   }
 
   // 単体：営業対象外にする（理由つき）。ダイアログの確定から呼ぶ。
@@ -192,7 +199,7 @@ export default function ProjectsPage() {
   }
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
-  const hasFilter = Boolean(site || salesStatus || q || recommendation);
+  const hasFilter = Boolean(site || salesStatus || q || recommendation || qualification);
   const colCount = showArchived ? 9 : 10;
 
   return (
@@ -322,6 +329,24 @@ export default function ProjectsPage() {
               </label>
 
               <label className="flex flex-col text-xs text-slate-500">
+                営業対象判定
+                <select
+                  className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
+                  value={qualification}
+                  onChange={(e) => {
+                    setPage(1);
+                    setQualification(e.target.value as QualificationDecision | "");
+                  }}
+                  title="調査前（pre_research）の判定で絞り込みます"
+                >
+                  <option value="">すべて</option>
+                  <option value="blocked">{QUALIFICATION_LABELS.blocked}</option>
+                  <option value="review">{QUALIFICATION_LABELS.review}</option>
+                  <option value="clear">{QUALIFICATION_LABELS.clear}</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col text-xs text-slate-500">
                 並び替え
                 <select
                   className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
@@ -373,6 +398,12 @@ export default function ProjectsPage() {
                   onClear={() => setRecommendation("")}
                 />
               )}
+              {qualification && (
+                <FilterChip
+                  label={`営業対象判定：${QUALIFICATION_LABELS[qualification]}`}
+                  onClear={() => setQualification("")}
+                />
+              )}
             </div>
           )}
         </div>
@@ -403,6 +434,9 @@ export default function ProjectsPage() {
                 )}
                 <th className="px-4 py-2.5">案件名</th>
                 <th className="whitespace-nowrap px-4 py-2.5">営業状況</th>
+                <th className="whitespace-nowrap px-4 py-2.5" title="調査前（pre_research）の判定">
+                  営業対象判定
+                </th>
                 <th className="whitespace-nowrap px-4 py-2.5">募集</th>
                 <th className="whitespace-nowrap px-4 py-2.5">日本販売</th>
                 <th className="whitespace-nowrap px-4 py-2.5 text-right">調達額</th>
@@ -448,6 +482,16 @@ export default function ProjectsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       <SalesStatusBadge status={p.sales_status} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <QualificationBadge
+                        decision={p.lead_qualification_decision}
+                        title={
+                          p.lead_qualification_at
+                            ? `調査前の判定 / ${formatDateTime(p.lead_qualification_at)}`
+                            : "調査前の判定（未判定）"
+                        }
+                      />
                     </td>
                     <td className={`whitespace-nowrap px-4 py-3 text-xs ${state.tone}`}>
                       {state.label}
