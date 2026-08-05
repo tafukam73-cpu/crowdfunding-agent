@@ -69,6 +69,27 @@ BLOG_PLATFORM_HOSTS = (
     "pixnet.net", "xuite.net", "sina.com.cn", "csdn.net", "jianshu.com",
 )
 
+# 小売店・取扱店を示す語（サイト素性に出たら「メーカー本人ではない」証拠）。
+# 判定対象は title / og:site_name / Organization 名などの**素性テキストのみ**。
+# 本文まで見るとメーカー自社サイトの Distributors ページで誤爆する。
+RESELLER_HINTS = (
+    "retailer", "reseller", "dealer", "distributor", "stockist",
+    "authorized dealer", "authorised dealer", "official distributor",
+    "판매점", "판매처", "공식판매점", "공식 판매점", "대리점", "총판",
+    "유통사", "입점", "구매처", "취급점",
+    "販売店", "取扱店", "正規販売店", "代理店", "総代理店", "販売代理店", "購入先",
+)
+# 自社EC・公式ストアを示す語（RESELLER_HINTS の誤爆を打ち消す）。
+# 「公式販売店(공식판매점)」は小売だが「公式ストア(공식몰)」はメーカー自社。
+OFFICIAL_STORE_HINTS = (
+    "official store", "official shop", "official site", "official online store",
+    "brand store", "공식몰", "공식 몰", "공식스토어", "공식 스토어",
+    "공식 온라인몰", "공식홈페이지", "공식 홈페이지",
+    "オフィシャルストア", "公式ストア", "公式サイト", "公式オンラインストア",
+)
+# 「ブランド名 ｜ 別サイト名」形式の区切り文字。
+_SEPARATOR_RE = re.compile(r"\s*[|｜/／>»:：·・–—]\s*|\s+-\s+")
+
 _JSONLD_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
     re.IGNORECASE | re.DOTALL,
@@ -187,6 +208,53 @@ def extract_site_identity(html: str) -> dict:
         "org_count": len(orgs),
         "has_org_jsonld": bool(orgs),
     }
+
+
+def has_reseller_hint(text: str | None) -> bool:
+    """素性テキストが小売・取扱店を示すか（公式ストア語は打ち消す）。"""
+    if not text:
+        return False
+    low = text.lower()
+    if not any(h.lower() in low for h in RESELLER_HINTS):
+        return False
+    # 「公式ストア」「공식몰」等の自社EC表現しか無い場合は小売とみなさない。
+    # ただし「공식판매점（公式販売店）」のように小売語を含む複合語は小売のまま。
+    stripped = low
+    for h in OFFICIAL_STORE_HINTS:
+        stripped = stripped.replace(h.lower(), " ")
+    return any(h.lower() in stripped for h in RESELLER_HINTS)
+
+
+def _split_identity_segments(text: str | None) -> list[str]:
+    """素性テキストを区切りで分割する（'ブランド ｜ 別サイト名' の検出用）。"""
+    if not text:
+        return []
+    return [s.strip() for s in _SEPARATOR_RE.split(text) if s and s.strip()]
+
+
+def looks_reseller_page(identity_texts, maker_name: str | None) -> str | None:
+    """小売・取扱店ページらしさの理由を返す（該当しなければ None）。
+
+    呼び出し側は **ドメインがブランド名と一致しない場合にのみ** 使うこと。
+    自社ドメインであれば運営者はメーカー本人なので、この判定は適用しない。
+    """
+    texts = [t for t in identity_texts if t]
+    for t in texts:
+        if has_reseller_hint(t):
+            return f"サイト素性 '{t}' に小売・取扱店を示す語がある"
+    # 「ブランド名 ｜ 別サイト名」形式：maker 名が一部セグメントにしか現れない
+    for t in texts:
+        segs = _split_identity_segments(t)
+        if len(segs) < 2 or not maker_name:
+            continue
+        hit = [s for s in segs if _contains(s, maker_name)]
+        if hit and len(hit) < len(segs):
+            others = [s for s in segs if s not in hit]
+            return (
+                f"サイト素性 '{t}' がブランド名と別の運営者名 "
+                f"'{others[0]}' に分かれている（取扱店の可能性）"
+            )
+    return None
 
 
 def _contains(haystack: str | None, needle: str | None) -> bool:
@@ -315,6 +383,19 @@ def verify_candidate(
             rs.append("ドメイン語の一致のみで素性の裏付けが無いため確定せず候補扱い")
         else:
             rs.append("素性がメーカー/ブランド/商品名と一致せず確定不可（候補のまま）")
+
+    # 小売・取扱店の降格：**ドメインがブランド名と一致しない（S1 偽）ときだけ**適用する。
+    # 自社ドメインなら運営者はメーカー本人であり、小売語があっても降格しない
+    # （メーカー自社サイトの Distributors ページ等を落とさないため）。
+    if result["verdict"] == "official" and not s1:
+        reseller_reason = looks_reseller_page(identity_texts, maker_name)
+        if reseller_reason:
+            result["verdict"], result["confidence"] = "candidate", "low"
+            result["site_role"] = "reseller_like"
+            rs.append(
+                f"{reseller_reason}。運営者がメーカー本人と確認できないため確定せず候補扱い"
+            )
+            return result
 
     if result["verdict"] == "official":
         result["site_role"] = "maker"
