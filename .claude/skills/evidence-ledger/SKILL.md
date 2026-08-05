@@ -55,6 +55,19 @@ description: 根拠URL・確認日時の記録規約。営業判断に関わる�
 
 **手法ごとに `*_researched_at` が分かれている点が重要です。** どの手法がいつ何を見つけたかを混ぜないでください。
 
+## 判定の正本（Phase C-1 で main へ入った実装）
+
+**独自ロジックを書かず、以下を呼んでください。** いずれも実案件の誤判定を修正したものです。
+
+| 判定 | 正本 | 何を防ぐか |
+|---|---|---|
+| プラットフォーム URL の除外 | `campaign_url.is_platform_host()` / `official_site_url_of()` | Kickstarter の `/profile/xxx` を公式サイトとして扱う誤り（実測 104件中99件） |
+| 非物理商品の判定 | `contact_search_gate.is_non_physical()` | `"companion app"` / 「アプリ連動」を持つ**物理商品**の誤除外 |
+| メール役割の判定 | `source_ownership.classify_email_target()` | 個人情報保護責任者・広報窓口への誤送信 |
+| ブログの除外 | `official_site_verifier.is_blog_platform()` | Tistory / Naver ブログ記事を公式サイトとする誤り |
+| 小売・取扱店の除外 | `official_site_verifier.looks_reseller_page()` / `has_reseller_hint()` | 販売店サイトを公式サイトとする誤り |
+| ディレクトリ / EC / ニュースの除外 | `official_site_verifier.is_directory()` / `is_marketplace()` / `is_news()` | 部分一致により `x.com` が `brandx.com` / `lumix.com` に誤ヒットしていた問題（PR-F で厳密照合へ） |
+
 ## confidence の割り当て
 
 `email_validation.email_confidence()` の既定に従います。**独自の基準を作らないでください。**

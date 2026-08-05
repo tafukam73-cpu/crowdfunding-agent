@@ -50,6 +50,34 @@ description: 1案件を「発見→除外判定→商品把握→maker同定→�
 
 **「急ぎだから [7] を飛ばす」は許容しません。** 誤送信のコストの方が高いためです。
 
+## STOP 条件（1つでも該当したら送信へ進まない）
+
+以下は**すべて停止理由**です。「たぶん大丈夫」で先へ進めないでください。
+
+| # | STOP 条件 | 判定元 |
+|---|---|---|
+| 1 | **official site 未確定** | `verify_candidate` の verdict が `official` でない |
+| 2 | **platform プロフィールのみ** | `campaign_url.is_platform_host()` が真 |
+| 3 | **blog 記事のみ** | `site_role == "blog"` |
+| 4 | **reseller / distributor のみ** | `site_role == "reseller_like"` |
+| 5 | **directory / marketplace / news のみ** | `is_directory` / `is_marketplace` / `is_news` |
+| 6 | **メール所有者が不明** | `classify_domain().is_maker` が偽 |
+| 7 | **role が `unknown`** | ラベルも氏名一致も無い |
+| 8 | **role が privacy / press / support / legal / recruit** | `role == "exclude"` または `support` |
+| 9 | **商品本文が不足** | 取得判定が `partial` / `failed` |
+| 10 | **規制確認が不能** | 仕様表が未取得で技適・PSE を判定できない |
+| 11 | **日本市場確認が不足** | `sas.missing_data()` に必須項目が残る |
+| 12 | **Makuake 向け根拠が不足** | 掲載規約・実施済みチェック未完了 |
+| 13 | **OEM / デジタル商品 / 非物理商品** | `is_non_physical()` が真 |
+| 14 | **既に日本流通済み** | 販売ページ URL を取得できた |
+| 15 | **根拠URL または checked_at の欠落** | [evidence-ledger](../evidence-ledger/SKILL.md) の4点セット未充足 |
+
+### site_role は maker_official と厳密に区別する
+
+`platform` / `blog` / `reseller` / `directory` は**いずれもメーカー本人ではありません**。
+「メーカーに繋がりそうなページが見つかった」ことと「メーカー本人を同定した」ことは別です。
+`site_role == "maker"` かつ `verdict == "official"` のときだけ次工程へ進みます。
+
 ## 実行の作法
 
 ### 重い処理は job 経由（CLAUDE.md §5）
@@ -139,3 +167,9 @@ WHERE p.id = :id;
 | 13 | [reply-rate-analytics](../reply-rate-analytics/SKILL.md) | 返信率の計測と改善 |
 | 14 | [ground-truth-audit](../ground-truth-audit/SKILL.md) | GT 監査 |
 | 15 | [safe-dev-pr](../safe-dev-pr/SKILL.md) / [db-safe-ops](../db-safe-ops/SKILL.md) | 開発・DB 運用 |
+
+## 今後の候補（未実装・追加しないこと）
+
+- **manufacturer-profile-builder**: maker 単位でプロフィール（法人・実績・発送履歴・
+  連絡先）を集約し、複数案件で再利用する構想。**現時点では実装しません。**
+  必要性は、同一 maker の複数案件が増えてから再検討します。

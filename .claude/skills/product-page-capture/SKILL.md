@@ -35,6 +35,26 @@ CLAUDE.md §5 の通り、以下は**すべて別物**です。取り違える�
 `greenfunding.py` `jp_success_base.py` 等。**既存スクレイパがあるプラットフォームは必ずそれを使ってください**
 （HTML構造の知見が入っています）。
 
+## fetcher の指定を省略しない（実案件で 403 になった）
+
+`get_fetcher()` の**既定は `"httpx"`** です。設定を読んでくれません。
+既定のまま Kickstarter を取得すると **HTTP 403** で失敗します（実案件 #151 で確認）。
+
+```python
+from app.config import settings
+from app.scrapers.fetcher import get_fetcher
+
+fetch = get_fetcher(
+    settings.scrape_fetcher,                      # ★ 必ず渡す（既定は httpx）
+    rate_limit_seconds=settings.scrape_rate_limit_seconds,
+    timeout=settings.scrape_timeout_seconds,
+    retries=settings.scrape_retries,
+)
+```
+
+Kickstarter / Indiegogo など JS 描画・ボット対策のあるサイトでは
+**Playwright 指定が必須**です（`SCRAPE_FETCHER=playwright`）。
+
 ## JS 描画ページの扱い
 
 多くのクラファンページは JS 描画です。`SCRAPE_FETCHER` の設定に従い、
@@ -59,6 +79,33 @@ Playwright（Chromium、インストール済み）で取得します。
 - [ ] maker 名・ロゴ・所在地表記（→ [maker-identity-verify](../maker-identity-verify/SKILL.md)）
 - [ ] 外部リンク（**公式サイト候補の一次ソース**。→ [official-site-verify](../official-site-verify/SKILL.md)）
 - [ ] 資金調達状況（達成額・支援者数・終了日）
+
+## 取得成功をバイト数で判定しない
+
+実案件 #151 では Playwright が **1,160,369 バイト**を取得しましたが、
+本文はプラットフォーム共通ナビゲーションが大半で、**商品ストーリーも仕様表も
+含まれていませんでした**（`Bluetooth` / `mAh` / `Battery` / `Specification` すべて不在）。
+
+> **バイト数は取得成功の指標になりません。**
+
+### full / partial / failed の判定基準
+
+| 判定 | 条件 |
+|---|---|
+| **full** | タグ・script・style 除去後の**本文実文字数**が十分（目安 2,000 文字以上）**かつ**必須項目（本文・仕様表・価格）がすべて取れている |
+| **partial** | 本文は取れたが必須項目に欠落がある（例: 仕様表が JS 遅延読込で未取得） |
+| **failed** | HTTP エラー / 本文実文字数が極端に少ない / 必須項目が全滅 |
+
+```python
+import re, html as ht
+body = re.sub(r'(?is)<(script|style)[^>]*>.*?</\1>', ' ', raw)
+body = re.sub(r'(?s)<[^>]+>', ' ', body)
+body = re.sub(r'\s+', ' ', ht.unescape(body))
+len(body)   # ← これで判定する。len(raw) では判定しない
+```
+
+**partial のまま [jp-market-fit](../jp-market-fit/SKILL.md) へ進まないでください。**
+仕様表が無い状態で技適・PSE を判定すると、それは推測になります。
 
 ## 取得できなかった範囲は必ず明示する
 

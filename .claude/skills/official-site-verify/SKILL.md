@@ -35,12 +35,42 @@ osv.verify_candidate(
 |---|---|---|
 | `"official"` | 素性が maker/ブランド/商品名と一致（confidence high/medium） | ✅ 確定してよい |
 | `"candidate"` | 取得できたが確定に足る一致が無い（confidence low） | ⚠️ **候補のまま**。確定しない |
-| `"rejected"` | ECモール / ディレクトリ / 取得不能 | ❌ 公式にしない |
+| `"rejected"` | ECモール / ディレクトリ / ブログ / 取得不能 | ❌ 公式にしない |
 
 **`candidate` を `official` に格上げしないでください。** 追加の根拠を得るまで候補です。
 
-補助判定: `osv.is_marketplace(url)` / `osv.is_directory(url)` / `osv.is_news(url)`
+### `site_role` で相手の正体を区別する
+
+`verify_candidate()` は `site_role` を返します。**`maker` 以外は公式サイトではありません。**
+
+| site_role | 意味 | 公式サイトとして採用 |
+|---|---|---|
+| `maker` | メーカー本人のサイト | ✅ |
+| `blog` | ブログプラットフォーム上の記事 | ❌ |
+| `reseller_like` | 小売店・取扱店・代理店 | ❌（→ 別チャネルとして記録は可） |
+| `unknown` | 判定不能 | ❌ |
+
+さらに以下も別物として区別します。
+- **platform**: クラファン内プロフィール（`campaign_url.is_platform_host()` で判定）
+- **directory**: 企業DB・SNS・サイトビルダー（`osv.is_directory()`）
+
+補助判定: `osv.is_marketplace()` / `osv.is_directory()` / `osv.is_news()` /
+`osv.is_blog_platform()` / `osv.has_reseller_hint()` / `osv.looks_reseller_page()`
 素性抽出: `osv.extract_site_identity(html)` → JSON-LD `Organization` / `<title>` 等
+
+## gate や url_state の `official_site_url` を信用しない
+
+`contact_search_gate.evaluate()` や `campaign_url.url_state()` が返す
+`official_site_url` は **`projects.maker_url` 由来**です。これは確定値ではありません。
+
+```
+❌ gate の official_site_url をそのまま採用する
+✅ 候補として受け取り、必ず verify_candidate() で再検証する
+```
+
+`campaign_url.is_platform_host()` によりクラファン内プロフィールは除外されますが、
+**除外されなかったからといって公式サイトである保証はありません**。
+`maker_url` が単に未設定（`None`）のことも多くあります。
 
 ## 候補の集め方（優先順）
 

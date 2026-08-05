@@ -10,29 +10,86 @@ description: 検証済みメールアドレスの「役割」を判定し、営�
 
 **所有者が正しくても役割が不適切なら送りません。** 所有者検証と役割判定は別工程です。
 
-## 正本は既存実装
+## 正本は `classify_email_target()`
 
 ```python
 from app.services import source_ownership as so
 
-so.email_role(email)   # → "high" | "person" | "mid" | "support" | "other" | "exclude"
-so._ROLE_RANK          # {"high":0, "person":1, "mid":2, "support":3, "other":4, "exclude":9}
+label = so.label_near_email(page_text, email)      # ページ上の用途ラベルを抽出
+r = so.classify_email_target(                       # ★ これを正本として使う
+    email, ctx,
+    label=label,
+    source_url=取得したページURL,
+    checked_at="2026-08-05T00:00:00Z",
+    person_names=公式ページから取れた氏名集合 or None,
+)
+# r["role"] / r["role_source"] / r["label_raw"] / r["source_url"] /
+# r["checked_at"] / r["sendable"] / r["reasons"]
+```
+
+**送信可否は `r["sendable"]` を見ます。** role から自分で判断し直さないでください。
+
+低水準 API（必要な場合のみ）:
+```python
+so.email_role(email, label=..., person_confirmed=...)
+so.classify_email(email, ctx, person_names, label=...)
+so.rank_maker_emails(emails, ctx, labels={email: label, ...})
+so._ROLE_RANK  # {"high":0,"person":1,"mid":2,"support":3,"other":4,"unknown":5,"exclude":9}
 ```
 
 ランクが**小さいほど優先**です。`exclude` (9) は**送信対象外**を意味します。
+
+## 判定の優先順位（この順序が安全性の要）
+
+1. **local-part の hard exclude が最優先**（`noreply` / `press` / `media` / `privacy` /
+   `legal` / `careers` 等）。**ラベルで解除できません**
+2. ページ上の**ラベル**（`label_near_email` の戻り値）
+3. local-part の既知機能語（`sales` / `info` / `support` 等）
+4. `person_confirmed`（公式ページ掲載の氏名と local-part が一致）→ `person`
+5. いずれも無ければ **`unknown`**
+
+### なぜ 1 がラベルより強いのか
+
+実装中に、`media@` の近傍ラベル `PR 문의` に含まれる一般語「문의（問い合わせ）」が
+`mid` に一致し、**送信不可のはずのアドレスが送信可へ降格する**経路が見つかりました。
+ラベルは **exclude への引き上げ**には使いますが、**exclude からの引き下げ**には使いません。
+迷ったら送らない側に倒します。
+
+### ラベルなし・氏名一致なしは `unknown`（person に昇格しない）
+
+`ethan@maker.com` のような個人名アドレスでも、**役割の証拠が無ければ `unknown`** です。
+`unknown` は `sendable=False` であり、**勝手に送信可へ昇格させないでください**。
+`person` になるのは、公式ページから氏名が取れて local-part と一致したときだけです。
 
 ## 役割クラスと集合
 
 | role | rank | 集合 | 送信 | 意味 |
 |---|---|---|---|---|
 | `high` | 0 | `HIGH_VALUE_LOCALS` | ✅ 最優先 | 事業・提携・パートナー窓口 |
-| `person` | 1 | （個人名パターン） | ✅ | 個人宛（担当者が特定できている） |
+| `person` | 1 | 氏名一致（`person_confirmed`）| ✅ | **証拠のある**個人宛 |
 | `mid` | 2 | `MID_VALUE_LOCALS`（contact, hello, info, inquiry, enquiries…） | ✅ | 汎用問い合わせ窓口 |
 | `support` | 3 | `SUPPORT_LOCALS`（support, help, care, service, cs） | ⚠️ | カスタマーサポート。**提携提案には不向き** |
 | `other` | 4 | — | ⚠️ | 分類不能 |
-| `exclude` | 9 | `EXCLUDE_LOCALS` | ❌ **送らない** | no-reply / press / abuse / legal 等 |
+| **`unknown`** | **5** | — | ❌ **送らない** | **役割の証拠なし**。汎用窓口より後ろに置く |
+| `exclude` | 9 | `EXCLUDE_LOCALS` | ❌ **送らない** | no-reply / press / media / privacy / abuse / legal / careers 等 |
 
 `email_validation.NOREPLY_PREFIXES` も併用して no-reply を弾きます。
+
+## 多言語ラベル
+
+`role_from_label()` は英語・日本語・**韓国語**に対応しています。
+
+| 群 | 韓国語の例 |
+|---|---|
+| exclude | `개인정보보호책임자` `개인정보보호` `정보보호책임자` `홍보` `언론` `미디어` `보도` `채용` `법무` |
+| support | `고객센터` `고객지원` `서비스센터` |
+| high | `제휴` `사업제휴` `파트너십` `파트너` `리셀러` `대리점` `총판` `유통` `도매` `수출` `해외영업` `영업` |
+
+複合ラベル（`"Media & Sales"` 等）は**保守的に exclude 側へ倒す**実装です。意図的な設計です。
+
+**ラベルの原文（`label_raw`）・取得元 URL（`source_url`）・確認日時（`checked_at`）を
+必ず保存してください。** 判定根拠が非ラテン文字のとき、原文が無いと後から検証できません
+（→ [evidence-ledger](../evidence-ledger/SKILL.md)）。
 
 ## 宛先の選び方
 

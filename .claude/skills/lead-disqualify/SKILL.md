@@ -33,6 +33,11 @@ result = contact_search_gate.evaluate(db, project, persist=True)
 
 `require_eligible()` は不適格時に `GateBlocked` を送出します。**この例外を握り潰さないでください。**
 
+非物理判定は `contact_search_gate.is_non_physical(text)` が正本です。
+**部分一致ではなく単語境界＋文脈**で判定します（`"companion app"` を持つヘッドホンや
+「アプリ連動」の水耕栽培キットは**物理商品**として扱われます）。自前で語のリストを
+突き合わせないでください。
+
 ## 実行順序
 
 ```
@@ -52,7 +57,9 @@ result = contact_search_gate.evaluate(db, project, persist=True)
 
 | 定数 | 落とす対象 |
 |---|---|
-| `_NON_PHYSICAL_HINTS` | 物理的な商品でない（アプリ・ゲーム・サービス・寄付） |
+| `_NON_PHYSICAL_STRONG` | 単独で非物理と断定できる語（`mobile app` / `saas` / `ソフトウェア` / `サブスクリプション` / `documentary` / `donation` 等） |
+| `_NON_PHYSICAL_WEAK` | 物理商品の付随機能でも出る語（`app` / `game` / `book` / `music` / `アプリ` / `앱` 等）。**単独では非物理と判定しない** |
+| `_PHYSICAL_PRODUCT_HINTS` | WEAK を打ち消す物理商品語（`headphone` / `キット` / `本体` / `アプリ連動` / `companion app` / `앱 연동` 等） |
 | `_BULKY_HINTS` | 大型・重量物（輸送コストが成立しない） |
 | `_MEDICAL_CLAIM_HINTS` | 医療的効能を謳う（薬機法リスク） |
 | `_DANGEROUS_HINTS` | 危険物（輸送・販売規制） |

@@ -24,6 +24,29 @@ pfs.compact_facts(project)          # 圧縮版
 
 日本語要約・特徴抽出は `product_context_service.build(db, project, gate=...)`。
 
+## HTML 生文字列へのキーワード判定を禁止する
+
+実案件 #151 で、生 HTML に対して `IPX` と `Weight` を検索したところ「あり」と出ましたが、
+**実体は CSS と base64 データの中の偶然の一致**でした。script / style を除去した本文で
+再判定すると両方「なし」。誤った「仕様あり」判定は、そのまま誤った規制判定になります。
+
+```python
+import re, html as ht
+
+def page_text(raw: str) -> str:
+    b = re.sub(r'(?is)<(script|style|noscript|template)[^>]*>.*?</\1>', ' ', raw or '')
+    b = re.sub(r'(?is)<!--.*?-->', ' ', b)          # コメント
+    b = re.sub(r'(?s)<[^>]+>', ' ', b)              # タグ
+    return re.sub(r'\s+', ' ', ht.unescape(b))
+
+text = page_text(raw)     # ★ 判定はこれに対して行う
+```
+
+除去対象: **`<script>` / `<style>` / `<noscript>` / HTML コメント / base64 データURI /
+共通ナビゲーション**（プラットフォームのカテゴリ一覧などは商品情報ではありません）。
+
+> **`if "Bluetooth" in raw_html:` は禁止です。** 必ず本文テキストで判定してください。
+
 ## 事実と訴求を分離する
 
 クラファンページは**大半がマーケティングコピー**です。これを事実として扱うと、
