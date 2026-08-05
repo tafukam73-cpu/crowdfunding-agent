@@ -22,37 +22,148 @@ import json
 import re
 from urllib.parse import urlparse
 
+from app.services import source_ownership as _so
+
+# --- ホスト判定の規則 -------------------------------------------------------- #
+# かつては「文字列の部分一致」で判定していたため、``x.com`` が ``brandx.com`` /
+# ``matrix.com`` / ``lumix.com`` などに誤ヒットし、正当なメーカー公式サイトを
+# ディレクトリとして棄却していた。エントリごとに**意図**が異なるため、
+# 3 種類の規則を明示して照合する（自動判別はしない）。
+#
+#   "domain"     … 登録ドメイン/ホスト名そのもの。
+#                  host == value または host.endswith("." + value)
+#   "brand"      … 任意 TLD で展開するブランド（amazon.com / amazon.co.jp / amazon.de）。
+#                  registrable_domain の先頭ラベル == value
+#   "hostprefix" … ホストの先頭ラベル列を指定（news.yahoo.co.jp の "news"）。
+#                  host == value または host.startswith(value + ".")
+_RULE_DOMAIN = "domain"
+_RULE_BRAND = "brand"
+_RULE_HOSTPREFIX = "hostprefix"
+
 # EC モール / マーケットプレイス（メーカー公式サイトではない）。台湾・韓国・日本・グローバル。
-MARKETPLACE_HOSTS = (
-    "shopee.", "momoshop.com.tw", "momo.dm", "pchome.com.tw", "24h.pchome",
-    "ruten.com.tw", "books.com.tw", "pinkoi.com", "yahoo.com", "tw.buy.yahoo",
-    "rakuten.", "amazon.", "ebay.", "etsy.", "aliexpress.", "taobao.", "tmall.",
-    "1688.com", "coupang.", "gmarket.", "11st.", "qoo10.", "lazada.", "shopify.com",
-    "myshopify.com", "shoplineapp.com", "cyberbiz.co", "waca.ec", "meepshop.",
-    "91app.", "shop.line.me", "page.line.me",
+MARKETPLACE_RULES = (
+    (_RULE_BRAND, "shopee"),            # shopee.tw / shopee.sg / shopee.co.id
+    (_RULE_DOMAIN, "momoshop.com.tw"),
+    (_RULE_DOMAIN, "momo.dm"),
+    (_RULE_DOMAIN, "pchome.com.tw"),
+    (_RULE_HOSTPREFIX, "24h.pchome"),   # 24h.pchome.com.tw
+    (_RULE_DOMAIN, "ruten.com.tw"),
+    (_RULE_DOMAIN, "books.com.tw"),
+    (_RULE_DOMAIN, "pinkoi.com"),
+    (_RULE_DOMAIN, "yahoo.com"),
+    (_RULE_HOSTPREFIX, "tw.buy.yahoo"),  # tw.buy.yahoo.com
+    (_RULE_BRAND, "rakuten"),           # rakuten.co.jp / rakuten.com
+    (_RULE_BRAND, "amazon"),            # amazon.com / amazon.co.jp / amazon.de
+    (_RULE_BRAND, "ebay"),              # ebay.com / ebay.co.uk
+    (_RULE_BRAND, "etsy"),
+    (_RULE_BRAND, "aliexpress"),
+    (_RULE_BRAND, "taobao"),
+    (_RULE_BRAND, "tmall"),
+    (_RULE_DOMAIN, "1688.com"),
+    (_RULE_BRAND, "coupang"),           # coupang.com / coupang.co.kr
+    (_RULE_BRAND, "gmarket"),           # gmarket.co.kr
+    (_RULE_BRAND, "11st"),              # 11st.co.kr
+    (_RULE_BRAND, "qoo10"),             # qoo10.jp / qoo10.sg
+    (_RULE_BRAND, "lazada"),
+    (_RULE_DOMAIN, "shopify.com"),
+    (_RULE_DOMAIN, "myshopify.com"),
+    (_RULE_DOMAIN, "shoplineapp.com"),
+    (_RULE_DOMAIN, "cyberbiz.co"),
+    (_RULE_DOMAIN, "waca.ec"),
+    (_RULE_BRAND, "meepshop"),
+    (_RULE_BRAND, "91app"),
+    (_RULE_DOMAIN, "shop.line.me"),
+    (_RULE_DOMAIN, "page.line.me"),
 )
 
 # ニュース / メディア / 情報サイト（案件について書いた記事であって公式サイトではない）。
 # 記事タイトルにメーカー名が出るため一致してしまうが、公式サイトとして採用しない。
-NEWS_HOSTS = (
-    "thenewslens.com", "udn.com", "ettoday.net", "chinatimes.com", "ltn.com.tw",
-    "setn.com", "tvbs.com.tw", "storm.mg", "cna.com.tw", "nownews.com",
-    "businessweekly.com.tw", "bnext.com.tw", "technews.tw", "cool3c.com",
-    "inside.com.tw", "mashdigi.com", "yahoo.com", "news.", "appledaily.",
-    "prnewswire.", "businesswire.", "sportsv.net", "tsna.com.tw",
+NEWS_RULES = (
+    (_RULE_DOMAIN, "thenewslens.com"),
+    (_RULE_DOMAIN, "udn.com"),
+    (_RULE_DOMAIN, "ettoday.net"),
+    (_RULE_DOMAIN, "chinatimes.com"),
+    (_RULE_DOMAIN, "ltn.com.tw"),
+    (_RULE_DOMAIN, "setn.com"),
+    (_RULE_DOMAIN, "tvbs.com.tw"),
+    (_RULE_DOMAIN, "storm.mg"),
+    (_RULE_DOMAIN, "cna.com.tw"),
+    (_RULE_DOMAIN, "nownews.com"),
+    (_RULE_DOMAIN, "businessweekly.com.tw"),
+    (_RULE_DOMAIN, "bnext.com.tw"),
+    (_RULE_DOMAIN, "technews.tw"),
+    (_RULE_DOMAIN, "cool3c.com"),
+    (_RULE_DOMAIN, "inside.com.tw"),
+    (_RULE_DOMAIN, "mashdigi.com"),
+    (_RULE_DOMAIN, "yahoo.com"),
+    (_RULE_HOSTPREFIX, "news"),         # news.yahoo.co.jp / news.mynavi.jp
+    (_RULE_BRAND, "appledaily"),        # appledaily.com / appledaily.com.tw
+    (_RULE_BRAND, "prnewswire"),
+    (_RULE_BRAND, "businesswire"),
+    (_RULE_DOMAIN, "sportsv.net"),
+    (_RULE_DOMAIN, "tsna.com.tw"),
 )
 
 # 企業ディレクトリ / 集約 / 百科 / 求人 / SNS / 動画（公式サイトではない）。
-DIRECTORY_HOSTS = (
-    "findcompany.com.tw", "companyinfotw.com", "twincn.com", "iyp.com.tw",
-    "crunchbase.com", "wikipedia.org", "wikiwand.com", "linkedin.com",
-    "facebook.com", "instagram.com", "youtube.com", "youtu.be", "twitter.com",
-    "x.com", "tiktok.com", "medium.com", "linktr.ee", "104.com.tw", "1111.com.tw",
-    "glassdoor.", "yelp.", "tripadvisor.", "google.com", "bing.com",
+DIRECTORY_RULES = (
+    (_RULE_DOMAIN, "findcompany.com.tw"),
+    (_RULE_DOMAIN, "companyinfotw.com"),
+    (_RULE_DOMAIN, "twincn.com"),
+    (_RULE_DOMAIN, "iyp.com.tw"),
+    (_RULE_DOMAIN, "crunchbase.com"),
+    (_RULE_DOMAIN, "wikipedia.org"),
+    (_RULE_DOMAIN, "wikiwand.com"),
+    (_RULE_DOMAIN, "linkedin.com"),
+    (_RULE_DOMAIN, "facebook.com"),
+    (_RULE_DOMAIN, "instagram.com"),
+    (_RULE_DOMAIN, "youtube.com"),
+    (_RULE_DOMAIN, "youtu.be"),
+    (_RULE_DOMAIN, "twitter.com"),
+    (_RULE_DOMAIN, "x.com"),            # ← 旧・部分一致では brandx.com 等に誤ヒットしていた
+    (_RULE_DOMAIN, "tiktok.com"),
+    (_RULE_DOMAIN, "medium.com"),
+    (_RULE_DOMAIN, "linktr.ee"),
+    (_RULE_DOMAIN, "104.com.tw"),
+    (_RULE_DOMAIN, "1111.com.tw"),
+    (_RULE_BRAND, "glassdoor"),         # glassdoor.com / glassdoor.co.uk
+    (_RULE_BRAND, "yelp"),              # yelp.com / yelp.co.jp
+    (_RULE_BRAND, "tripadvisor"),       # tripadvisor.com / tripadvisor.jp
+    (_RULE_DOMAIN, "google.com"),
+    (_RULE_DOMAIN, "bing.com"),
     # サイトビルダーのトップページ（ブランドサイトではなくビルダー自身）
-    "squarespace.com", "wixsite.com", "wix.com", "weebly.com", "godaddysites.com",
-    "webnode.", "strikingly.com", "carrd.co", "notion.site",
+    (_RULE_DOMAIN, "squarespace.com"),
+    (_RULE_DOMAIN, "wixsite.com"),
+    (_RULE_DOMAIN, "wix.com"),
+    (_RULE_DOMAIN, "weebly.com"),
+    (_RULE_DOMAIN, "godaddysites.com"),
+    (_RULE_BRAND, "webnode"),           # webnode.com / webnode.jp
+    (_RULE_DOMAIN, "strikingly.com"),
+    (_RULE_DOMAIN, "carrd.co"),
+    (_RULE_DOMAIN, "notion.site"),
 )
+
+
+def _legacy_hosts(rules) -> tuple[str, ...]:
+    """旧来の文字列タプル表現を規則から復元する（後方互換の参照用）。
+
+    照合には使わない。外部が ``MARKETPLACE_HOSTS`` 等を参照していても壊れないよう
+    残すためのもので、規則との二重管理（ドリフト）を避けるため導出する。
+    """
+    out = []
+    for kind, value in rules:
+        if kind == _RULE_DOMAIN:
+            out.append(value)
+        elif kind == _RULE_BRAND:
+            out.append(value + ".")
+        else:  # hostprefix
+            out.append(value if "." in value else value + ".")
+    return tuple(out)
+
+
+# 後方互換：旧定数を維持する（判定には _RULES を使う）。
+MARKETPLACE_HOSTS = _legacy_hosts(MARKETPLACE_RULES)
+NEWS_HOSTS = _legacy_hosts(NEWS_RULES)
+DIRECTORY_HOSTS = _legacy_hosts(DIRECTORY_RULES)
 
 # ブログプラットフォーム（記事であってメーカー公式サイトではない）。
 # 記事本文にメーカー名も商品名も出るため素性一致してしまうが、公式サイトにしない。
@@ -103,7 +214,26 @@ _ORG_TYPES = {
 
 
 def _host(url: str) -> str:
-    net = urlparse(url or "").netloc.lower()
+    """URL からホストを取り出して正規化する。
+
+    小文字化 / 認証情報の除去 / ポート番号の除去 / 末尾ドットの除去を行い、
+    既存仕様どおり先頭の ``www.`` を落とす。解析できない場合は空文字を返し、
+    呼び出し側では「どのリストにも一致しない（＝棄却しない）」安全側に倒す。
+    """
+    try:
+        net = urlparse(url or "").netloc
+    except ValueError:
+        return ""
+    net = (net or "").strip().lower()
+    if not net:
+        return ""
+    if "@" in net:                       # user:pass@host
+        net = net.rsplit("@", 1)[-1]
+    if net.startswith("["):              # IPv6 リテラル [::1]:8080
+        net = net[1:].split("]", 1)[0]
+    else:
+        net = net.split(":", 1)[0]       # ポート除去
+    net = net.rstrip(".")                # 末尾ドット（FQDN 表記）除去
     return net[4:] if net.startswith("www.") else net
 
 
@@ -119,33 +249,59 @@ def _domain_token(url: str) -> str:
     return host
 
 
+def _host_matches(host: str, rules) -> bool:
+    """正規化済みホストが規則群のいずれかに一致するか。
+
+    **部分一致はしない。** ``x.com`` が ``brandx.com`` に一致するような
+    誤判定を構造的に防ぐため、規則の種別ごとに照合方法を分ける。
+    """
+    if not host:
+        return False
+    brand = _so.domain_token(host)   # 登録ドメインの先頭ラベル（二段 TLD 対応）
+    for kind, value in rules:
+        if kind == _RULE_DOMAIN:
+            if host == value or host.endswith("." + value):
+                return True
+        elif kind == _RULE_BRAND:
+            if brand and brand == value:
+                return True
+        elif kind == _RULE_HOSTPREFIX:
+            if host == value or host.startswith(value + "."):
+                return True
+    return False
+
+
 def _match_any(host: str, hints) -> bool:
+    """後方互換のために残す旧 API（部分一致）。
+
+    新しい判定では使わない。``x.com`` が ``brandx.com`` に一致する問題があるため、
+    新規コードでは ``_host_matches`` を使うこと。
+    """
     return any(h in host for h in hints)
 
 
 def is_marketplace(url: str) -> bool:
-    return _match_any(_host(url), MARKETPLACE_HOSTS)
+    return _host_matches(_host(url), MARKETPLACE_RULES)
 
 
 def is_directory(url: str) -> bool:
-    return _match_any(_host(url), DIRECTORY_HOSTS)
+    return _host_matches(_host(url), DIRECTORY_RULES)
 
 
 def is_news(url: str) -> bool:
-    return _match_any(_host(url), NEWS_HOSTS)
+    return _host_matches(_host(url), NEWS_RULES)
 
 
 def is_blog_platform(url: str) -> bool:
     """URL がブログプラットフォーム上の記事かを返す。
 
-    ``_match_any`` の部分一致は使わない。``blog.mycompany.com`` のような
-    **独自ドメインの企業ブログ**を巻き込まないよう、登録ドメインの
-    サフィックス一致（host == d または host.endswith("." + d)）で判定する。
+    部分一致は使わない。``blog.mycompany.com`` のような**独自ドメインの
+    企業ブログ**を巻き込まないよう、サフィックス一致で判定する。
+    全エントリが完全ドメインのため ``_RULE_DOMAIN`` として照合する。
     """
-    host = _host(url)
-    if not host:
-        return False
-    return any(host == d or host.endswith("." + d) for d in BLOG_PLATFORM_HOSTS)
+    return _host_matches(
+        _host(url), tuple((_RULE_DOMAIN, d) for d in BLOG_PLATFORM_HOSTS)
+    )
 
 
 def _tokens(*texts: str) -> set[str]:
