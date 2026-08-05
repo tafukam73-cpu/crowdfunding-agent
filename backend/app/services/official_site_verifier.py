@@ -54,6 +54,21 @@ DIRECTORY_HOSTS = (
     "webnode.", "strikingly.com", "carrd.co", "notion.site",
 )
 
+# ブログプラットフォーム（記事であってメーカー公式サイトではない）。
+# 記事本文にメーカー名も商品名も出るため素性一致してしまうが、公式サイトにしない。
+# **登録ドメインのサフィックス一致**で判定する（部分一致にすると独自ドメインの
+# 企業ブログ blog.example.com まで巻き込むため）。
+BLOG_PLATFORM_HOSTS = (
+    "tistory.com", "blog.naver.com", "blog.me", "post.naver.com",
+    "brunch.co.kr", "postype.com", "egloos.com",
+    "blogspot.com", "blogger.com", "medium.com", "substack.com",
+    "note.com", "ameblo.jp", "hatenablog.com", "hatenadiary.com",
+    "hatena.ne.jp", "livedoor.jp", "livedoor.blog", "fc2.com",
+    "wordpress.com", "tumblr.com", "exblog.jp", "seesaa.net",
+    "goo.ne.jp", "jugem.jp", "cocolog-nifty.com",
+    "pixnet.net", "xuite.net", "sina.com.cn", "csdn.net", "jianshu.com",
+)
+
 _JSONLD_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
     re.IGNORECASE | re.DOTALL,
@@ -97,6 +112,19 @@ def is_directory(url: str) -> bool:
 
 def is_news(url: str) -> bool:
     return _match_any(_host(url), NEWS_HOSTS)
+
+
+def is_blog_platform(url: str) -> bool:
+    """URL がブログプラットフォーム上の記事かを返す。
+
+    ``_match_any`` の部分一致は使わない。``blog.mycompany.com`` のような
+    **独自ドメインの企業ブログ**を巻き込まないよう、登録ドメインの
+    サフィックス一致（host == d または host.endswith("." + d)）で判定する。
+    """
+    host = _host(url)
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in BLOG_PLATFORM_HOSTS)
 
 
 def _tokens(*texts: str) -> set[str]:
@@ -192,6 +220,7 @@ def verify_candidate(
         "org_name": None,
         "legal_name": None,
         "site_name": None,
+        "site_role": "unknown",
         "reasons": [],
     }
     ev: list[str] = result["evidence"]
@@ -200,6 +229,13 @@ def verify_candidate(
     if is_marketplace(url):
         result["verdict"] = "rejected"
         rs.append("EC モール/マーケットプレイス（公式サイトではない）")
+        return result
+    if is_blog_platform(url):
+        # ブログ記事はメーカー名・商品名を本文に含むため素性一致するが、
+        # 企業公式サイトではない。confidence 昇格経路に到達させない。
+        result["verdict"] = "rejected"
+        result["site_role"] = "blog"
+        rs.append("ブログプラットフォーム上の記事（企業公式サイトではない）")
         return result
     if is_directory(url):
         result["verdict"] = "rejected"
@@ -279,5 +315,8 @@ def verify_candidate(
             rs.append("ドメイン語の一致のみで素性の裏付けが無いため確定せず候補扱い")
         else:
             rs.append("素性がメーカー/ブランド/商品名と一致せず確定不可（候補のまま）")
+
+    if result["verdict"] == "official":
+        result["site_role"] = "maker"
 
     return result
