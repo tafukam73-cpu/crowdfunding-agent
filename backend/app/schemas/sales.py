@@ -301,8 +301,12 @@ class OutreachOut(BaseModel):
     replied_at: str | None = None
     last_activity_at: str | None = None
     notes: str | None = None
-    # 既存 Gmail compose を再利用した送信 URL（推奨言語・宛先入り。未生成なら None）。
+    # 既存 Gmail compose を再利用した送信 URL（推奨言語・宛先入り）。
+    # 未生成、または営業対象判定が clear でない場合は None（送信導線を出さない）。
     gmail_compose_url: str | None = None
+    # 最新の保存済み pre_outreach 判定（blocked / review / clear）。未判定は None。
+    # 送信導線を出さなかった理由を画面が説明するための値。スコアは含まない。
+    qualification_decision: str | None = None
     recipient: str | None = None
     # --- 送信後ワークフロー（0045） ---
     recipient_email: str | None = None

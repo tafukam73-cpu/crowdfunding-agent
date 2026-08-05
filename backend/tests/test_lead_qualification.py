@@ -542,8 +542,12 @@ def test_category_s():
     o = lq.qualify(unknown, PRE_O, now=NOW)
     check("S hit（公式サイト未検証）", verdict(r, "S") == "hit")
     check("S は pre_research で info", sev(r, "S") == "info")
-    check("S は pre_outreach で blocker", sev(o, "S") == "blocker")
-    check("S pre_outreach の decision は blocked", o.decision == "blocked")
+    # 公式サイト未検証は「探索が未完了」を示すことが多く、単独で送信を止める
+    # 根拠にはしない（maker 同定は E が別経路で判定する）。
+    check("S は pre_outreach で review（単独で送信を止めない）",
+          sev(o, "S") == "review")
+    check("S だけでは blocked にならない（maker 同定済みなら review 止まり）",
+          o.decision == "review")
     cand = lq.qualify(base_signals(official_site={"url": "https://maybe.example",
                                                   "verified": False}), PRE_R, now=NOW)
     check("S 候補ありで未検証は pre_research で review", sev(cand, "S") == "review")
@@ -649,8 +653,10 @@ def test_stage_difference_summary():
     o = lq.qualify(sig, PRE_O, now=NOW)
     check("D/E/S は pre_research で blocker にならない",
           not ({"D", "E", "S"} & set(r.blocker_codes)))
-    check("D/E/S は pre_outreach で blocker になる",
-          {"D", "E", "S"} <= set(o.blocker_codes))
+    check("D/E は pre_outreach で blocker になる",
+          {"D", "E"} <= set(o.blocker_codes))
+    check("S は pre_outreach で review（送信を単独で止めない）",
+          "S" in o.review_codes)
     check("pre_research の decision は blocked ではない", r.decision != "blocked")
     check("pre_outreach の decision は blocked", o.decision == "blocked")
     check("stage が Finding に記録される", all(f.stage == PRE_O for f in o.findings))

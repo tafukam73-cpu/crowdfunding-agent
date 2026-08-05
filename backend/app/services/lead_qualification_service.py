@@ -954,9 +954,11 @@ def _rule_f(signals: dict, stage: str, now: datetime) -> Finding:
             facts={"japan_official_sales": False},
         )
 
-    severity = SEVERITY_INFO if stage == STAGE_PRE_RESEARCH else SEVERITY_REVIEW
+    # 日本販売チェックが未実施なのは「調査すべき理由」であって「送信を止める
+    # 理由」ではない。どのステージでも info に留める（証跡が無いことを停止根拠に
+    # しないという原則どおり）。
     return _finding(
-        "F", stage, verdict=VERDICT_INSUFFICIENT, severity=severity,
+        "F", stage, verdict=VERDICT_INSUFFICIENT, severity=SEVERITY_INFO,
         confidence=CONFIDENCE_UNVERIFIED,
         reason="日本販売状況が未確定（未実施 / inconclusive）",
     )
@@ -1187,10 +1189,16 @@ def _rule_s(signals: dict, stage: str, now: datetime) -> Finding:
         )
     ]
     if stage == STAGE_PRE_OUTREACH:
+        # 公式サイト未検証は「探索が未完了」を意味することが多く、単独で送信を
+        # 止める根拠にはしない（maker 同定は E が別経路で判定する）。人が確認
+        # すべき事項として review に留める。
         return _finding(
-            "S", stage, verdict=VERDICT_HIT, severity=SEVERITY_BLOCKER,
+            "S", stage, verdict=VERDICT_HIT, severity=SEVERITY_REVIEW,
             confidence=CONFIDENCE_HIGH,
-            reason="ブランド所有者を特定できていない状態で営業メールを送ることはできない",
+            reason=(
+                "公式サイトを検証できていないため、ブランド所有者を確認してから"
+                "送信すること"
+            ),
             evidence=ev,
         )
     severity = SEVERITY_REVIEW if official.get("url") else SEVERITY_INFO
@@ -1499,7 +1507,9 @@ def gather_signals(db, project) -> dict:
     signals["contact_form_url"] = (
         getattr(disc, "primary_contact_form_url", None) if disc is not None else None
     )
-    signals["maker_identity"] = _maker_identity_signal(disc, signals["official_site"])
+    signals["maker_identity"] = _maker_identity_signal(
+        disc, signals["official_site"], signals["business_emails"]
+    )
     signals["japan_sales"] = _japan_sales_signal(db, project, jss, sas)
     signals["creator_domain"] = _creator_domain_signal(project, disc, so, url_state)
     signals["business_facts"] = _business_facts(project)
@@ -1600,20 +1610,45 @@ def _decision_maker_signals(db, project_id: int, chs) -> list[dict]:
     return out
 
 
-def _maker_identity_signal(disc, official: dict) -> dict:
-    """maker identity の確定状況。公式サイトの検証結果を根拠にする。
+# メールの保存済み役割のうち「メーカー本人が保有している」ことを示す値。
+# source_ownership.classify_domain の分類値に合わせる。**推測では格上げしない。**
+_MAKER_OWNED_EMAIL_ROLES = ("maker_official", "maker_subdomain")
 
-    公式サイトが検証済みであることをもって「メーカー本人を同定できた」と扱う。
-    ここで新たな推論は行わない（同定そのものは maker-identity-verify の工程）。
+
+def _maker_identity_signal(disc, official: dict, emails: list[dict]) -> dict:
+    """maker identity の確定状況。
+
+    同定の根拠は 2 経路ある。**公式サイトの有無だけに依存させない**
+    （v2 探索が未実施なだけの案件を「メーカー不明」と扱わないため）。
+
+      1. 公式サイトが検証済み
+      2. **メーカー本人が保有するメール**が、取得元 URL と確認日時つきで取れている
+         （`source_ownership` の分類で maker_official / maker_subdomain のもの）
+
+    取得元 URL の無いメール（取得元不明）では格上げしない。evidence-ledger の
+    「推測は unverified。low に格上げしない」に従う。
     """
-    if not official.get("verified"):
-        return {"verified": False}
-    return {
-        "verified": True,
-        "source_url": official.get("source_url"),
-        "checked_at": official.get("checked_at"),
-        "method": official.get("method"),
-    }
+    if official.get("verified"):
+        return {
+            "verified": True,
+            "source_url": official.get("source_url"),
+            "checked_at": official.get("checked_at"),
+            "method": official.get("method"),
+            "basis": "official_site",
+        }
+    for item in emails or []:
+        if item.get("role") not in _MAKER_OWNED_EMAIL_ROLES:
+            continue
+        if not item.get("source_url") or not item.get("checked_at"):
+            continue
+        return {
+            "verified": True,
+            "source_url": item.get("source_url"),
+            "checked_at": item.get("checked_at"),
+            "method": item.get("method"),
+            "basis": "maker_owned_email",
+        }
+    return {"verified": False}
 
 
 def _japan_sales_signal(db, project, jss, sas) -> dict:
