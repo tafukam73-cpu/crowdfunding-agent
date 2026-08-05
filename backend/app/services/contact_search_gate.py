@@ -242,12 +242,11 @@ def _appeal_points(text: str) -> list[str]:
     return points
 
 
-def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
-    """ゲートを判定する。persist=True なら判定結果を projects へ保存する。
+def _evaluate_gate_only(db: Session, project: Project) -> dict:
+    """既存のゲート判定（makuake_fit 45/30 ＋ 除外語 ＋ 訴求点）だけを行う。
 
-    Returns:
-        eligible_for_contact_search / contact_search_gate_reason /
-        japan_crowdfunding_score / gate_checked_at / reasons / rationale
+    **この関数のロジックは LQE 導入前と同一**（温存パス）。判定結果を保存せず、
+    dict を返すだけ。LQE との合成は ``merge_gate_with_lqe`` が行う。
     """
     text = _text_of(project)
     reasons: list[str] = []
@@ -322,7 +321,7 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
 
     eligible = decision == GATE_ELIGIBLE
     checked_at = _now()
-    result = {
+    return {
         "eligible_for_contact_search": eligible,
         "contact_search_gate_decision": decision,
         # gate_reason は内部ログ・監査用（スコアを含む）。画面には user_reasons を使う。
@@ -341,12 +340,182 @@ def evaluate(db: Session, project: Project, *, persist: bool = True) -> dict:
         **url_state,
     }
 
+
+def _qualify_or_none(db: Session, project: Project):
+    """LQE の判定（pre_research）を返す。実行できなければ None。
+
+    ``lead_qualification_service`` は遅延 import する（LQE 側も非物理語彙のために
+    このモジュールを遅延 import しており、module レベルだと循環するため）。
+
+    **``run()`` は呼ばない。** 履歴は書かず、``gather_signals`` → ``qualify`` の
+    読み取り＋純粋関数だけを使う（外部 HTTP なし・DB 書き込みなし）。
+    LQE 側の失敗でゲート全体を止めないよう、例外は握って None を返す。
+    """
+    try:
+        from app.services import lead_qualification_service as lqs
+
+        signals = lqs.gather_signals(db, project)
+        return lqs.qualify(signals, lqs.STAGE_PRE_RESEARCH)
+    except Exception as exc:  # noqa: BLE001  LQE 失敗でゲートを止めない
+        logger.warning("lead qualification failed (project=%s): %s", project.id, exc)
+        return None
+
+
+# --------------------------------------------------------------------------- #
+#  LQE との合成（純粋関数）
+# --------------------------------------------------------------------------- #
+# 判定の重さ。小さいほど厳しい。合成では **決して緩和しない**（never upgrade）。
+_DECISION_RANK = {GATE_NOT_ELIGIBLE: 0, GATE_NEEDS_REVIEW: 1, GATE_ELIGIBLE: 2}
+
+# merge が付与する LQE 由来のキー。PR-3 では **既定でレスポンスに出さない**
+# （API を変えないため）。公開は PR-4 の専用エンドポイントで行う。
+LQE_DETAIL_FIELDS: tuple[str, ...] = (
+    "lqe_decision", "lqe_blocker_codes", "lqe_review_codes",
+)
+
+_PAREN_RE = re.compile(r"[（(][^）)]*[）)]")
+
+
+def _normalize_reason(text: str) -> str:
+    """理由文の重複判定用に正規化する（括弧内の補足と空白を落とす）。"""
+    return re.sub(r"\s+", "", _PAREN_RE.sub("", text or ""))
+
+
+def _is_duplicate_reason(candidate: str, existing_norms: list[str]) -> bool:
+    """既出の理由と同じことを言っているか（部分一致を含む）。"""
+    norm = _normalize_reason(candidate)
+    if not norm:
+        return True
+    return any(norm in e or e in norm for e in existing_norms if e)
+
+
+def _split_reason(text: str) -> list[str]:
+    """LQE の理由は複数事実を "; " で連結していることがあるため分解する。"""
+    return [part.strip() for part in (text or "").split(";") if part.strip()]
+
+
+def merge_gate_with_lqe(gate_result: dict, qualification_result) -> dict:
+    """既存ゲートの判定と LQE の判定を合成する（**純粋関数**）。
+
+    DB アクセス・外部 HTTP・commit を一切行わない。入力の dict も変更せず、
+    新しい dict を返す。
+
+    合成ルール:
+      - LQE ``blocked``  → ゲートを ``not_eligible`` へ**降格**し、blocker の理由を追記
+      - LQE ``review``   → **decision は変えない。** 理由だけ追記する
+      - LQE ``clear``    → ゲート結果をそのまま返す
+      - **never upgrade**: どの場合もゲートより緩い判定にはしない
+
+    理由は重複排除する（ゲートの「商品ページURL未確認」と LQE の T が同じ事実を
+    二重に出さない）。LQE 由来のキー（LQE_DETAIL_FIELDS）の付与もこの関数の責務。
+
+    Args:
+        gate_result: ``_evaluate_gate_only`` の戻り値。
+        qualification_result: ``lead_qualification_service.QualificationResult``
+            または None（LQE を実行できなかった場合。その場合はゲート結果を返す）。
+    """
+    merged = dict(gate_result)
+    if qualification_result is None:
+        return merged
+
+    lqe_decision = getattr(qualification_result, "decision", None)
+    blocker_codes = list(getattr(qualification_result, "blocker_codes", []) or [])
+    review_codes = list(getattr(qualification_result, "review_codes", []) or [])
+    findings = list(getattr(qualification_result, "findings", []) or [])
+
+    merged["lqe_decision"] = lqe_decision
+    merged["lqe_blocker_codes"] = blocker_codes
+    merged["lqe_review_codes"] = review_codes
+
+    severities = {"blocked": "blocker", "review": "review"}
+    target = severities.get(lqe_decision or "")
+    if target is None:  # clear（または未知値）→ ゲート結果をそのまま
+        return merged
+
+    # 追記する理由（decision を動かした/人が見るべき Finding の理由だけ）。
+    user_reasons = list(merged.get("user_reasons") or [])
+    blockers = list(merged.get("blockers") or [])
+    existing_norms = [_normalize_reason(r) for r in user_reasons + blockers]
+
+    added: list[str] = []
+    for finding in findings:
+        if getattr(finding, "severity", None) != target:
+            continue
+        for part in _split_reason(getattr(finding, "reason", "")):
+            if _is_duplicate_reason(part, existing_norms):
+                continue
+            added.append(part)
+            existing_norms.append(_normalize_reason(part))
+
+    if target == "blocker":
+        # LQE が証跡付きで止めている → ゲートを not_eligible へ降格する。
+        merged["contact_search_gate_decision"] = GATE_NOT_ELIGIBLE
+        merged["eligible_for_contact_search"] = False
+        blockers.extend(added)
+        merged["blockers"] = blockers
+        if added:
+            merged["contact_search_gate_reason"] = "; ".join(
+                [merged.get("contact_search_gate_reason") or "", *added]
+            ).strip("; ")
+            merged["rationale"] = merged["contact_search_gate_reason"]
+    user_reasons.extend(added)
+    merged["user_reasons"] = user_reasons
+
+    # never upgrade の保証：合成後がゲート単独より緩くなっていないことを確認する。
+    before = _DECISION_RANK.get(gate_result.get("contact_search_gate_decision"), 2)
+    after = _DECISION_RANK.get(merged["contact_search_gate_decision"], 2)
+    if after > before:
+        merged["contact_search_gate_decision"] = gate_result[
+            "contact_search_gate_decision"
+        ]
+        merged["eligible_for_contact_search"] = gate_result[
+            "eligible_for_contact_search"
+        ]
+    return merged
+
+
+def evaluate(
+    db: Session,
+    project: Project,
+    *,
+    persist: bool = True,
+    include_lqe_detail: bool = False,
+) -> dict:
+    """ゲートを判定する。persist=True なら判定結果を projects へ保存する。
+
+    流れ: 既存ゲート → gather_signals() → qualify() → merge_gate_with_lqe()
+
+    LQE は判定を **厳しくする方向にだけ** 効く（never upgrade）。LQE の実行に
+    失敗してもゲートは止めない（従来どおりの結果を返す）。
+
+    **履歴（lead_qualifications）は書かない。** この関数は GET のリードパス
+    （/facts・/contact-search-gate）からも呼ばれるため、``run()`` を呼ぶと画面を
+    開くたびに履歴が増える。履歴保存は明示的な再判定の責務とする。
+
+    include_lqe_detail=False（既定）のときは LQE 由来のキーを落とす。PR-3 では
+    既存 API のレスポンス形を一切変えないため（公開は PR-4）。
+
+    Returns:
+        eligible_for_contact_search / contact_search_gate_reason /
+        japan_crowdfunding_score / gate_checked_at / reasons / rationale
+    """
+    gate_result = _evaluate_gate_only(db, project)
+    qualification = _qualify_or_none(db, project)
+    result = merge_gate_with_lqe(gate_result, qualification)
+    if not include_lqe_detail:
+        for key in LQE_DETAIL_FIELDS:
+            result.pop(key, None)
+
+    decision = result["contact_search_gate_decision"]
+    eligible = result["eligible_for_contact_search"]
+    gate_reason = result["contact_search_gate_reason"]
+
     if persist:
         try:
             project.eligible_for_contact_search = eligible
             project.contact_search_gate_reason = gate_reason
-            project.japan_crowdfunding_score = score
-            project.gate_checked_at = checked_at
+            project.japan_crowdfunding_score = result["japan_crowdfunding_score"]
+            project.gate_checked_at = result["gate_checked_at"]
             db.commit()
         except Exception as exc:  # noqa: BLE001  保存失敗でも判定結果は返す
             logger.warning("gate persist failed (project=%s): %s", project.id, exc)
