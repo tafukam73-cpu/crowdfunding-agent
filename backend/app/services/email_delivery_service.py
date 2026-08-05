@@ -2,6 +2,11 @@
 
 生成済みの EmailDraft を、設定されたプロバイダー（未設定なら mock）に
 「下書き」として作成する。送信はしない。
+
+**営業対象除外判定の主関門はここにある。** プロバイダーへ下書きを作るのは
+外部（ユーザーの Gmail）へ実際に書き込む唯一の地点なので、
+``provider.create_draft()`` を呼ぶ**前に** pre_outreach 判定を必ず通す。
+不合格なら ``LeadQualificationBlocked`` を送出し、プロバイダーは呼ばない。
 """
 from __future__ import annotations
 
@@ -52,8 +57,15 @@ def create_provider_draft(
 ) -> tuple[DraftResult, str]:
     """プロバイダーに下書きを作成し、EmailDraft に記録する。
 
+    **``provider.create_draft()`` の直前に営業対象除外判定（pre_outreach）を
+    必ず実行する。** ``clear`` 以外はプロバイダーを一切呼ばずに送出する
+    （下書き・アウトリーチ・営業状況・タイムラインのいずれも変更しない）。
+
     Returns: (結果, 解決した宛先)
-    Raises: ValueError（宛先なし）, EmailProviderError（プロバイダー失敗）
+    Raises:
+        ValueError: 宛先なし
+        EmailProviderError: プロバイダー失敗
+        LeadQualificationBlocked: 営業対象判定により送信準備を進められない
     """
     recipient = resolve_recipient(db, draft, to)
     if not recipient:
@@ -61,6 +73,17 @@ def create_provider_draft(
             "宛先メールアドレスがありません。to を指定するか、"
             "メーカー担当者にメールアドレスを登録してください。"
         )
+
+    # --- 関門：ここから先はプロバイダー（外部 Gmail）へ書き込む ---
+    from app.services import outreach_qualification_gate as gate
+
+    project = db.get(Project, draft.project_id)
+    if project is None:
+        # 案件が引けなければ判定できない → fail closed。
+        raise gate.LeadQualificationBlocked(
+            gate.safe_payload(persisted=False), message=gate.MESSAGE_UNAVAILABLE
+        )
+    gate.require_clear(db, project)
 
     provider = get_email_provider()
     result = provider.create_draft(

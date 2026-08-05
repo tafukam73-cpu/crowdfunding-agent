@@ -58,6 +58,13 @@ FOLLOWUP_BUSINESS_DAYS = 5   # 送信/前回フォローの 5 営業日後にフ
 MAX_FOLLOWUPS = 2            # フォローアップは最大 2 回まで
 
 
+def lqs_decision_clear() -> str:
+    """LQE の「営業可能」判定値。定数を複製せず正本から取る。"""
+    from app.services import lead_qualification_service as lqs
+
+    return lqs.DECISION_CLEAR
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -282,12 +289,27 @@ def _iso(dt) -> str | None:
 
 
 def serialize(db: Session, row: SalesOutreach) -> dict:
-    """SalesOutreach を API 出力 dict に変換する（既存 Gmail compose URL を付与）。"""
+    """SalesOutreach を API 出力 dict に変換する（既存 Gmail compose URL を付与）。
+
+    Gmail compose URL は宛先・件名・本文入りの作成画面を開く**送信導線**であり、
+    内容のプレビューではない（本文は generated_subject / generated_body として
+    別途返しているので、URL が無くても確認はできる）。したがって営業対象判定が
+    ``clear`` でない案件には URL を出さない。
+
+    **ここでは判定を実行しない。** この関数は一覧・画面表示から高頻度に呼ばれる
+    ため、保存済みの最新 pre_outreach 判定だけを参照する（履歴を増やさない）。
+    """
     from app.ai.followup import gmail_compose_url
+    from app.services import outreach_qualification_gate as gate
 
     recipient = _recipient_email(db, row.project_id)
     compose_url = None
-    if row.generated_subject and row.generated_body:
+    qualification = gate.latest_decision(db, row.project_id)
+    if (
+        row.generated_subject
+        and row.generated_body
+        and qualification == lqs_decision_clear()
+    ):
         # 既存の Gmail compose を再利用（新規実装しない・要件 7）。
         compose_url = gmail_compose_url(
             recipient, row.generated_subject, row.generated_body
@@ -307,6 +329,9 @@ def serialize(db: Session, row: SalesOutreach) -> dict:
         "last_activity_at": _iso(row.last_activity_at),
         "notes": row.notes,
         "gmail_compose_url": compose_url,
+        # 送信導線を出さなかった理由を画面が説明できるようにする（判定値のみ。
+        # スコアや証跡は含めない）。未判定は None。
+        "qualification_decision": qualification,
         "recipient": recipient,
         # --- 送信後ワークフロー（0045） ---
         "recipient_email": row.recipient_email,
@@ -613,7 +638,23 @@ def mark_sent(
         f"営業メール送信（{lang_label}）: 宛先 {snap_recipient or '不明'} / "
         f"件名「{(snap_subject or '')[:60]}」",
     )
+    # 営業対象判定を監査情報として残す（**事実記録は止めない**）。外部で既に
+    # 送信済みのものを記録するだけなので、判定が blocked でも失敗させない。
+    # 判定できなくても mark_sent 自体は成功させる。
+    _add_timeline(db, project, _qualification_audit_note(db, project))
     return {"outreach": row, "already_sent": False}
+
+
+def _qualification_audit_note(db: Session, project: Project) -> str:
+    """mark_sent 時の LQE 監査文言。メールアドレス・証跡本文は書かない。"""
+    from app.services import outreach_qualification_gate as gate
+
+    try:
+        return gate.audit_note(db, project)
+    except Exception as exc:  # noqa: BLE001  監査失敗で記録を止めない
+        logger.warning("qualification audit note failed (project=%s): %s",
+                       project.id, exc)
+        return f"LQE監査: {gate.AUDIT_UNAVAILABLE}"
 
 
 def _reflect_crm_status(

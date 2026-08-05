@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -25,7 +25,12 @@ from app.schemas.email_draft import (
     ProviderDraftResult,
     SelectSubjectRequest,
 )
-from app.services import email_delivery_service, email_service, project_service
+from app.services import (
+    email_delivery_service,
+    email_service,
+    outreach_qualification_gate,
+    project_service,
+)
 
 logger = logging.getLogger("router.email_drafts")
 
@@ -57,6 +62,11 @@ def create_provider_draft(
     to = payload.to if payload else None
     try:
         result, recipient = email_delivery_service.create_provider_draft(db, draft, to)
+    except outreach_qualification_gate.LeadQualificationBlocked as blocked:
+        # 営業対象判定で止めた。フロントのボタン制御だけに頼らずサーバー側で拒否する。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=blocked.as_detail()
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except EmailProviderError as exc:

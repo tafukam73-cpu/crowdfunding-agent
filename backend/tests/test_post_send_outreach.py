@@ -134,7 +134,19 @@ p2 = _mk_project(db, site="wadiz", maker="SendCo", title="Send Gadget")
 _mk_cd(db, p2.id, email="send@example.com")
 _gen_draft(db, p2)
 ser = svc.serialize(db, svc.get_by_project(db, p2.id))
-check("Gmail compose URL は生成される", bool(ser["gmail_compose_url"]))
+# Gmail compose URL は「送信導線」なので、営業対象判定（pre_outreach）が
+# clear でない案件には出さない（PR-5）。未判定の段階では None。
+check("未判定では Gmail compose URL を出さない", ser["gmail_compose_url"] is None)
+check("判定値をレスポンスで説明できる", "qualification_decision" in ser)
+from app.services import lead_qualification_service as _lqs  # noqa: E402
+_lqs.run(db, p2, _lqs.STAGE_PRE_OUTREACH)
+_dec = _lqs.get_latest(db, p2.id, stage=_lqs.STAGE_PRE_OUTREACH).decision
+ser = svc.serialize(db, svc.get_by_project(db, p2.id))
+if _dec == "clear":
+    check("clear なら Gmail compose URL が出る", bool(ser["gmail_compose_url"]))
+else:
+    check("clear 以外は Gmail compose URL を出さない",
+          ser["gmail_compose_url"] is None)
 check("URL 生成後も status は draft のまま", ser["outreach_status"] == "draft")
 check("URL 生成後も sent_at は None", ser["sent_at"] is None)
 
