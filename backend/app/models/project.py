@@ -264,6 +264,17 @@ class Project(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- 営業対象除外判定キャッシュ（Lead Qualification Engine） ---
+    # 判定の正本は lead_qualifications（追記専用の履歴）。ここには一覧の
+    # フィルタ/ソート用に「最新の判定」だけを持つ（上書き更新してよい）。
+    # blocked / review / clear。未判定は NULL。
+    lead_qualification_decision: Mapped[str | None] = mapped_column(
+        String(12), nullable=True, index=True
+    )
+    lead_qualification_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # --- AI 評価キャッシュ（最新評価。一覧のソート/フィルタ用） ---
     latest_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     latest_recommendation: Mapped[str | None] = mapped_column(

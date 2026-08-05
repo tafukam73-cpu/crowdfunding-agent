@@ -27,6 +27,7 @@ from app.models.evaluation import AiEvaluation, Recommendation
 from app.models.japan_sales_check import JapanSalesCheck, JapanSalesStatus
 from app.models.japanese_success import JapaneseSuccessProject
 from app.models.job_run import JobLock, JobRun, JobStatus, JobTrigger
+from app.models.lead_qualification import LeadQualification
 from app.models.project import Project, ProjectStatus, SalesStatus, SourceSite
 from app.models.project_status_event import ProjectStatusEvent, StatusChangeSource
 from app.models.reply_assistant import ReplyAssistant, ReplyStatus
@@ -83,6 +84,7 @@ __all__ = [
     "DiscoveryJob",
     "DiscoveryJobStatus",
     "JapanOpportunityAnalysis",
+    "LeadQualification",
     "ReplyAssistant",
     "ReplyStatus",
     "SalesOpportunity",
