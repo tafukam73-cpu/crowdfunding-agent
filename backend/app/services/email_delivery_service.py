@@ -54,18 +54,21 @@ def resolve_recipient(db: Session, draft: EmailDraft, to: str | None) -> str | N
 
 def create_provider_draft(
     db: Session, draft: EmailDraft, to: str | None = None
-) -> tuple[DraftResult, str]:
+) -> tuple[DraftResult, str, dict | None]:
     """プロバイダーに下書きを作成し、EmailDraft に記録する。
 
     **``provider.create_draft()`` の直前に営業対象除外判定（pre_outreach）を
-    必ず実行する。** ``clear`` 以外はプロバイダーを一切呼ばずに送出する
-    （下書き・アウトリーチ・営業状況・タイムラインのいずれも変更しない）。
+    必ず実行する**（モードに依らず判定と履歴保存は行う）。
 
-    Returns: (結果, 解決した宛先)
+    - **enforce**: ``clear`` 以外はプロバイダーを一切呼ばずに送出する
+      （下書き・アウトリーチ・営業状況・タイムラインのいずれも変更しない）
+    - **observe**: 不合格でも従来どおり下書きを作り、判定を監査情報として返す
+
+    Returns: ``(結果, 解決した宛先, qualification payload)``
     Raises:
         ValueError: 宛先なし
         EmailProviderError: プロバイダー失敗
-        LeadQualificationBlocked: 営業対象判定により送信準備を進められない
+        LeadQualificationBlocked: enforce で営業対象判定により止めた場合
     """
     recipient = resolve_recipient(db, draft, to)
     if not recipient:
@@ -79,11 +82,15 @@ def create_provider_draft(
 
     project = db.get(Project, draft.project_id)
     if project is None:
-        # 案件が引けなければ判定できない → fail closed。
-        raise gate.LeadQualificationBlocked(
-            gate.safe_payload(persisted=False), message=gate.MESSAGE_UNAVAILABLE
-        )
-    gate.require_clear(db, project)
+        # 案件が引けなければ判定できない。enforce では fail closed で止める。
+        payload = gate.safe_payload(persisted=False)
+        if gate.is_enforcing():
+            raise gate.LeadQualificationBlocked(
+                payload, message=gate.MESSAGE_UNAVAILABLE
+            )
+        qualification = payload
+    else:
+        qualification = gate.require_clear(db, project)
 
     provider = get_email_provider()
     result = provider.create_draft(
@@ -94,4 +101,4 @@ def create_provider_draft(
     draft.provider_draft_id = result.draft_id
     db.commit()
     db.refresh(draft)
-    return result, recipient
+    return result, recipient, qualification

@@ -23,6 +23,7 @@ from app.schemas.email_draft import (
     GenerateDraftsRequest,
     ProviderDraftRequest,
     ProviderDraftResult,
+    QualificationAudit,
     SelectSubjectRequest,
 )
 from app.services import (
@@ -39,9 +40,11 @@ router = APIRouter(tags=["email-drafts"])
 
 @router.get("/email/provider", response_model=EmailProviderInfo)
 def email_provider_info() -> EmailProviderInfo:
-    """現在有効なメール下書きプロバイダー（gmail / mock）を返す。"""
+    """現在有効なメール下書きプロバイダー（gmail / mock）と関門モードを返す。"""
     return EmailProviderInfo(
-        provider=active_provider_name(), gmail_configured=is_gmail_configured()
+        provider=active_provider_name(),
+        gmail_configured=is_gmail_configured(),
+        outreach_gate_mode=outreach_qualification_gate.current_mode(),
     )
 
 
@@ -61,7 +64,9 @@ def create_provider_draft(
 
     to = payload.to if payload else None
     try:
-        result, recipient = email_delivery_service.create_provider_draft(db, draft, to)
+        result, recipient, qualification = (
+            email_delivery_service.create_provider_draft(db, draft, to)
+        )
     except outreach_qualification_gate.LeadQualificationBlocked as blocked:
         # 営業対象判定で止めた。フロントのボタン制御だけに頼らずサーバー側で拒否する。
         raise HTTPException(
@@ -80,6 +85,11 @@ def create_provider_draft(
         to=recipient,
         web_link=result.web_link,
         detail=result.detail,
+        # observe モードで不合格のまま作成した場合の監査情報（安全な値のみ）。
+        # clear のときも判定内容を返し、運用者が状態を確認できるようにする。
+        qualification=(
+            QualificationAudit(**qualification) if qualification else None
+        ),
     )
 
 

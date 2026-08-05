@@ -27,6 +27,9 @@ _DBFILE = os.path.join(tempfile.gettempdir(), "lqe_outreach_gate_test.sqlite")
 if os.path.exists(_DBFILE):
     os.remove(_DBFILE)
 os.environ["DATABASE_URL"] = f"sqlite:///{_DBFILE}"
+# このファイルは **enforce 前提**の検証（observe は
+# test_lqe_outreach_gate_observe.py が担当）。app.config の読み込み前に固定する。
+os.environ["OUTREACH_GATE_MODE"] = "enforce"
 # プロバイダは必ず mock（実 Gmail を呼ばない）。
 os.environ.pop("GMAIL_CLIENT_ID", None)
 os.environ.pop("GMAIL_REFRESH_TOKEN", None)
@@ -165,11 +168,13 @@ def test_clear_allows_draft():
         decision, _payload, _row = gate.evaluate(db, p)
         check("前提: clear になる", decision == "clear")
         d = make_draft(db, p)
-        result, recipient = eds.create_provider_draft(db, d, "to@example.com")
+        result, recipient, qualification = eds.create_provider_draft(
+            db, d, "to@example.com")
         check("clear なら下書き作成が成功する", result.status == "created")
         check("provider.create_draft が 1 回呼ばれる", _calls["create_draft"] == 1)
         check("宛先が解決される", recipient == "to@example.com")
         check("EmailDraft に記録される", d.provider_draft_id == "d1")
+        check("qualification 監査情報が返る", qualification["decision"] == "clear")
     finally:
         db.close()
 

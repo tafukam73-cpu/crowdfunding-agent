@@ -133,20 +133,34 @@ print("[gmail-open-not-sent]")
 p2 = _mk_project(db, site="wadiz", maker="SendCo", title="Send Gadget")
 _mk_cd(db, p2.id, email="send@example.com")
 _gen_draft(db, p2)
-ser = svc.serialize(db, svc.get_by_project(db, p2.id))
-# Gmail compose URL は「送信導線」なので、営業対象判定（pre_outreach）が
-# clear でない案件には出さない（PR-5）。未判定の段階では None。
-check("未判定では Gmail compose URL を出さない", ser["gmail_compose_url"] is None)
-check("判定値をレスポンスで説明できる", "qualification_decision" in ser)
+# Gmail compose URL は「送信導線」なので、enforce モードでは営業対象判定
+# （pre_outreach）が clear の案件にだけ出す。observe（既定）は従来どおり出す。
+from app.config import settings as _settings  # noqa: E402
 from app.services import lead_qualification_service as _lqs  # noqa: E402
+
+_orig_mode = _settings.outreach_gate_mode
+_settings.outreach_gate_mode = "observe"
+ser = svc.serialize(db, svc.get_by_project(db, p2.id))
+check("observe では未判定でも Gmail compose URL を出す",
+      bool(ser["gmail_compose_url"]))
+check("判定値をレスポンスで説明できる", "qualification_decision" in ser)
+
+_settings.outreach_gate_mode = "enforce"
+ser = svc.serialize(db, svc.get_by_project(db, p2.id))
+check("enforce では未判定なら Gmail compose URL を出さない",
+      ser["gmail_compose_url"] is None)
 _lqs.run(db, p2, _lqs.STAGE_PRE_OUTREACH)
 _dec = _lqs.get_latest(db, p2.id, stage=_lqs.STAGE_PRE_OUTREACH).decision
 ser = svc.serialize(db, svc.get_by_project(db, p2.id))
 if _dec == "clear":
-    check("clear なら Gmail compose URL が出る", bool(ser["gmail_compose_url"]))
+    check("enforce: clear なら Gmail compose URL が出る",
+          bool(ser["gmail_compose_url"]))
 else:
-    check("clear 以外は Gmail compose URL を出さない",
+    check("enforce: clear 以外は Gmail compose URL を出さない",
           ser["gmail_compose_url"] is None)
+_settings.outreach_gate_mode = _orig_mode
+
+ser = svc.serialize(db, svc.get_by_project(db, p2.id))
 check("URL 生成後も status は draft のまま", ser["outreach_status"] == "draft")
 check("URL 生成後も sent_at は None", ser["sent_at"] is None)
 

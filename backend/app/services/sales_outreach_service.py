@@ -58,13 +58,6 @@ FOLLOWUP_BUSINESS_DAYS = 5   # 送信/前回フォローの 5 営業日後にフ
 MAX_FOLLOWUPS = 2            # フォローアップは最大 2 回まで
 
 
-def lqs_decision_clear() -> str:
-    """LQE の「営業可能」判定値。定数を複製せず正本から取る。"""
-    from app.services import lead_qualification_service as lqs
-
-    return lqs.DECISION_CLEAR
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -293,11 +286,15 @@ def serialize(db: Session, row: SalesOutreach) -> dict:
 
     Gmail compose URL は宛先・件名・本文入りの作成画面を開く**送信導線**であり、
     内容のプレビューではない（本文は generated_subject / generated_body として
-    別途返しているので、URL が無くても確認はできる）。したがって営業対象判定が
-    ``clear`` でない案件には URL を出さない。
+    別途返しているので、URL が無くても確認はできる）。
+
+    - **enforce**: 営業対象判定が ``clear`` の案件にだけ URL を出す
+    - **observe**: 従来どおり常に出す（判定値は別途返して警告表示に使う）
 
     **ここでは判定を実行しない。** この関数は一覧・画面表示から高頻度に呼ばれる
     ため、保存済みの最新 pre_outreach 判定だけを参照する（履歴を増やさない）。
+    本文プレビューとコピー用の値（generated_subject / generated_body）は
+    モードに依らず常に返す。
     """
     from app.ai.followup import gmail_compose_url
     from app.services import outreach_qualification_gate as gate
@@ -308,7 +305,7 @@ def serialize(db: Session, row: SalesOutreach) -> dict:
     if (
         row.generated_subject
         and row.generated_body
-        and qualification == lqs_decision_clear()
+        and gate.allows_compose_url(qualification)
     ):
         # 既存の Gmail compose を再利用（新規実装しない・要件 7）。
         compose_url = gmail_compose_url(

@@ -75,6 +75,27 @@ class FollowupEmailResult(BaseModel):
     sales_status: str
 
 
+class QualificationAudit(BaseModel):
+    """営業対象除外判定の監査情報（送信前関門）。
+
+    **安全な値だけを載せる。** 数値 confidence / score / probability / forecast /
+    返信率 / 成功率 / makuake_fit / japan_crowdfunding_score / internal_db の URL /
+    メールアドレス / Evidence 本文は含めない。
+    """
+
+    stage: str
+    # 判定できなかった場合は None（observe でも隠さずそのまま出す）。
+    decision: str | None = None
+    machine_decision: str | None = None
+    effective_decision: str | None = None
+    overridden: bool = False
+    blocker_codes: list[str] = []
+    review_codes: list[str] = []
+    reasons: list[str] = []
+    checked_at: str | None = None
+    persisted: bool = False
+
+
 class ProviderDraftResult(BaseModel):
     """プロバイダー下書き作成結果。"""
 
@@ -84,6 +105,9 @@ class ProviderDraftResult(BaseModel):
     to: str
     web_link: str | None = None
     detail: str | None = None
+    # 送信前関門の判定。observe モードで不合格のまま作成した場合の警告に使う
+    # （enforce では不合格なら 409 になるため 200 に載ることはない）。
+    qualification: QualificationAudit | None = None
 
 
 class EmailProviderInfo(BaseModel):
@@ -91,3 +115,6 @@ class EmailProviderInfo(BaseModel):
 
     provider: str
     gmail_configured: bool
+    # 送信前関門の適用モード（observe / enforce）。運用者が現在の挙動を確認する
+    # ためのグローバル設定。案件単位のレスポンスには載せない（重複させない）。
+    outreach_gate_mode: str = "observe"

@@ -125,6 +125,16 @@ class Settings(BaseSettings):
     # 監視集計の対象にする直近 run 件数（通知判定にも使う）
     alert_window: int = 20
 
+    # --- 営業対象除外判定の適用モード（送信前関門） ---
+    # observe : 判定・履歴保存・警告だけ行い、Gmail 下書き作成や Compose URL は
+    #           止めない（業務を止めずに実データを観測する段階）
+    # enforce : clear または有効な override だけ許可し、review / blocked /
+    #           判定不能は 409 で止める
+    # 未設定・空文字・不正値は observe にフォールバックする（安全側＝業務を
+    # 止めない側）。判定に失敗したときの fail closed は enforce 内の話であり、
+    # ここでのフォールバックとは別物。
+    outreach_gate_mode: str = "observe"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

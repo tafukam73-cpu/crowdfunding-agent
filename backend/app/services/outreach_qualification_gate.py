@@ -67,6 +67,31 @@ MESSAGE_UNAVAILABLE = "営業対象判定を完了できないため、Gmail下�
 #: 監査記録で判定が取れなかったことを表す印。
 AUDIT_UNAVAILABLE = "qualification_unavailable"
 
+# --- 適用モード（段階導入） ------------------------------------------------- #
+#: 判定・履歴保存・警告だけ行い、下書き作成や Compose URL は止めない。
+MODE_OBSERVE = "observe"
+#: clear または有効な override だけ許可し、それ以外は 409 で止める。
+MODE_ENFORCE = "enforce"
+MODES: tuple[str, ...] = (MODE_OBSERVE, MODE_ENFORCE)
+
+
+def current_mode() -> str:
+    """現在の適用モード。
+
+    ``settings.outreach_gate_mode`` を読み、``observe`` / ``enforce`` 以外は
+    **必ず observe に丸める**（未設定・空文字・不正値・本番設定の欠落を含む）。
+    段階導入の安全側は「業務を止めない」側なので observe を既定にする。
+    """
+    from app.config import settings
+
+    value = str(getattr(settings, "outreach_gate_mode", "") or "").strip().lower()
+    return value if value in MODES else MODE_OBSERVE
+
+
+def is_enforcing() -> bool:
+    """enforce モードか（明示的に enforce のときだけ True）。"""
+    return current_mode() == MODE_ENFORCE
+
 
 class LeadQualificationBlocked(Exception):
     """pre_outreach 判定により送信準備を進められない。
@@ -356,14 +381,32 @@ def _attach_digest(row, digest: str) -> None:
 def require_clear(db: Session, project: Project) -> dict:
     """送信準備（Gmail 下書き作成）を進めてよいか。
 
-    **``clear`` 以外はすべて ``LeadQualificationBlocked``**（review も止める）。
-    判定できなかった場合も止める（fail closed）。
+    処理はモードに依らず同じ:
+      1. pre_outreach 判定を実行または再利用する（**observe でも必ず記録する**）
+      2. 安全な qualification payload を作る
+      3. ``clear`` なら両モードで許可する
 
-    Returns: 通過した場合の安全な qualification payload。
+    ``review`` / ``blocked`` / 判定不能（``None``）のとき:
+      - **observe**: WARNING を残して payload を返す（409 を投げず処理を続行）
+      - **enforce**: ``LeadQualificationBlocked`` を送出して止める
+
+    ログには内部例外・Evidence 本文・メールアドレス・秘密情報を含めない
+    （判定値とカテゴリ記号だけ）。
+
+    Returns: 安全な qualification payload（observe では不合格でも返る）。
     """
     decision, payload, _row = evaluate(db, project)
     if decision == lqs.DECISION_CLEAR:
         return payload
+
+    if not is_enforcing():
+        # observe: 止めないが、判定不能も隠さずそのまま記録する。
+        logger.warning(
+            "observe: would block project=%s decision=%s blocker_codes=%s",
+            project.id, decision, payload.get("blocker_codes"),
+        )
+        return payload
+
     if decision is None:
         raise LeadQualificationBlocked(payload, message=MESSAGE_UNAVAILABLE)
     logger.info(
@@ -396,6 +439,17 @@ def audit_note(db: Session, project: Project) -> str:
     if codes:
         parts.append("blocker_codes=" + ",".join(codes))
     return "LQE監査: " + " ".join(parts)
+
+
+def allows_compose_url(decision: str | None) -> bool:
+    """Gmail compose URL（送信導線）を出してよいか。
+
+    - **observe**: 常に出す（従来どおり業務を止めない）
+    - **enforce**: ``clear``（有効な override を含む）のときだけ出す
+    """
+    if not is_enforcing():
+        return True
+    return decision == lqs.DECISION_CLEAR
 
 
 def latest_decision(db: Session, project_id: int) -> str | None:
