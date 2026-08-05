@@ -761,8 +761,14 @@ def test_no_side_effect_sources():
     check("qualify とルール関数群は DB に触れない", impure == [])
     check("qualify は db 引数を取らない",
           "db" not in lq.qualify.__code__.co_varnames)
-    check("DB 書き込み（db.commit）は 1 か所だけ", src.count("db.commit()") == 1)
-    check("DB 書き込み（db.add）は 1 か所だけ", src.count("db.add(") == 1)
+    # DB 書き込みは「書き込み専用関数」の中だけに閉じていること。
+    # （PR-2: run / _append_history、PR-4: record_override）
+    write_fns = [lq.run, lq.record_override, lq._append_history]
+    allowed = "".join(inspect.getsource(fn) for fn in write_fns)
+    check("db.commit は書き込み関数の中だけ",
+          src.count("db.commit()") == allowed.count("db.commit()") > 0)
+    check("db.add は書き込み関数の中だけ",
+          src.count("db.add(") == allowed.count("db.add(") > 0)
     check("DELETE を行わない", "delete(" not in src and "db.delete" not in src)
 
 

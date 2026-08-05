@@ -42,6 +42,14 @@ def list_projects(
     recommendation: str | None = Query(
         None, pattern="^(high|mid|low)$", description="推奨度で絞り込み"
     ),
+    qualification: str | None = Query(
+        None,
+        pattern="^(blocked|review|clear)$",
+        description=(
+            "営業対象除外判定で絞り込み（最新の pre_research 判定。"
+            "送信可否 pre_outreach は対象外）"
+        ),
+    ),
     archived: bool = Query(
         False,
         description="true なら営業対象外（除外済み）案件のみ、false（既定）なら対象内のみ",
@@ -60,6 +68,7 @@ def list_projects(
         q=q,
         min_score=min_score,
         recommendation=recommendation,
+        qualification=qualification,
         archived=archived,
         sort=sort,
         order=order,
