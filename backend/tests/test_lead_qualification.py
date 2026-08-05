@@ -763,14 +763,64 @@ def test_no_url_fabrication():
     }
     check("証跡 URL は signals 由来か db:// のみ",
           all(u in known or u.startswith("db://") for u in urls if u))
-    state_methods = {e.method for f in r.findings for e in f.evidence
-                     if (e.source_url or "").startswith("db://")}
-    check("db:// を使うのは method=db_state のみ",
-          state_methods <= {"db_state"})
     guessed = lq.qualify(base_signals(maker_name="Acme"), PRE_R, now=NOW)
     check("maker 名からドメインを組み立てない",
           not any("acme.com" in (e.source_url or "")
                   for f in guessed.findings for e in f.evidence))
+
+
+def _all_evidence(result):
+    return [e for f in result.findings for e in f.evidence] + [
+        e for p in result.positive_facts for e in p.evidence]
+
+
+def test_internal_db_locator_policy():
+    """db:// 内部ロケータの取り扱いを固定する（承認済みの運用条件）。"""
+    print("test_internal_db_locator_policy")
+    check("内部 DB 用の source_kind は internal_db",
+          lq.SOURCE_INTERNAL_DB == "internal_db")
+    check("旧称 SOURCE_DB_STATE は残していない", not hasattr(lq, "SOURCE_DB_STATE"))
+
+    scenarios = [
+        base_signals(),
+        base_signals(campaign_url=None),
+        base_signals(maker_identity={"verified": False}, official_site={}),
+        _sold_signals(),
+        _reseller_signals(),
+        base_signals(end_date=iso(30), official_site={}),
+        base_signals(maker_name="Sony"),
+    ]
+    locators, kinds_of_internal, bad_shape = [], set(), []
+    for sig in scenarios:
+        for stage in (PRE_R, PRE_O):
+            for ev in _all_evidence(lq.qualify(sig, stage, now=NOW)):
+                url = ev.source_url or ""
+                if url.startswith("db://"):
+                    locators.append(ev)
+                    if not url.startswith(f"db://projects/{sig.get('project_id')}#"):
+                        bad_shape.append(url)
+                if ev.source_kind == lq.SOURCE_INTERNAL_DB:
+                    kinds_of_internal.add(ev.method)
+
+    check("内部ロケータの証跡が実際に生成されている", len(locators) > 0)
+    check("db:// を使うのは method=db_state のときだけ",
+          all(e.method == "db_state" for e in locators))
+    check("db:// の source_kind は必ず internal_db",
+          all(e.source_kind == lq.SOURCE_INTERNAL_DB for e in locators))
+    check("internal_db を名乗る証跡は method=db_state のみ",
+          kinds_of_internal <= {"db_state"})
+    check("内部ロケータの形は db://projects/<id># のみ（推測生成しない）",
+          bad_shape == [])
+    check("内部ロケータは http/https の外部リンクではない",
+          not any((e.source_url or "").startswith(("http://", "https://"))
+                  for e in locators))
+    check("内部ロケータは外部証跡の代用にしない（F は db:// を証跡にしない）",
+          all(not (e.source_url or "").startswith("db://")
+              for e in find(lq.qualify(_sold_signals(), PRE_R, now=NOW), "F").evidence))
+    check("外部 URL の証跡に internal_db を使わない",
+          all(e.source_kind != lq.SOURCE_INTERNAL_DB
+              for e in _all_evidence(lq.qualify(_sold_signals(), PRE_R, now=NOW))
+              if (e.source_url or "").startswith("http")))
 
 
 def test_evidence_count_and_serialization():
@@ -837,6 +887,7 @@ def main():
     test_no_network_access()
     test_no_side_effect_sources()
     test_no_url_fabrication()
+    test_internal_db_locator_policy()
     test_evidence_count_and_serialization()
     test_word_boundary_matching()
     print(f"\n{_passed} passed / {_failed} failed")

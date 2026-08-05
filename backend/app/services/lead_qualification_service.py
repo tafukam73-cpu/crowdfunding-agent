@@ -115,7 +115,10 @@ SOURCE_OFFICIAL = "メーカー公式サイト"
 SOURCE_EC = "ECサイト"
 SOURCE_JP_CROWDFUNDING = "日本クラファンサイト"
 SOURCE_DISTRIBUTOR = "代理店・販売店サイト"
-SOURCE_DB_STATE = "保存済みデータ"
+# DB の状態そのものを指す内部ロケータ専用の source_kind。**外部 URL と必ず区別する。**
+# この source_kind を持つ証跡は外部 Web リンクではないため、UI でクリック可能な
+# リンクとして表示してはならない（表示側の扱いは PR-6）。
+SOURCE_INTERNAL_DB = "internal_db"
 
 # 取得方法（evidence-ledger の method）
 METHOD_CAMPAIGN_PARSE = "campaign_page_parse"
@@ -382,8 +385,15 @@ class Evidence:
 
     例外として、DB の状態そのものが証拠になる場合（campaign_url が保存されていない、
     maker identity が未確定 など）に限り ``method="db_state"`` ＋
-    ``source_url="db://projects/<id>..."`` を使う。これは推測 URL ではなく、
-    「その行を見れば確認できる」内部ロケータである。
+    ``source_kind="internal_db"`` ＋ ``source_url="db://projects/<id>..."`` を使う。
+    これは推測 URL ではなく「その行を見れば確認できる」内部ロケータである。
+
+    内部ロケータの取り扱い（固定事項）:
+      - ``db://`` を使うのは ``method="db_state"`` のときだけ
+      - その ``source_kind`` は必ず ``internal_db``（外部 URL と区別する）
+      - 外部 Web リンクとして扱わない／UI でクリック可能に表示しない
+      - **外部証跡の代用にしない**（外部で確認すべき事実を db:// で置き換えない）
+      - maker 名等から推測生成しない（``db://projects/<id>`` 以外を作らない）
     """
 
     claim: str
@@ -621,12 +631,16 @@ def _campaign_evidence(
 
 
 def _state_evidence(signals: dict, claim: str, anchor: str, *, now: datetime) -> Evidence:
-    """DB の状態そのものを証跡にする（推測 URL ではない内部ロケータ）。"""
+    """DB の状態そのものを証跡にする（推測 URL ではない内部ロケータ）。
+
+    ロケータは常に ``db://projects/<project_id>#<anchor>`` の形だけを作る。
+    maker 名やドメインから組み立てることはしない。
+    """
     pid = signals.get("project_id")
     return Evidence(
         claim=claim,
         source_url=f"db://projects/{pid}#{anchor}",
-        source_kind=SOURCE_DB_STATE,
+        source_kind=SOURCE_INTERNAL_DB,
         method=METHOD_DB_STATE,
         checked_at=now,
         excerpt=anchor,
