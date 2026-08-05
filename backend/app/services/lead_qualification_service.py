@@ -1437,3 +1437,330 @@ def qualify(
         rule_version=RULE_VERSION,
         evaluated_at=now,
     )
+
+
+# --------------------------------------------------------------------------- #
+#  DB 連携（PR-2）
+#
+#  ここから下だけが DB に触れる。判定そのもの（qualify とルール関数群）は
+#  引き続き純粋関数のままにしておくこと。
+# --------------------------------------------------------------------------- #
+def gather_signals(db, project) -> dict:
+    """保存済みの事実だけを読み取り、``qualify()`` へ渡す signals を組み立てる。
+
+    **読み取り専用。** DB を更新せず、外部 HTTP・スクレイプ・検索・ジョブ起動も
+    一切行わない。探索は既存の Contact Intelligence / japan_sales_check の仕事で、
+    ここは「既に取れている証跡」を集めるだけ。
+
+    判定の正本は既存サービスに委ねる（重複ロジックを作らない）:
+      - ``campaign_url.url_state``            campaign_url と欠落理由
+      - ``product_context_service.build_japanese_summary``  日本語概要
+      - ``contact_discovery_service.get_latest``            公式サイト・メール
+      - ``contact_hunter_service.get_people``               人物
+      - ``japan_sales_service.get_latest_completed`` ＋
+        ``sales_assessment_service.interpret_japan_check``  日本販売状況
+      - ``source_ownership.classify_domain``                出品者ドメイン分類
+      - ``product_facts_service.regulatory_checks``         規制の確認項目
+
+    取得できなかった項目は **推測で埋めず、キーを落とすか None にする**
+    （qualify 側で insufficient_evidence として扱われる）。
+    """
+    from app.services import campaign_url as campaign_url_mod
+    from app.services import contact_discovery_service as cds
+    from app.services import contact_hunter_service as chs
+    from app.services import japan_sales_service as jss
+    from app.services import product_context_service as pcs
+    from app.services import product_facts_service as pfs
+    from app.services import sales_assessment_service as sas
+    from app.services import source_ownership as so
+
+    url_state = campaign_url_mod.url_state(project)
+    disc = cds.get_latest(db, project.id)
+
+    signals: dict = {
+        "project_id": project.id,
+        "title": project.title,
+        "description": project.description_clean or project.description,
+        "category": project.category,
+        "source_site": project.source_site,
+        "maker_name": project.maker_name,
+        "end_date": project.end_date,
+        "campaign_url": url_state["campaign_url"],
+        "campaign_url_missing_reason": url_state["campaign_url_missing_reason"],
+        "japanese_summary": pcs.build_japanese_summary(project),
+        # 規制の確認項目（既存実装の出力をそのまま持ち回る）。qualify は G〜M を
+        # 同じ category_keywords 語彙から独立に導くため、これは表示・監査用。
+        "regulatory_checks": pfs.regulatory_checks(project),
+    }
+
+    signals["official_site"] = _official_site_signal(disc, project, url_state)
+    signals["business_emails"] = _business_email_signals(disc)
+    signals["decision_makers"] = _decision_maker_signals(db, project.id, chs)
+    signals["contact_form_url"] = (
+        getattr(disc, "primary_contact_form_url", None) if disc is not None else None
+    )
+    signals["maker_identity"] = _maker_identity_signal(disc, signals["official_site"])
+    signals["japan_sales"] = _japan_sales_signal(db, project, jss, sas)
+    signals["creator_domain"] = _creator_domain_signal(project, disc, so, url_state)
+    signals["business_facts"] = _business_facts(project)
+    return signals
+
+
+def _official_site_signal(disc, project, url_state: dict) -> dict:
+    """公式サイトの保存済み判定情報を渡す。
+
+    **`official_site_url` があることを「maker 公式である」と断定しない。**
+    保存済みの判定元（v2_official_site_source）と取得元 URL・確認日時を
+    そのまま渡し、確定しているか（verified）は「探索が完了して URL と取得元の
+    両方が残っているか」だけで表す。
+    """
+    if disc is None:
+        return {}
+    url = getattr(disc, "v2_official_site_url", None)
+    if not url:
+        return {}
+    source = getattr(disc, "v2_official_site_source", None)
+    source_url = getattr(disc, "v2_primary_source_url", None) or url
+    researched_at = getattr(disc, "v2_researched_at", None)
+    return {
+        "url": url,
+        # 取得元と確認日時の両方が残っているものだけを「検証済み」として渡す。
+        "verified": bool(source and researched_at),
+        "source": source,
+        "source_url": source_url,
+        "checked_at": researched_at,
+        "method": "contact_discovery_v2",
+    }
+
+
+def _business_email_signals(disc) -> list[dict]:
+    """営業に使えるメールの候補。**推測で business email へ昇格しない。**
+
+    保存済みの取得元 URL・確認日時をそのまま渡す（取得元不明のアドレスは
+    証跡が不完全になり、qualify 側で positive_fact にならない）。
+    役割・信頼度ラベル等の保存済み情報は保持する。
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    if disc is not None:
+        for item in (getattr(disc, "v2_emails", None) or []):
+            if not isinstance(item, dict):
+                continue
+            email = item.get("email")
+            if not email or email in seen:
+                continue
+            seen.add(email)
+            out.append({
+                "email": email,
+                "source_url": item.get("source_url"),
+                "checked_at": getattr(disc, "v2_researched_at", None),
+                "method": "contact_discovery_v2",
+                "role": item.get("email_owner") or item.get("confidence_source"),
+                "confidence_label": item.get("confidence_level")
+                or item.get("confidence_label"),
+            })
+        primary = getattr(disc, "v2_primary_email", None) or getattr(
+            disc, "primary_email", None
+        )
+        if primary and primary not in seen:
+            out.append({
+                "email": primary,
+                "source_url": getattr(disc, "v2_primary_source_url", None),
+                "checked_at": getattr(disc, "v2_researched_at", None)
+                or getattr(disc, "researched_at", None),
+                "method": "contact_discovery",
+                "role": None,
+                "confidence_label": None,
+            })
+    return out
+
+
+def _decision_maker_signals(db, project_id: int, chs) -> list[dict]:
+    """意思決定者の候補。
+
+    **氏名 ＋ 役職 ＋ 取得元 URL の 3 つが揃ったものだけ**を渡す。
+    「人物メールらしい（role=person）」だけでは意思決定者として扱わない。
+    """
+    out: list[dict] = []
+    for person in chs.get_people(db, project_id):
+        name = (person.name or "").strip()
+        title = (person.title or "").strip()
+        source_url = (person.source_url or "").strip()
+        if not (name and title and source_url):
+            continue
+        out.append({
+            "name": name,
+            "title": title,
+            "department": person.department,
+            "source_url": source_url,
+            "checked_at": person.updated_at or person.created_at,
+            "method": person.email_source or "contact_hunter",
+        })
+    return out
+
+
+def _maker_identity_signal(disc, official: dict) -> dict:
+    """maker identity の確定状況。公式サイトの検証結果を根拠にする。
+
+    公式サイトが検証済みであることをもって「メーカー本人を同定できた」と扱う。
+    ここで新たな推論は行わない（同定そのものは maker-identity-verify の工程）。
+    """
+    if not official.get("verified"):
+        return {"verified": False}
+    return {
+        "verified": True,
+        "source_url": official.get("source_url"),
+        "checked_at": official.get("checked_at"),
+        "method": official.get("method"),
+    }
+
+
+def _japan_sales_signal(db, project, jss, sas) -> dict:
+    """日本販売状況。``interpret_japan_check`` の解釈をそのまま渡す。
+
+    sold_in_japan / not_found_in_japan / inconclusive を区別し、source_urls と
+    チャネル明細を保持する。**not_found を「日本未販売の証明」に変換しない。**
+    """
+    jsc = jss.get_latest_completed(db, project.id)
+    interpreted = sas.interpret_japan_check(jsc)
+    return {
+        "status": interpreted["status"],
+        "result": interpreted["result"],
+        "confidence": interpreted["confidence"],
+        "source_urls": interpreted["source_urls"],
+        "evidence": interpreted["evidence"],
+        "checked_at": interpreted["checked_at"],
+        "channels": list(getattr(jsc, "channels", None) or []) if jsc else [],
+    }
+
+
+def _creator_domain_signal(project, disc, so, url_state: dict) -> dict:
+    """出品者ドメインの所有者分類。``classify_domain`` の結果と判定元 URL を渡す。"""
+    candidate = (
+        (getattr(disc, "v2_official_site_url", None) if disc is not None else None)
+        or url_state.get("official_site_url")
+        or project.maker_url
+    )
+    if not candidate:
+        return {}
+    ctx = so.Ctx(
+        maker_name=project.maker_name,
+        product_title=project.title,
+    )
+    ownership = so.classify_domain(candidate, ctx)
+    checked_at = (
+        getattr(disc, "v2_researched_at", None) if disc is not None else None
+    ) or project.updated_at
+    return {
+        "url": candidate,
+        "ownership_class": ownership.ownership_class,
+        "evidence": list(ownership.evidence or []),
+        "checked_at": checked_at,
+        "method": METHOD_CLASSIFY_DOMAIN,
+    }
+
+
+def _business_facts(project) -> dict:
+    """将来の priority_band 用の事実（**判定には使わない**）。
+
+    BUSINESS_VALUE_FACT_KEYS のうち、projects から確認できるものだけを入れる。
+    優先度の算出は行わない（PR-1〜3 の対象外）。
+    """
+    facts: dict = {}
+    if project.backers_count is not None:
+        facts["backers_count"] = int(project.backers_count)
+    if project.raised_amount is not None:
+        facts["raised_amount"] = float(project.raised_amount)
+    try:
+        if project.raised_amount is not None and project.goal_amount:
+            goal = float(project.goal_amount)
+            if goal > 0:
+                facts["achievement_rate"] = int(
+                    float(project.raised_amount) / goal * 100
+                )
+    except (TypeError, ValueError):
+        pass
+    if project.end_date is not None:
+        facts["campaign_state"] = "ended" if _campaign_ended(project) else "live"
+    return facts
+
+
+def _campaign_ended(project) -> bool:
+    end = _as_datetime(project.end_date)
+    return end is not None and end < _now()
+
+
+def run(db, project, stage: str = STAGE_PRE_RESEARCH, *, commit: bool = True):
+    """判定を実行して履歴を 1 行追記し、一覧用キャッシュを更新する。
+
+    処理順:
+      1. ``gather_signals(db, project)``（読み取りのみ）
+      2. ``qualify(signals, stage)``（純粋関数）
+      3. ``lead_qualifications`` へ **1 行 INSERT**（append-only）
+      4. ``projects.lead_qualification_decision`` を最新 decision に更新
+      5. ``projects.lead_qualification_at`` を evaluated_at に更新
+
+    commit 責務は既存サービス（``project_service.record_status_event``）に合わせ、
+    **既定でこの関数が commit する**。呼び出し側でトランザクションを束ねたい場合は
+    ``commit=False`` を渡す。
+
+    **既存履歴を UPDATE / DELETE しない。** 同じ結果でも再実行すれば行が増える。
+    **archived_at / archive_reason には触れない**（自動アーカイブはしない）。
+    """
+    from app.models.lead_qualification import LeadQualification
+
+    signals = gather_signals(db, project)
+    result = qualify(signals, stage)
+
+    row = LeadQualification(
+        project_id=project.id,
+        stage=result.stage,
+        decision=result.decision,
+        blocker_codes=list(result.blocker_codes),
+        review_codes=list(result.review_codes),
+        findings_json=[f.to_dict() for f in result.findings],
+        positive_facts_json=[p.to_dict() for p in result.positive_facts],
+        # QualificationResult の値をそのまま保存する（再計算しない）。
+        evidence_count=result.evidence_count,
+        engine=result.rule_version,
+    )
+    db.add(row)
+
+    # 一覧のフィルタ/ソート用キャッシュ（判定の正本は lead_qualifications）。
+    project.lead_qualification_decision = result.decision
+    project.lead_qualification_at = result.evaluated_at
+
+    if commit:
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def get_latest(db, project_id: int, *, stage: str | None = None):
+    """最新の判定履歴を 1 件返す（無ければ None）。"""
+    from sqlalchemy import desc, select
+
+    from app.models.lead_qualification import LeadQualification
+
+    stmt = select(LeadQualification).where(LeadQualification.project_id == project_id)
+    if stage is not None:
+        stmt = stmt.where(LeadQualification.stage == stage)
+    stmt = stmt.order_by(desc(LeadQualification.created_at),
+                        desc(LeadQualification.id)).limit(1)
+    return db.scalar(stmt)
+
+
+def list_history(db, project_id: int, *, limit: int = 50) -> list:
+    """判定履歴を新しい順に返す（append-only なので増える一方）。"""
+    from sqlalchemy import desc, select
+
+    from app.models.lead_qualification import LeadQualification
+
+    stmt = (
+        select(LeadQualification)
+        .where(LeadQualification.project_id == project_id)
+        .order_by(desc(LeadQualification.created_at), desc(LeadQualification.id))
+        .limit(limit)
+    )
+    return list(db.scalars(stmt))

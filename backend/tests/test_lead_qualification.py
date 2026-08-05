@@ -739,15 +739,31 @@ def test_no_network_access():
 
 
 def test_no_side_effect_sources():
+    """判定そのものが純粋関数のままであることを固定する。
+
+    PR-2 で永続化（gather_signals / run）が同じモジュールへ入ったため、
+    「モジュール全体が DB に触れない」ではなく「判定ロジックが DB に触れない」を
+    検証する。DB 書き込みは run() の 1 か所だけに閉じていること。
+    """
     print("test_no_side_effect_sources")
     src = Path(lq.__file__).read_text(encoding="utf-8")
     for banned in ("httpx", "requests.", "urllib.request", "playwright"):
-        check(f"ソースに {banned} を含まない", banned not in src)
-    for banned in ("db.commit(", "db.add(", "session.commit(", "db.execute("):
-        check(f"ソースに {banned} を含まない（DB 書き込み禁止）", banned not in src)
-    check("Session を import しない", "from sqlalchemy" not in src)
+        check(f"ソースに {banned} を含まない（外部HTTP禁止）", banned not in src)
+
+    import inspect
+
+    pure = [lq.qualify, lq._enforce_invariants, lq._decide, lq._positive_facts,
+            lq._non_physical_analysis] + [
+        getattr(lq, n) for n in dir(lq) if n.startswith("_rule_")]
+    impure = [fn.__name__ for fn in pure
+              if any(t in inspect.getsource(fn)
+                     for t in ("db.", "commit(", "session"))]
+    check("qualify とルール関数群は DB に触れない", impure == [])
     check("qualify は db 引数を取らない",
           "db" not in lq.qualify.__code__.co_varnames)
+    check("DB 書き込み（db.commit）は 1 か所だけ", src.count("db.commit()") == 1)
+    check("DB 書き込み（db.add）は 1 か所だけ", src.count("db.add(") == 1)
+    check("DELETE を行わない", "delete(" not in src and "db.delete" not in src)
 
 
 def test_no_url_fabrication():
