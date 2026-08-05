@@ -13,6 +13,29 @@
   一覧のフィルタ用キャッシュは `projects.lead_qualification_decision` /
   `.lead_qualification_at` に持つ（あちらは上書き更新してよい）。
 
+## スナップショット列は pre_research 専用
+
+`projects.lead_qualification_decision` / `.lead_qualification_at` が保持するのは
+**最新の `pre_research` 判定だけ**。
+
+- `stage="pre_research"` の判定（run / override）だけがこの 2 列を更新する
+- `stage="pre_outreach"` の判定は **履歴にのみ残し、2 列を変更しない**
+- 一覧の `?qualification=` フィルタは pre_research スナップショットとして扱う
+
+送信可否（pre_outreach）は案件一覧の絞り込み軸ではなく、送信直前に判定するもの
+だから（PR-5 の責務）。
+
+## override の表現
+
+人が判定を覆した場合も **履歴 1 行の追記**で表す（既存行を書き換えない）。
+
+- `decision` 列には実効判定（人の指定値）が入る
+- `findings_json` の末尾に予約メタデータを 1 要素だけ足す:
+  `{"_qualification_meta": {"machine_decision", "effective_decision", "overridden"}}`
+- メタは通常の Finding と混同しない（Finding は必ず `code` を持つ）
+- メタは `evidence_count` に加算しない
+- `blocker_codes` / `review_codes` は機械判定のまま残す
+
 ## findings_json / positive_facts_json 内の Evidence の契約
 
 `lead_qualification_service.Evidence` を dict 化したものが入る。

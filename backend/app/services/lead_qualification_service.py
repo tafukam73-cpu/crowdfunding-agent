@@ -1691,6 +1691,44 @@ def _campaign_ended(project) -> bool:
     return end is not None and end < _now()
 
 
+# findings_json に埋め込む予約メタデータのキー。**通常の Finding と混同しない**
+# （Finding は必ず "code" を持つ。メタはこのキーだけを持つ 1 要素として末尾に置く）。
+META_KEY = "_qualification_meta"
+
+
+def findings_of(row) -> list[dict]:
+    """履歴行から **通常の Finding だけ** を取り出す（予約メタデータを除く）。"""
+    return [
+        item for item in (getattr(row, "findings_json", None) or [])
+        if isinstance(item, dict) and META_KEY not in item
+    ]
+
+
+def qualification_meta(row) -> dict | None:
+    """履歴行の予約メタデータ（機械判定と実効判定の区別）。無ければ None。"""
+    for item in (getattr(row, "findings_json", None) or []):
+        if isinstance(item, dict) and META_KEY in item:
+            meta = item[META_KEY]
+            return meta if isinstance(meta, dict) else None
+    return None
+
+
+def _update_snapshot(project, stage: str, decision: str, evaluated_at) -> bool:
+    """``projects`` の一覧用スナップショット 2 列を更新する。
+
+    **スナップショットは pre_research 専用**。``pre_outreach`` の判定は履歴にのみ
+    残し、一覧のフィルタ（qualification）には影響させない。送信可否は案件一覧の
+    絞り込み軸ではなく、送信直前に判定するものだから（PR-5 の責務）。
+
+    Returns: 更新したかどうか。
+    """
+    if stage != STAGE_PRE_RESEARCH:
+        return False
+    project.lead_qualification_decision = decision
+    project.lead_qualification_at = evaluated_at
+    return True
+
+
 def run(db, project, stage: str = STAGE_PRE_RESEARCH, *, commit: bool = True):
     """判定を実行して履歴を 1 行追記し、一覧用キャッシュを更新する。
 
@@ -1698,8 +1736,8 @@ def run(db, project, stage: str = STAGE_PRE_RESEARCH, *, commit: bool = True):
       1. ``gather_signals(db, project)``（読み取りのみ）
       2. ``qualify(signals, stage)``（純粋関数）
       3. ``lead_qualifications`` へ **1 行 INSERT**（append-only）
-      4. ``projects.lead_qualification_decision`` を最新 decision に更新
-      5. ``projects.lead_qualification_at`` を evaluated_at に更新
+      4. **stage が pre_research のときだけ** ``projects`` のスナップショット
+         2 列（lead_qualification_decision / _at）を更新する
 
     commit 責務は既存サービス（``project_service.record_status_event``）に合わせ、
     **既定でこの関数が commit する**。呼び出し側でトランザクションを束ねたい場合は
@@ -1708,33 +1746,112 @@ def run(db, project, stage: str = STAGE_PRE_RESEARCH, *, commit: bool = True):
     **既存履歴を UPDATE / DELETE しない。** 同じ結果でも再実行すれば行が増える。
     **archived_at / archive_reason には触れない**（自動アーカイブはしない）。
     """
-    from app.models.lead_qualification import LeadQualification
-
     signals = gather_signals(db, project)
     result = qualify(signals, stage)
-
-    row = LeadQualification(
-        project_id=project.id,
-        stage=result.stage,
-        decision=result.decision,
-        blocker_codes=list(result.blocker_codes),
-        review_codes=list(result.review_codes),
-        findings_json=[f.to_dict() for f in result.findings],
-        positive_facts_json=[p.to_dict() for p in result.positive_facts],
-        # QualificationResult の値をそのまま保存する（再計算しない）。
-        evidence_count=result.evidence_count,
-        engine=result.rule_version,
-    )
-    db.add(row)
-
-    # 一覧のフィルタ/ソート用キャッシュ（判定の正本は lead_qualifications）。
-    project.lead_qualification_decision = result.decision
-    project.lead_qualification_at = result.evaluated_at
-
+    row = _append_history(db, project, result)
+    _update_snapshot(project, result.stage, result.decision, result.evaluated_at)
     if commit:
         db.commit()
         db.refresh(row)
     return row
+
+
+def _append_history(
+    db,
+    project,
+    result: QualificationResult,
+    *,
+    effective_decision: str | None = None,
+    override_reason: str | None = None,
+    override_evidence_url: str | None = None,
+):
+    """判定結果を履歴へ 1 行追記する（append-only。既存行は触らない）。
+
+    ``effective_decision`` を渡すと「人が覆した判定」として保存する。その場合:
+      - ``decision`` 列には **実効判定（人の指定値）** を入れる
+      - ``findings_json`` の末尾へ予約メタデータを 1 要素だけ足し、機械判定と
+        実効判定を区別できるようにする
+      - **``evidence_count`` には加算しない**（メタは証跡ではない）
+      - **``blocker_codes`` / ``review_codes`` は機械判定のまま**（勝手に書き換えない）
+    """
+    from app.models.lead_qualification import LeadQualification
+
+    findings = [f.to_dict() for f in result.findings]
+    decision = result.decision
+    if effective_decision is not None:
+        decision = effective_decision
+        findings.append({
+            META_KEY: {
+                "machine_decision": result.decision,
+                "effective_decision": effective_decision,
+                "overridden": True,
+            }
+        })
+
+    row = LeadQualification(
+        project_id=project.id,
+        stage=result.stage,
+        decision=decision,
+        # 機械判定のコードをそのまま残す（人の上書きで書き換えない）。
+        blocker_codes=list(result.blocker_codes),
+        review_codes=list(result.review_codes),
+        findings_json=findings,
+        positive_facts_json=[p.to_dict() for p in result.positive_facts],
+        # QualificationResult の値をそのまま保存する（再計算しない）。
+        evidence_count=result.evidence_count,
+        engine=result.rule_version,
+        override_reason=override_reason,
+        override_evidence_url=override_evidence_url,
+    )
+    db.add(row)
+    return row
+
+
+def record_override(
+    db,
+    project,
+    stage: str,
+    decision: str,
+    *,
+    reason: str,
+    evidence_url: str,
+    commit: bool = True,
+):
+    """人が判定を覆した記録を **履歴 1 行として** 追記する。
+
+    ``run()`` は呼ばない（呼ぶと 1 操作で履歴が 2 行増えてしまう）。処理は
+    gather_signals → qualify で機械判定を取り、その結果を土台に実効判定を
+    上書きした行を 1 行だけ INSERT する。
+
+    機械判定と同じ decision を指定してもエラーにしない（監査記録として残す）。
+    その場合は ``changed=False`` を返す。
+
+    **スナップショット更新は stage が pre_research のときだけ**。
+    **archived_at / archive_reason には触れない**（自動アーカイブはしない）。
+
+    Returns: ``(row, changed)``
+    """
+    if stage not in STAGES:
+        raise ValueError(f"unknown stage: {stage}")
+    if decision not in DECISIONS:
+        raise ValueError(f"unknown decision: {decision}")
+
+    signals = gather_signals(db, project)
+    result = qualify(signals, stage)
+    changed = result.decision != decision
+
+    row = _append_history(
+        db, project, result,
+        effective_decision=decision,
+        override_reason=reason,
+        override_evidence_url=evidence_url,
+    )
+    _update_snapshot(project, result.stage, decision, result.evaluated_at)
+
+    if commit:
+        db.commit()
+        db.refresh(row)
+    return row, changed
 
 
 def get_latest(db, project_id: int, *, stage: str | None = None):

@@ -113,6 +113,12 @@ class ProjectOut(ProjectBase):
     # 内部スコア（japan_crowdfunding_score）と内部向け判定理由は画面に出さない。
     eligible_for_contact_search: bool | None = None
     gate_checked_at: datetime | None = None
+    # 営業対象除外判定（Lead Qualification Engine）の最新スナップショット。
+    # blocked / review / clear。**最新の pre_research 判定だけ**を保持する
+    # （送信可否 pre_outreach は履歴にのみ残す）。未判定は None。
+    # 判定の内訳・証跡は GET /projects/{id}/lead-qualification で取得する。
+    lead_qualification_decision: str | None = None
+    lead_qualification_at: datetime | None = None
     # 営業対象外（ソフトデリート）。archived_at があれば対象外、is_archived で導出。
     archived_at: datetime | None = None
     archive_reason: str | None = None

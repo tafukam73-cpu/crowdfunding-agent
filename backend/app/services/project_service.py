@@ -100,6 +100,7 @@ def list_projects(
     q: str | None = None,
     min_score: int | None = None,
     recommendation: str | None = None,
+    qualification: str | None = None,
     archived: bool = False,
     sort: str = "created_at",
     order: str = "desc",
@@ -144,6 +145,11 @@ def list_projects(
         conditions.append(Project.latest_score >= min_score)
     if recommendation:
         conditions.append(Project.latest_recommendation == recommendation)
+    if qualification:
+        # 営業対象除外判定（blocked / review / clear）。参照するのは projects の
+        # スナップショット列で、これは **最新の pre_research 判定だけ** を保持する
+        # （送信可否 pre_outreach は一覧の絞り込み軸にしない）。
+        conditions.append(Project.lead_qualification_decision == qualification)
 
     base = select(Project)
     count_stmt = select(func.count()).select_from(Project)

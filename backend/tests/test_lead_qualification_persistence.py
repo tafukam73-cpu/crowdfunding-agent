@@ -437,12 +437,17 @@ def test_run_updates_only_cache_columns():
               p.eligible_for_contact_search == before["eligible_for_contact_search"])
         check("latest_score は変更されない", p.latest_score == before["latest_score"])
 
-        prev_at = p.lead_qualification_at
-        second = lq.run(db, p, lq.STAGE_PRE_OUTREACH)
+        # スナップショットは **pre_research 専用**。pre_outreach は履歴にのみ残す。
+        prev = (p.lead_qualification_decision, p.lead_qualification_at)
+        lq.run(db, p, lq.STAGE_PRE_OUTREACH)
         db.refresh(p)
-        check("再判定でキャッシュが最新へ更新される",
-              p.lead_qualification_decision == second.decision)
-        check("キャッシュ日時が進む（または同値）", p.lead_qualification_at >= prev_at)
+        check("pre_outreach はスナップショットを更新しない",
+              (p.lead_qualification_decision, p.lead_qualification_at) == prev)
+        third = lq.run(db, p, lq.STAGE_PRE_RESEARCH)
+        db.refresh(p)
+        check("pre_research の再判定でキャッシュが最新へ更新される",
+              p.lead_qualification_decision == third.decision)
+        check("キャッシュ日時が進む（または同値）", p.lead_qualification_at >= prev[1])
     finally:
         db.close()
 
@@ -605,16 +610,17 @@ def test_migration_file():
 
 def test_no_api_or_ui_change():
     print("test_no_api_or_ui_change")
-    for rel in ("app/routers/contact_intelligence.py", "app/routers/projects.py",
-                "app/schemas/project.py"):
-        path = BACKEND / rel
-        if not path.exists():
-            continue
-        check(f"{rel} に lead_qualification を追加していない",
-              "lead_qualification" not in path.read_text(encoding="utf-8"))
+    # PR-4 で LQE の API を追加したため、「どこにも lead_qualification が無いこと」は
+    # もう不変条件ではない。維持すべきなのは次の 2 点:
+    #   1. LQE の API は専用 router に閉じている（既存 router へ混ぜない）
+    #   2. frontend は未変更（UI は PR-6）
+    ci = (BACKEND / "app" / "routers" / "contact_intelligence.py").read_text(
+        encoding="utf-8")
+    check("contact_intelligence.py に LQE エンドポイントを混ぜていない",
+          "lead-qualification" not in ci)
     front = BACKEND.parent / "frontend" / "lib" / "api.ts"
     if front.exists():
-        check("frontend/lib/api.ts に lead_qualification を追加していない",
+        check("frontend/lib/api.ts は未変更（UI は PR-6）",
               "lead_qualification" not in front.read_text(encoding="utf-8"))
 
 

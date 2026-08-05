@@ -268,6 +268,10 @@ class Project(Base):
     # 判定の正本は lead_qualifications（追記専用の履歴）。ここには一覧の
     # フィルタ/ソート用に「最新の判定」だけを持つ（上書き更新してよい）。
     # blocked / review / clear。未判定は NULL。
+    #
+    # **保持するのは最新の pre_research 判定だけ。** pre_outreach（送信可否）の
+    # 判定は履歴にのみ残し、この 2 列は更新しない。送信可否は案件一覧の絞り込み
+    # 軸ではなく、送信直前に判定するものだから。
     lead_qualification_decision: Mapped[str | None] = mapped_column(
         String(12), nullable=True, index=True
     )
