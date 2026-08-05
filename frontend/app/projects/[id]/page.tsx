@@ -22,6 +22,7 @@ import SalesStatusBadge from "@/components/SalesStatusBadge";
 import WadizImportPanel from "@/components/WadizImportPanel";
 import WorkflowCard from "@/components/WorkflowCard";
 import ArchiveReasonDialog from "@/components/ArchiveReasonDialog";
+import LeadQualificationPanel from "@/components/LeadQualificationPanel";
 import type { ReactNode } from "react";
 import {
   archiveProject,
@@ -244,6 +245,13 @@ export default function ProjectDetail() {
           open={archiveDialogOpen}
           targetLabel={project.title}
           busy={archiveBusy}
+          // 営業対象判定が「対象外」の案件だけ理由をプリフィルする。
+          // 証跡URL・メールアドレス・内部参照は含めない（判定値とコードのみ）。
+          initialReason={
+            project.lead_qualification_decision === "blocked"
+              ? "営業対象判定：対象外"
+              : undefined
+          }
           onCancel={() => setArchiveDialogOpen(false)}
           onConfirm={onArchive}
         />
@@ -388,6 +396,16 @@ export default function ProjectDetail() {
               />
             </div>
           )}
+        </Section>
+
+        {/* ③-2 営業対象判定（Lead Qualification Engine）。
+            連絡先が揃ったあと、AI 提案・送信準備に進む前の関門として置く。 */}
+        <Section num="③-2" title="営業対象判定">
+          <LeadQualificationPanel
+            projectId={id}
+            projectTitle={project.title}
+            onSnapshotChange={() => setStatusVersion((v) => v + 1)}
+          />
         </Section>
 
         {/* ④ AI提案 */}

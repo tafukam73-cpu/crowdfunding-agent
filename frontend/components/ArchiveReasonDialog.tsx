@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ARCHIVE_REASONS } from "@/lib/api";
 
@@ -12,6 +12,12 @@ type Props = {
   targetLabel?: string;
   count?: number;
   busy?: boolean;
+  /**
+   * 理由の初期値（自由入力欄へプリフィルする）。営業対象判定が「対象外」の案件で
+   * 呼び出し側が渡す。**ダイアログを開いただけでは保存されない**（ユーザーが
+   * 自由に編集でき、確定操作をして初めて保存される）。
+   */
+  initialReason?: string;
   onConfirm: (reason: string | undefined) => void;
   onCancel: () => void;
 };
@@ -26,11 +32,24 @@ export default function ArchiveReasonDialog({
   targetLabel,
   count,
   busy = false,
+  initialReason,
   onConfirm,
   onCancel,
 }: Props) {
   const [reason, setReason] = useState<string>("");
   const [freeText, setFreeText] = useState<string>("");
+
+  // 開いたときだけプリフィルする（入力中に上書きしない）。
+  useEffect(() => {
+    if (!open) return;
+    if (initialReason && initialReason.trim()) {
+      setReason(OTHER);
+      setFreeText(initialReason.trim());
+    } else {
+      setReason("");
+      setFreeText("");
+    }
+  }, [open, initialReason]);
 
   if (!open) return null;
 

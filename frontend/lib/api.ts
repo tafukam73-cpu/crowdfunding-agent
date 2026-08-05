@@ -97,6 +97,10 @@ export type Project = {
   // 日本クラファン適性ゲート（メール探索の事前判定）。内部スコアは返さない。
   eligible_for_contact_search: boolean | null;
   gate_checked_at: string | null;
+  // 営業対象判定（Lead Qualification Engine）の最新スナップショット。
+  // **pre_research 専用**（送信可否 pre_outreach は含まない）。未判定は null。
+  lead_qualification_decision: QualificationDecision | null;
+  lead_qualification_at: string | null;
   // 営業対象外（ソフトデリート）。archived_at があれば対象外。is_archived で導出。
   archived_at: string | null;
   archive_reason: string | null;
@@ -220,6 +224,8 @@ export const EMAIL_TONE_ORDER: EmailTone[] = [
 export type EmailProviderInfo = {
   provider: string;
   gmail_configured: boolean;
+  // 送信前関門の適用モード。observe = 記録のみ / enforce = 判定で導線を止める。
+  outreach_gate_mode: OutreachGateMode;
 };
 
 export type ProviderDraftResult = {
@@ -304,6 +310,8 @@ export type ListParams = {
   q?: string;
   min_score?: number;
   recommendation?: Recommendation | "";
+  // 営業対象判定で絞り込む。参照するのは **pre_research スナップショット**。
+  qualification?: QualificationDecision | "";
   // true なら営業対象外（除外済み）案件のみ、false（既定）なら対象内のみ。
   archived?: boolean;
   sort?: string;
@@ -772,6 +780,9 @@ export type Outreach = {
   last_activity_at: string | null;
   notes: string | null;
   gmail_compose_url: string | null;
+  // 保存済みの最新 pre_outreach 判定。未判定は null。
+  // enforce では clear 以外で gmail_compose_url が null になる理由の説明に使う。
+  qualification_decision: QualificationDecision | null;
   recipient: string | null;
   // 送信後ワークフロー（0045）
   recipient_email: string | null;
@@ -991,6 +1002,7 @@ export async function fetchProjects(params: ListParams = {}): Promise<ProjectLis
   if (params.q) qs.set("q", params.q);
   if (params.min_score != null) qs.set("min_score", String(params.min_score));
   if (params.recommendation) qs.set("recommendation", params.recommendation);
+  if (params.qualification) qs.set("qualification", params.qualification);
   if (params.archived) qs.set("archived", "true");
   if (params.sort) qs.set("sort", params.sort);
   if (params.order) qs.set("order", params.order);
@@ -3833,4 +3845,189 @@ export async function fetchWadizImports(id: number): Promise<WadizImportHistory>
   const res = await apiFetch(`/projects/${id}/wadiz-imports`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+// ===== 営業対象判定（Lead Qualification Engine） =====
+// 表示方針（CLAUDE.md §1）: 数値スコア・確率・返信率・成功率は扱わない。
+// confidence は **証跡の確からしさ**を表すラベルであり、成功可能性ではない。
+
+export type QualificationDecision = "blocked" | "review" | "clear";
+export type QualificationStage = "pre_research" | "pre_outreach";
+export type QualificationConfidence = "high" | "medium" | "low" | "unverified";
+/** 送信前関門の適用モード。observe = 記録のみ / enforce = 判定で導線を止める。 */
+export type OutreachGateMode = "observe" | "enforce";
+
+export type QualificationEvidence = {
+  claim: string | null;
+  source_url: string | null;
+  source_kind: string | null;
+  method: string | null;
+  checked_at: string | null;
+  excerpt: string | null;
+  // false の証跡は外部 Web リンクではない（内部 DB 参照）。**リンク化しない**。
+  is_external_link: boolean;
+};
+
+export type QualificationFinding = {
+  code: string;
+  key: string;
+  label: string;
+  stage: QualificationStage;
+  verdict: string;
+  severity: string;
+  confidence: QualificationConfidence;
+  reason: string;
+  evidence: QualificationEvidence[];
+  rule_version: string;
+  entity_role: string;
+  facts: Record<string, unknown>;
+  downgraded_from: string | null;
+  downgrade_reason: string | null;
+};
+
+export type QualificationPositiveFact = {
+  key: string;
+  label: string;
+  evidence: QualificationEvidence[];
+};
+
+/** GET /projects/{id}/lead-qualification のレスポンス。 */
+export type LeadQualificationResult = {
+  project_id: number;
+  stage: QualificationStage;
+  // 実効判定（人の上書きを含む）。machine_decision と異なる場合がある。
+  decision: QualificationDecision;
+  machine_decision: QualificationDecision;
+  effective_decision: QualificationDecision;
+  overridden: boolean;
+  // false は「その場で算出した未保存の判定」。
+  persisted: boolean;
+  blocker_codes: string[];
+  review_codes: string[];
+  findings: QualificationFinding[];
+  positive_facts: QualificationPositiveFact[];
+  evidence_count: number;
+  rule_version: string;
+  evaluated_at: string | null;
+  override_reason: string | null;
+  override_evidence_url: string | null;
+};
+
+export type RecheckResult = {
+  qualification: LeadQualificationResult;
+  // pre_research のときだけ一覧スナップショットが更新される。
+  snapshot_updated: boolean;
+};
+
+export type OverrideResult = {
+  // 機械判定と同じ値を指定した場合は false（監査記録としては保存される）。
+  changed: boolean;
+  qualification: LeadQualificationResult;
+};
+
+export type OverridePayload = {
+  stage: QualificationStage;
+  decision: QualificationDecision;
+  reason: string;
+  evidence_url: string;
+};
+
+// --- 表示ラベル（一覧は pre_research スナップショット専用） ---
+// clear を「営業可能」「送信可能」と書かない。pre_outreach では結果が変わり得る。
+export const QUALIFICATION_LABELS: Record<QualificationDecision, string> = {
+  blocked: "対象外",
+  review: "要確認",
+  clear: "調査通過",
+};
+export const QUALIFICATION_UNKNOWN_LABEL = "未判定";
+
+export const QUALIFICATION_COLORS: Record<QualificationDecision, string> = {
+  blocked: "bg-rose-100 text-rose-800",
+  review: "bg-amber-100 text-amber-800",
+  clear: "bg-emerald-100 text-emerald-800",
+};
+export const QUALIFICATION_UNKNOWN_COLOR = "bg-slate-100 text-slate-600";
+
+/** 不明な値・null を安全に扱う（推測で判定値を作らない）。 */
+export function normalizeQualification(
+  value: QualificationDecision | string | null | undefined
+): QualificationDecision | null {
+  if (value === "blocked" || value === "review" || value === "clear") return value;
+  return null;
+}
+
+export const CONFIDENCE_LABELS: Record<QualificationConfidence, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+  unverified: "未確認",
+};
+/** 「高」は成功可能性ではなく **証跡の確からしさ**であることを明示する。 */
+export const CONFIDENCE_HELP =
+  "証跡の確からしさを表します。営業の成功可能性ではありません。";
+
+export const STAGE_LABELS: Record<QualificationStage, string> = {
+  pre_research: "調査前",
+  pre_outreach: "送信準備前",
+};
+
+/** 内部 DB 参照の証跡に出す文言（db:// をそのまま画面に出さない）。 */
+export const INTERNAL_EVIDENCE_LABEL = "保存済みデータ（内部参照）";
+
+export async function fetchLeadQualification(
+  projectId: number,
+  stage: QualificationStage = "pre_research"
+): Promise<LeadQualificationResult> {
+  const res = await apiFetch(
+    `/projects/${projectId}/lead-qualification?stage=${stage}`
+  );
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function recheckLeadQualification(
+  projectId: number,
+  stage: QualificationStage = "pre_research"
+): Promise<RecheckResult> {
+  const res = await apiFetch(
+    `/projects/${projectId}/lead-qualification/recheck?stage=${stage}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(await apiErrorMessage(res));
+  return res.json();
+}
+
+export async function overrideLeadQualification(
+  projectId: number,
+  payload: OverridePayload
+): Promise<OverrideResult> {
+  const res = await apiFetch(`/projects/${projectId}/lead-qualification/override`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await apiErrorMessage(res));
+  return res.json();
+}
+
+/** API エラーを人が読める 1 行にする（422 の detail も拾う）。 */
+async function apiErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    const detail = body?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d: { loc?: unknown[]; msg?: string }) => {
+          const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : "";
+          return field ? `${field}: ${d.msg ?? ""}` : d.msg ?? "";
+        })
+        .filter(Boolean);
+      if (msgs.length) return `入力エラー: ${msgs.join(" / ")}`;
+    }
+    if (detail?.message) return String(detail.message);
+  } catch {
+    /* JSON でない場合は下のフォールバックを使う */
+  }
+  return `API error: ${res.status}`;
 }

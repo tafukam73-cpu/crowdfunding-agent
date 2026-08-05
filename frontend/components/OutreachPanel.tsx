@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   confirmOutreachReply,
+  fetchEmailProvider,
   fetchOutreach,
   generateOutreach,
   generateOutreachFollowup,
@@ -13,13 +14,109 @@ import {
   OUTREACH_STATUS_LABELS,
   previewOutreachReply,
   type Outreach,
+  type OutreachGateMode,
   type OutreachStatus,
+  QUALIFICATION_LABELS,
   type ReplyAnalysis,
   REPLY_INTENT_LABELS,
   saveOutreachDraft,
 } from "@/lib/api";
 
 const LANG_ORDER = ["en", "ko", "zh", "ja"];
+
+/**
+ * 送信前関門（営業対象判定）の状況表示。
+ *
+ * このシステムは**メールを直接送信しない**。制御しているのは Gmail 下書きの導線
+ * （Compose URL・下書き作成）であり、「送信可能」「安全」「承認済み」とは書かない。
+ * モードを取得できない場合は推測せず、その旨を表示する。
+ */
+function GateModeNotice({
+  mode,
+  modeError,
+  decision,
+  hasComposeUrl,
+}: {
+  mode: OutreachGateMode | null;
+  modeError: boolean;
+  decision: "blocked" | "review" | "clear" | null;
+  hasComposeUrl: boolean;
+}) {
+  if (modeError || mode === null) {
+    return (
+      <div
+        role="status"
+        className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900"
+      >
+        <p className="font-medium">適用モードを確認できません</p>
+        <p className="mt-0.5">
+          送信前判定の適用状態が取得できませんでした。宛先と内容をご自身で確認してください。
+        </p>
+      </div>
+    );
+  }
+
+  const decisionLabel = decision ? QUALIFICATION_LABELS[decision] : "未判定";
+  const notClear = decision === "blocked" || decision === "review";
+
+  if (mode === "observe") {
+    return (
+      <div
+        role="status"
+        className="rounded border border-slate-300 bg-slate-50 p-2 text-[11px] text-slate-700"
+      >
+        <p className="font-medium">
+          監査モード（送信準備前の判定: {decisionLabel}）
+        </p>
+        <p className="mt-0.5 leading-relaxed">
+          営業対象判定を記録しています。現在は判定が要確認・対象外でも、Gmail
+          下書き導線は利用できます。送信前に内容と宛先を必ず確認してください。
+        </p>
+        {notClear && hasComposeUrl && (
+          <p className="mt-0.5">
+            この案件は「{decisionLabel}」ですが、監査モードのため導線は表示されています。
+            判定の内訳は
+            <a href="#lead-qualification" className="ml-1 text-blue-600 underline">
+              営業対象判定
+            </a>
+            で確認できます。
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="status"
+      className={`rounded border p-2 text-[11px] ${
+        notClear
+          ? "border-rose-300 bg-rose-50 text-rose-900"
+          : "border-slate-300 bg-slate-50 text-slate-700"
+      }`}
+    >
+      <p className="font-medium">
+        強制適用モード（送信準備前の判定: {decisionLabel}）
+      </p>
+      <p className="mt-0.5 leading-relaxed">
+        調査通過、または有効な人手 override がある案件だけ、Gmail
+        下書き導線を利用できます。
+      </p>
+      {notClear && !hasComposeUrl && (
+        <p className="mt-0.5">
+          {decision === "blocked"
+            ? "営業対象判定によりGmail導線が表示されていません。"
+            : "追加確認が必要なためGmail導線が表示されていません。"}
+          上書きが必要な場合は
+          <a href="#lead-qualification" className="ml-1 text-blue-600 underline">
+            営業対象判定
+          </a>
+          から人の判断で登録してください。
+        </p>
+      )}
+    </div>
+  );
+}
 
 function fmt(dt: string | null): string {
   if (!dt) return "—";
@@ -59,6 +156,9 @@ function StatusBadge({ status }: { status: OutreachStatus }) {
 // Gmail で開いただけでは送信済みにしない（「送信済みとして記録」ボタンのみ）。
 export default function OutreachPanel({ projectId }: { projectId: number }) {
   const [outreach, setOutreach] = useState<Outreach | null>(null);
+  // 送信前関門の適用モード。取得できなければ null（推測しない）。
+  const [gateMode, setGateMode] = useState<OutreachGateMode | null>(null);
+  const [gateModeError, setGateModeError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +191,25 @@ export default function OutreachPanel({ projectId }: { projectId: number }) {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [load]);
+
+  // 送信前関門の適用モードを取得する（表示専用。判定は実行しない）。
+  useEffect(() => {
+    let alive = true;
+    fetchEmailProvider()
+      .then((info) => {
+        if (!alive) return;
+        setGateMode(info.outreach_gate_mode ?? null);
+        setGateModeError(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setGateMode(null);
+        setGateModeError(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const pollJob = useCallback(
     (jobId: number) => {
@@ -263,6 +382,15 @@ export default function OutreachPanel({ projectId }: { projectId: number }) {
         </button>
       </div>
 
+      {/* 送信前関門の適用モードと、Gmail 導線の可否理由。
+          このシステムはメールを直接送信せず、Gmail の下書き導線を制御する。 */}
+      <GateModeNotice
+        mode={gateMode}
+        modeError={gateModeError}
+        decision={outreach?.qualification_decision ?? null}
+        hasComposeUrl={Boolean(outreach?.gmail_compose_url)}
+      />
+
       {step && <p className="text-xs text-indigo-600">{step}</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
 
@@ -378,7 +506,8 @@ export default function OutreachPanel({ projectId }: { projectId: number }) {
                       rel="noopener noreferrer"
                       className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-500"
                     >
-                      Gmail で開く ↗
+                      Gmail で下書きを開く ↗
+                      <span className="sr-only">（新しいタブで開く）</span>
                     </a>
                   )}
                 {!isSent && !isTerminal && (
