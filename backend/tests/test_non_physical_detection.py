@@ -129,7 +129,7 @@ def test_app_only_is_non_physical():
     cases = [
         ("アプリのみのサブスクリプション", "サブスクリプション"),
         ("瞑想アプリを開発します", "アプリ単独"),
-        ("новый モバイルアプリ mobile app for meditation", "mobile app"),
+        ("new mobile app for meditation", "mobile app"),
         ("가계부 앱 서비스", "앱単独"),
     ]
     for t, why in cases:
