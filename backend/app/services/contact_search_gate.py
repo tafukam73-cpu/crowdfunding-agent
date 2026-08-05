@@ -59,7 +59,7 @@ GATE_NOT_ELIGIBLE = "not_eligible"
 # 単独で「非物理」と判断してよい語（物理商品の説明にはまず出ない）。
 _NON_PHYSICAL_STRONG = (
     "mobile app", "saas", "software only", "web service", "subscription service",
-    "アプリ", "ソフトウェア", "サブスクリプション",
+    "ソフトウェア", "サブスクリプション",
     "documentary", "short film", "video game", "board game", "tabletop",
     "concert", "festival", "exhibition",
     "donation", "charity", "fundraiser", "nonprofit", "ngo", "scholarship",
@@ -72,7 +72,10 @@ _NON_PHYSICAL_STRONG = (
 _NON_PHYSICAL_WEAK = (
     "app", "plugin", "movie", "film", "game", "book", "novel", "comic", "manga",
     "album", "music", "song", "event", "course",
-    "ゲーム", "音楽", "イベント",
+    # 日本語・韓国語の「アプリ」も付随機能として頻出するため WEAK に置く。
+    # 例: 「スマート水耕栽培キット（アプリ連動）」は物理商品。
+    "アプリ", "ゲーム", "音楽", "イベント",
+    "앱", "게임", "음악",
 )
 # 物理商品であることを示す語（_NON_PHYSICAL_WEAK の打ち消しに使う）。
 _PHYSICAL_PRODUCT_HINTS = (
@@ -92,6 +95,18 @@ _PHYSICAL_PRODUCT_HINTS = (
     "titanium", "waterproof", "rechargeable", "bluetooth",
     "ヘッドホン", "イヤホン", "スピーカー", "時計", "カメラ", "ライト",
     "ボトル", "バッグ", "充電", "電池", "キーボード", "財布", "ナイフ",
+    # 日本語の物理商品語（形状・素材・機構）。
+    "キット", "本体", "充電式", "ステンレス", "アルミ", "チタン", "防水",
+    "栽培", "収納", "照明", "空気清浄", "加湿", "掃除機", "調理", "食器",
+    "リュック", "工具", "ランプ", "扇風機", "マット", "椅子", "机",
+    # 韓国語の物理商品語。
+    "키트", "본체", "충전식", "충전", "방수", "스테인리스", "알루미늄",
+    "이어폰", "헤드폰", "스피커", "카메라", "가방", "조명", "청소기",
+    # 「付随アプリ」を示す複合語は、アプリが操作する**実体がある**ことの証拠。
+    # 単独の "アプリ" では物理商品を除外しないための打ち消し語。
+    "アプリ連動", "アプリ対応", "アプリ操作", "専用アプリ", "アプリ制御",
+    "companion app", "app-enabled", "app control", "app-controlled",
+    "앱 연동", "전용 앱", "앱 제어", "앱연동",
 )
 # 後方互換：既存の参照が壊れないよう全語を残す。
 _NON_PHYSICAL_HINTS = _NON_PHYSICAL_STRONG + _NON_PHYSICAL_WEAK

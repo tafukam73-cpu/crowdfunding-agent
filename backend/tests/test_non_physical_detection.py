@@ -105,6 +105,59 @@ def test_excluded_categories_integration():
           any("物理商品ではない" in r for r in reasons2))
 
 
+def test_japanese_companion_app_is_physical():
+    """日本語「アプリ連動」等を持つ物理商品を非物理と誤判定しないこと。
+
+    実案件 #4「スマート水耕栽培キット（アプリ連動）」が誤判定された回帰テスト。
+    """
+    print("test_japanese_companion_app_is_physical")
+    cases = [
+        "スマート水耕栽培キット（アプリ連動）",
+        "専用アプリで操作するスマートロック 本体",
+        "アプリ対応 充電式 ランプ",
+        "アプリ操作できるステンレス製ボトル",
+        "앱 연동 스마트 조명 본체",
+        "전용 앱으로 제어하는 충전식 청소기",
+    ]
+    for t in cases:
+        check(f"物理商品と判定: {t[:34]}", not g.is_non_physical(t.lower()))
+
+
+def test_app_only_is_non_physical():
+    """アプリ/SaaS のみの企画は従来どおり非物理と判定すること。"""
+    print("test_app_only_is_non_physical")
+    cases = [
+        ("アプリのみのサブスクリプション", "サブスクリプション"),
+        ("瞑想アプリを開発します", "アプリ単独"),
+        ("новый モバイルアプリ mobile app for meditation", "mobile app"),
+        ("가계부 앱 서비스", "앱単独"),
+    ]
+    for t, why in cases:
+        check(f"非物理と判定: {why}", g.is_non_physical(t.lower()))
+
+
+def test_app_moved_to_weak():
+    """「アプリ」が STRONG から WEAK へ移動していること。"""
+    print("test_app_moved_to_weak")
+    check("'アプリ' は STRONG に無い", "アプリ" not in g._NON_PHYSICAL_STRONG)
+    check("'アプリ' は WEAK にある", "アプリ" in g._NON_PHYSICAL_WEAK)
+    check("'ソフトウェア' は STRONG のまま", "ソフトウェア" in g._NON_PHYSICAL_STRONG)
+    check("'サブスクリプション' は STRONG のまま",
+          "サブスクリプション" in g._NON_PHYSICAL_STRONG)
+    check("'アプリ連動' は物理指標にある", "アプリ連動" in g._PHYSICAL_PRODUCT_HINTS)
+
+
+def test_excluded_categories_japanese_integration():
+    """_excluded_categories 経由でも日本語ケースが正しいこと。"""
+    print("test_excluded_categories_japanese_integration")
+    reasons = g._excluded_categories("スマート水耕栽培キット（アプリ連動）".lower())
+    check("水耕栽培キットに非物理理由が付かない",
+          not any("物理商品ではない" in r for r in reasons))
+    reasons2 = g._excluded_categories("瞑想アプリのサブスクリプション".lower())
+    check("アプリ単独には非物理理由が付く",
+          any("物理商品ではない" in r for r in reasons2))
+
+
 def test_backward_compat_constant():
     """既存参照が壊れないこと。"""
     print("test_backward_compat_constant")
@@ -119,6 +172,10 @@ def main():
     test_true_non_physical_still_detected()
     test_weak_hint_without_physical_context()
     test_excluded_categories_integration()
+    test_japanese_companion_app_is_physical()
+    test_app_only_is_non_physical()
+    test_app_moved_to_weak()
+    test_excluded_categories_japanese_integration()
     test_backward_compat_constant()
     print(f"\n{_passed} passed / {_failed} failed")
     return 1 if _failed else 0
