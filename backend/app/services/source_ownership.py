@@ -222,27 +222,143 @@ EXCLUDE_LOCALS = frozenset({
     "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "privacy",
     "abuse", "webmaster", "postmaster", "security", "careers", "career", "jobs",
     "recruit", "legal", "copyright", "dmca", "dpo", "gdpr", "unsubscribe",
+    # 広報・メディア窓口。提携提案の宛先としては不適切（転送されず終わる）。
+    "press", "media", "publicity", "pressroom", "influencer", "influencers",
 })
 
 
-def email_role(email: str) -> str:
-    """メール local-part の営業役割を返す：high / mid / support / person / exclude / other。"""
+# --- ページ上のラベルによる役割判定 ------------------------------------------ #
+# Contact ページでは各アドレスの用途がラベルで明示されることが多い。
+#   例: "Press & Influencers  ethan@example.com" / "Reseller  sales@example.com"
+# local-part の見た目（"ethan" → 人物）より **ラベルが示す実際の機能**が優先される。
+# 判定は保守的に「除外 → 高価値 → サポート → 汎用」の順で評価する
+# （"Media Sales" のような複合ラベルは送らない側に倒す）。
+_LABEL_ROLE_GROUPS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "press", "media", "influencer", "publicity", "journalist",
+            "recruit", "career", "hiring", "job", "legal", "privacy", "abuse",
+            "data protection", "privacy officer",
+            # "pr" 単独は product/approach 等に誤爆するため、複合形のみを見る。
+            "pr 문의", "pr문의", "pr inquiry", "pr team", "pr 담당",
+            "広報", "報道", "取材", "採用", "求人", "法務", "個人情報",
+            # 韓国語：個人情報保護責任者 / 広報・報道 / 採用 / 法務
+            "개인정보보호책임자", "개인정보 보호책임자", "개인정보보호", "개인정보 보호",
+            "정보보호책임자", "개인정보", "홍보", "언론", "미디어", "보도",
+            "채용", "법무",
+        ),
+        "exclude",
+    ),
+    (
+        (
+            "reseller", "distributor", "distribution", "wholesale", "dealer",
+            "partnership", "partner", "b2b", "export", "oem", "sales",
+            "business development", "international",
+            "代理店", "卸", "販売店", "提携", "法人", "取引",
+            # 韓国語：提携・パートナー・代理店・流通・輸出・営業
+            "제휴", "사업제휴", "파트너십", "파트너", "리셀러", "대리점",
+            "총판", "유통", "도매", "수출", "해외영업", "글로벌영업",
+            "비즈니스", "영업",
+        ),
+        "high",
+    ),
+    (
+        (
+            "support", "customer service", "customer care", "after-sales",
+            "after sales", "technical", "warranty", "repair",
+            "サポート", "カスタマー", "保証", "修理",
+            # 韓国語：顧客センター / 顧客支援 / サービスセンター
+            "고객센터", "고객지원", "서비스센터", "고객 센터", "고객 지원",
+            "as센터", "기술지원",
+        ),
+        "support",
+    ),
+    (
+        ("general", "inquiry", "enquiries", "enquiry", "contact",
+         "お問い合わせ", "問い合わせ", "문의", "일반문의"),
+        "mid",
+    ),
+)
+
+
+def role_from_label(label: str | None) -> str | None:
+    """ページ上のラベル文字列から営業役割を返す（判定不能なら None）。"""
+    if not label:
+        return None
+    text = str(label).lower()
+    for terms, role in _LABEL_ROLE_GROUPS:
+        if any(term in text for term in terms):
+            return role
+    return None
+
+
+def label_near_email(text: str, email: str, *, window: int = 60) -> str | None:
+    """本文中でメールアドレスの直前に現れるラベルを抽出する。
+
+    Contact ページは "Press & Influencers ethan@example.com" のように
+    ラベル→アドレスの順で並ぶことが多いため、直前 ``window`` 文字を見る。
+    見つからなければ None。
+    """
+    if not text or not email:
+        return None
+    idx = text.lower().find(email.lower())
+    if idx < 0:
+        return None
+    before = text[max(0, idx - window):idx]
+    # 直前に別のメールアドレスがあれば、それ以降だけを見る。
+    # （"... hello@x.com Press & Influencers ethan@x.com" で hello 側の文脈を拾わない）
+    prev = list(re.finditer(r"[\w.+-]+@[\w.-]+\.\w+", before))
+    if prev:
+        before = before[prev[-1].end():]
+    # 直前の区切り（改行・中黒・記号）以降をラベル候補とする
+    parts = re.split(r"[\n\r\t|•·・>]+", before)
+    cand = (parts[-1] if parts else "").strip(" -–—:：,、")
+    return cand or None
+
+
+def email_role(email: str, *, label: str | None = None,
+               person_confirmed: bool = False) -> str:
+    """メールの営業役割を返す：high / mid / support / person / unknown / exclude / other。
+
+    判定の優先順位（推測で person へ昇格しないための規約）:
+      1. local-part が明確な送信不可アドレス（noreply/press/media/privacy 等）なら
+         **exclude（ラベルでは覆せない）**
+      2. ``label``（ページ上の用途ラベル）があればそれを最優先
+      3. local-part が既知の機能アドレス（sales/info/support 等）ならその役割
+      4. ``person_confirmed``（公式ページ掲載の氏名と local-part が一致）なら person
+      5. いずれも無ければ **unknown**（person へ昇格しない）
+
+    例: "ethan@..." は見た目こそ人物だが、ラベルが "Press & Influencers" なら exclude。
+    逆に "media@..." は近傍ラベルが "PR 문의"（＝一般文言の「문의」を含む）でも
+    送信可へ降格させない。ラベルは exclude への引き上げには使うが、
+    exclude からの引き下げには使わない（迷ったら送らない）。
+    """
     local = (email or "").split("@", 1)[0].strip().lower()
     base = re.split(r"[.+_-]", local)[0] if local else ""
+    # local-part の送信不可はラベルより強い（ラベルで送信可へ戻さない）。
     if local in EXCLUDE_LOCALS or base in EXCLUDE_LOCALS:
         return "exclude"
+    labeled = role_from_label(label)
+    if labeled is not None:
+        return labeled
     if local in HIGH_VALUE_LOCALS or base in HIGH_VALUE_LOCALS:
         return "high"
     if local in MID_VALUE_LOCALS or base in MID_VALUE_LOCALS:
         return "mid"
     if local in SUPPORT_LOCALS or base in SUPPORT_LOCALS:
         return "support"
-    # それ以外は人物メールの可能性（founder 名等との一致は呼び出し側で判定）。
-    return "person"
+    # 氏名一致という証拠があるときだけ人物と認める。
+    if person_confirmed:
+        return "person"
+    # 証拠が無い＝役割不明。person（rank 1）へ勝手に昇格させない。
+    return "unknown"
 
 
 # 営業適性ランキング（小さいほど優先）。
-_ROLE_RANK = {"high": 0, "person": 1, "mid": 2, "support": 3, "other": 4, "exclude": 9}
+# unknown は「役割が確認できていない」状態であり、汎用窓口(mid)やサポート(support)より
+# 後ろに置く（証拠のない個人宛を優先しない）。
+_ROLE_RANK = {"high": 0, "person": 1, "mid": 2, "support": 3, "other": 4,
+              "unknown": 5, "exclude": 9}
 
 
 # fallback として保持可能なクラス（maker 直通ではないが営業チャネルになり得る）。
@@ -252,7 +368,8 @@ _FALLBACK_ROUTE = {"agency": "agency", "distributor": "distributor"}
 
 
 def classify_email(email: str, ctx: Ctx | None = None,
-                   person_names: set[str] | None = None) -> dict:
+                   person_names: set[str] | None = None,
+                   *, label: str | None = None) -> dict:
     """メールを ownership × role で評価し採用可否を返す（Phase 1/4）。
 
     採用は 3 段階に分ける（無条件全消しを避け、営業価値のある連絡先を保持する）:
@@ -261,16 +378,21 @@ def classify_email(email: str, ctx: Ctx | None = None,
         （agency）・正規販売/地域窓口（distributor）。contact_route にルートを入れる。
       - どちらでもない : platform / marketing / shortener / messenger / retailer /
         unrelated は rejected、unknown は低 confidence 保留（削除しない）。
-    role が exclude（noreply/careers 等）の機能アドレスは maker/fallback とも不採用。
+    role が exclude（noreply/careers/個人情報保護責任者/広報 等）の機能アドレスは
+    maker/fallback とも不採用。
+
+    ``label`` にページ上の用途ラベル（``label_near_email`` の戻り値）を渡すと、
+    local-part の推論より優先される。個人名アドレスでもラベルが個人情報保護・広報なら
+    exclude になり、採用されない。
     """
     addr = (email or "").strip().lower()
     own = classify_domain(addr, ctx)
-    role = email_role(addr)
     person_hit = False
     if person_names:
         local = addr.split("@", 1)[0]
         ltok = set(re.split(r"[.+_-]", local))
         person_hit = bool(ltok & {p.lower() for p in person_names})
+    role = email_role(addr, label=label, person_confirmed=person_hit)
 
     rejection: str | None = None
     accepted = False
@@ -320,12 +442,69 @@ def classify_email(email: str, ctx: Ctx | None = None,
 
 
 def rank_maker_emails(emails: list[str], ctx: Ctx | None = None,
-                      person_names: set[str] | None = None) -> list[dict]:
-    """採用可能な maker メールを営業適性順に並べて返す（採用不可は除外）。"""
-    scored = [classify_email(e, ctx, person_names) for e in emails]
+                      person_names: set[str] | None = None,
+                      *, labels: dict[str, str] | None = None) -> list[dict]:
+    """採用可能な maker メールを営業適性順に並べて返す（採用不可は除外）。
+
+    ``labels`` は {メールアドレス: ページ上のラベル} 。渡すと local-part 推論より
+    優先され、広報・個人情報保護窓口などを確実に除外できる。
+    """
+    lut = {k.strip().lower(): v for k, v in (labels or {}).items()}
+    scored = [
+        classify_email(e, ctx, person_names, label=lut.get((e or "").strip().lower()))
+        for e in emails
+    ]
     accepted = [s for s in scored if s["accepted_as_maker_contact"]]
     accepted.sort(key=lambda s: (s["rank"], s["email"]))
     return accepted
+
+
+def classify_email_target(email: str, ctx: Ctx | None = None, *,
+                          label: str | None = None,
+                          source_url: str | None = None,
+                          checked_at: str | None = None,
+                          person_names: set[str] | None = None) -> dict:
+    """営業宛先としての可否を、証跡（ラベル原文・取得URL・確認日時）付きで返す。
+
+    ``classify_email`` の結果に「なぜその役割になったか（role_source）」と証跡を添える。
+    送信可否は ``sendable`` を見る。判定できない場合は role="unknown" とし、
+    送信可へは昇格させない（推測で宛先にしない）。
+    """
+    addr = (email or "").strip().lower()
+    base = classify_email(addr, ctx, person_names, label=label)
+    role = base["role_type"]
+
+    if role_from_label(label) is not None:
+        role_source = "label"
+    elif base.get("person_match"):
+        role_source = "person_name_match"
+    elif role in ("high", "mid", "support", "exclude"):
+        role_source = "local_part"
+    else:
+        role_source = "unknown"
+
+    reasons: list[str] = []
+    if role == "exclude":
+        reasons.append(f"役割が送信対象外（role=exclude / 判定元={role_source}）")
+    if not base["accepted_as_maker_contact"]:
+        reasons.append(base.get("rejection_reason") or "maker 直通の連絡先ではない")
+    if role == "unknown":
+        reasons.append("役割を確認できない（ラベル・氏名一致とも無し）")
+
+    sendable = (
+        base["accepted_as_maker_contact"]
+        and role not in ("exclude", "unknown")
+    )
+    return {
+        **base,
+        "role": role,
+        "role_source": role_source,
+        "label_raw": label,
+        "source_url": source_url,
+        "checked_at": checked_at,
+        "sendable": sendable,
+        "reasons": reasons,
+    }
 
 
 # --- SNS 自己アカウント（プラットフォーム本体）判定（Phase 6） ---
