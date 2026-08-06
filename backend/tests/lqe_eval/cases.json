@@ -1,0 +1,2528 @@
+[
+  {
+    "source_project_id": 201,
+    "source_site": "kickstarter",
+    "project_name": "CoachBoard Pro Player development, lineups & match tracking",
+    "maker_name": "sayeed",
+    "category": "Apps",
+    "canonical_maker_key": "url:kickstarter.com/profile/crafttime",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "blocked",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "CoachBoard Pro Player development, lineups & match tracking",
+      "source_site": "kickstarter",
+      "category": "Apps",
+      "maker_name": "sayeed",
+      "campaign_url": "https://www.kickstarter.com/projects/crafttime/coachboard-pro-player-development-lineups-and-match-tracking",
+      "end_date": "2026-09-18",
+      "backers_count": 0
+    },
+    "signals_snapshot": {
+      "project_id": 201,
+      "title": "CoachBoard Pro Player development, lineups & match tracking",
+      "description": "The all-in-one coaching app for grassroots soccer — track player development, build lineups, and manage matches, right from your phone.",
+      "category": "Apps",
+      "source_site": "kickstarter",
+      "maker_name": "sayeed",
+      "end_date": "2026-09-18",
+      "campaign_url": "https://www.kickstarter.com/projects/crafttime/coachboard-pro-player-development-lineups-and-match-tracking",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Kickstarterでsayeedが公開したApps「CoachBoard Pro Player development, lineups & match tracking」です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/crafttime",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-20T18:00:00.066213+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 0,
+        "raised_amount": 0.0,
+        "achievement_rate": 0,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ01",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 216,
+    "source_site": "kickstarter",
+    "project_name": "Roman Applied Sciences / Music & Systems",
+    "maker_name": "Roman Kiefer",
+    "category": "Software",
+    "canonical_maker_key": "url:kickstarter.com/profile/nodarama",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "blocked",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "Roman Applied Sciences / Music & Systems",
+      "source_site": "kickstarter",
+      "category": "Software",
+      "maker_name": "Roman Kiefer",
+      "campaign_url": "https://www.kickstarter.com/projects/nodarama/nodarama-verbatim-vibe-coding-amplified",
+      "end_date": "2026-09-09",
+      "backers_count": 0
+    },
+    "signals_snapshot": {
+      "project_id": 216,
+      "title": "Roman Applied Sciences / Music & Systems",
+      "description": "Roman Applied Sciences, enlightened self-reflection, expression, & systems. Consulting, Software, and Streaming.",
+      "category": "Software",
+      "source_site": "kickstarter",
+      "maker_name": "Roman Kiefer",
+      "end_date": "2026-09-09",
+      "campaign_url": "https://www.kickstarter.com/projects/nodarama/nodarama-verbatim-vibe-coding-amplified",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでRoman Kieferが公開したSoftware「Roman Applied Sciences / Music & Systems」です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/nodarama",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-27T18:00:00.050066+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 0,
+        "raised_amount": 0.0,
+        "achievement_rate": 0,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ02",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 76,
+    "source_site": "kickstarter",
+    "project_name": "Commodore 64: The Birth of a Cultural Icon",
+    "maker_name": "Nicola Caulfield & Anthony Caulfield",
+    "category": "Documentary",
+    "canonical_maker_key": "url:kickstarter.com/projects/graciousfilms/the-commodore-64-the-birth-of-a-cultural-icon",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "blocked",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "Commodore 64: The Birth of a Cultural Icon",
+      "source_site": "kickstarter",
+      "category": "Documentary",
+      "maker_name": "Nicola Caulfield & Anthony Caulfield",
+      "campaign_url": "https://www.kickstarter.com/projects/graciousfilms/the-commodore-64-the-birth-of-a-cultural-icon",
+      "end_date": null,
+      "backers_count": null
+    },
+    "signals_snapshot": {
+      "project_id": 76,
+      "title": "Commodore 64: The Birth of a Cultural Icon",
+      "description": "A documentary that explores the success of the iconic Commodore 64 computer!",
+      "category": "Documentary",
+      "source_site": "kickstarter",
+      "maker_name": "Nicola Caulfield & Anthony Caulfield",
+      "end_date": null,
+      "campaign_url": "https://www.kickstarter.com/projects/graciousfilms/the-commodore-64-the-birth-of-a-cultural-icon",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでNicola Caulfield & Anthony Caulfieldが公開したDocumentary「Commodore 64: The Birth of a Cultural Icon」です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/projects/graciousfilms/the-commodore-64-the-birth-of-a-cultural-icon",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-06T09:53:13.159016+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {}
+    },
+    "case_id": "LQ03",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 68,
+    "source_site": "kickstarter",
+    "project_name": "8 Dragons",
+    "maker_name": "Wonderbow Games",
+    "category": "Tabletop Games",
+    "canonical_maker_key": "url:kickstarter.com/projects/wonderbowgames/8-dragons",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "blocked",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "8 Dragons",
+      "source_site": "kickstarter",
+      "category": "Tabletop Games",
+      "maker_name": "Wonderbow Games",
+      "campaign_url": "https://www.kickstarter.com/projects/wonderbowgames/8-dragons",
+      "end_date": null,
+      "backers_count": null
+    },
+    "signals_snapshot": {
+      "project_id": 68,
+      "title": "8 Dragons",
+      "description": "Fly a Dragon Swarm with interlocking Dragons and build your lair. A game as unique as a Dragon. Minimal downtime, maximum Dragon time.",
+      "category": "Tabletop Games",
+      "source_site": "kickstarter",
+      "maker_name": "Wonderbow Games",
+      "end_date": null,
+      "campaign_url": "https://www.kickstarter.com/projects/wonderbowgames/8-dragons",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでWonderbow Gamesが公開したTabletop Games「8 Dragons」です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/projects/wonderbowgames/8-dragons",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-08-05T01:36:17.042309+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {}
+    },
+    "case_id": "LQ04",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 118,
+    "source_site": "kickstarter",
+    "project_name": "Hanboost T1 Pocket Size Laser Engraver for DIY Enthusiast",
+    "maker_name": "Hanboost",
+    "category": "Product Design",
+    "canonical_maker_key": "host:hanboost.com",
+    "key_source": "official_site_host",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "Hanboost T1 Pocket Size Laser Engraver for DIY Enthusiast",
+      "source_site": "kickstarter",
+      "category": "Product Design",
+      "maker_name": "Hanboost",
+      "campaign_url": "https://www.kickstarter.com/projects/hanboost/t1-laser-engraver",
+      "end_date": "2026-07-24",
+      "backers_count": 4558
+    },
+    "signals_snapshot": {
+      "project_id": 118,
+      "title": "Hanboost T1 Pocket Size Laser Engraver for DIY Enthusiast",
+      "description": "A palm-sized mini laser engraver designed for small creative projects, personalized gifts, maker labels, and selected craft materials",
+      "category": "Product Design",
+      "source_site": "kickstarter",
+      "maker_name": "Hanboost",
+      "end_date": "2026-07-24",
+      "campaign_url": "https://www.kickstarter.com/projects/hanboost/t1-laser-engraver",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでHanboostが公開した小型ガジェット「Hanboost T1 Pocket Size Laser Engraver for DIY Enthusiast」です。本国クラウドファンディングでの実績は目標比13,780%・支援者4,558人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://www.hanboost.com",
+        "verified": true,
+        "source": "search",
+        "source_url": "https://www.hanboost.com",
+        "checked_at": "2026-07-26T17:22:05.670963+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "marketing@hanboost.com",
+          "source_url": "https://www.hanboost.com",
+          "checked_at": "2026-07-26T17:22:05.670963+00:00",
+          "method": "contact_discovery_v2",
+          "role": "maker",
+          "confidence_label": "high"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://www.hanboost.com",
+        "checked_at": "2026-07-26T17:22:05.670963+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.hanboost.com",
+        "ownership_class": "maker_official",
+        "evidence": [
+          "domain_name_match:hanboost"
+        ],
+        "checked_at": "2026-07-26T17:22:05.670963+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 4558,
+        "raised_amount": 689006.0,
+        "achievement_rate": 13780,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ05",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 150,
+    "source_site": "kickstarter",
+    "project_name": "Aldo, Giovanni e Giacomo: File STL Statuette da Collezione",
+    "maker_name": "3DClever",
+    "category": "3D Printing",
+    "canonical_maker_key": "url:kickstarter.com/profile/3dclever",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "Aldo, Giovanni e Giacomo: File STL Statuette da Collezione",
+      "source_site": "kickstarter",
+      "category": "3D Printing",
+      "maker_name": "3DClever",
+      "campaign_url": "https://www.kickstarter.com/projects/3dclever/aldo-giovanni-e-giacomo-file-stl-statuette-da-collezione",
+      "end_date": "2026-08-15",
+      "backers_count": 1
+    },
+    "signals_snapshot": {
+      "project_id": 150,
+      "title": "Aldo, Giovanni e Giacomo: File STL Statuette da Collezione",
+      "description": "Porta a casa il trio comico più amato d'Italia! File 3D stampabili, collezione in edizione limitata di Aldo Giovanni e Giacomo",
+      "category": "3D Printing",
+      "source_site": "kickstarter",
+      "maker_name": "3DClever",
+      "end_date": "2026-08-15",
+      "campaign_url": "https://www.kickstarter.com/projects/3dclever/aldo-giovanni-e-giacomo-file-stl-statuette-da-collezione",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Kickstarterで3DCleverが公開した3D Printing「Aldo, Giovanni e Giacomo: File STL Statuette da Collezione」です。本国クラウドファンディングでの実績は目標比3%・支援者1人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/3dclever",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-19T18:00:00.071150+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 1,
+        "raised_amount": 45.75,
+        "achievement_rate": 3,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ06",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 220,
+    "source_site": "kickstarter",
+    "project_name": "Gossip Buzz: safe social that rewards the real world",
+    "maker_name": "JKulDev LLC",
+    "category": "Apps",
+    "canonical_maker_key": "url:kickstarter.com/profile/jkuldev",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "Gossip Buzz: safe social that rewards the real world",
+      "source_site": "kickstarter",
+      "category": "Apps",
+      "maker_name": "JKulDev LLC",
+      "campaign_url": "https://www.kickstarter.com/projects/jkuldev/gossip-buzz-a-social-app-for-your-wellbeing",
+      "end_date": "2026-09-22",
+      "backers_count": 4
+    },
+    "signals_snapshot": {
+      "project_id": 220,
+      "title": "Gossip Buzz: safe social that rewards the real world",
+      "description": "Safe for kids & teens, rewarding for every age — built for wellbeing, not addiction, turning screen time into real-world good.",
+      "category": "Apps",
+      "source_site": "kickstarter",
+      "maker_name": "JKulDev LLC",
+      "end_date": "2026-09-22",
+      "campaign_url": "https://www.kickstarter.com/projects/jkuldev/gossip-buzz-a-social-app-for-your-wellbeing",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでJKulDev LLCが公開したApps「Gossip Buzz: safe social that rewards the real world」です。本国クラウドファンディングでの実績は目標比9%・支援者4人です。輸入・販売時は子供向けの確認が必要です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/jkuldev",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-27T18:00:00.050066+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 4,
+        "raised_amount": 4500.0,
+        "achievement_rate": 9,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ07",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 152,
+    "source_site": "kickstarter",
+    "project_name": "WARSUN T9 Pro: 4-in-1 Magnetic EDC Light with UV & Laser",
+    "maker_name": "warsunofficial",
+    "category": "Gadgets",
+    "canonical_maker_key": "url:kickstarter.com/profile/warsunofficial",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "WARSUN T9 Pro: 4-in-1 Magnetic EDC Light with UV & Laser",
+      "source_site": "kickstarter",
+      "category": "Gadgets",
+      "maker_name": "warsunofficial",
+      "campaign_url": "https://www.kickstarter.com/projects/warsunofficial/warsun-t9-pro-the-ultimate-4-in-1-magnetic-edc-flashlight",
+      "end_date": "2026-08-15",
+      "backers_count": 10
+    },
+    "signals_snapshot": {
+      "project_id": 152,
+      "title": "WARSUN T9 Pro: 4-in-1 Magnetic EDC Light with UV & Laser",
+      "description": "1600 lumens, UV detection, red laser, magnetic base and USB-C charging in an ultra-slim 82g EDC light",
+      "category": "Gadgets",
+      "source_site": "kickstarter",
+      "maker_name": "warsunofficial",
+      "end_date": "2026-08-15",
+      "campaign_url": "https://www.kickstarter.com/projects/warsunofficial/warsun-t9-pro-the-ultimate-4-in-1-magnetic-edc-flashlight",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Kickstarterでwarsunofficialが公開した小型ガジェット「WARSUN T9 Pro: 4-in-1 Magnetic EDC Light with UV & Laser」です。本国クラウドファンディングでの実績は目標比1%・支援者10人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/warsunofficial",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-19T18:00:00.071150+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 10,
+        "raised_amount": 673.7,
+        "achievement_rate": 1,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ08",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 193,
+    "source_site": "kickstarter",
+    "project_name": "ADSBee Winglet!",
+    "maker_name": "Pants for Birds LLC",
+    "category": "Hardware",
+    "canonical_maker_key": "url:kickstarter.com/profile/pantsforbirds",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "ADSBee Winglet!",
+      "source_site": "kickstarter",
+      "category": "Hardware",
+      "maker_name": "Pants for Birds LLC",
+      "campaign_url": "https://www.kickstarter.com/projects/pantsforbirds/adsbee-winglet",
+      "end_date": "2026-08-17",
+      "backers_count": 21
+    },
+    "signals_snapshot": {
+      "project_id": 193,
+      "title": "ADSBee Winglet!",
+      "description": "Winglet is an open source ADS-B receiver designed for portable aircraft tracking and electronic flight bag applications.",
+      "category": "Hardware",
+      "source_site": "kickstarter",
+      "maker_name": "Pants for Birds LLC",
+      "end_date": "2026-08-17",
+      "campaign_url": "https://www.kickstarter.com/projects/pantsforbirds/adsbee-winglet",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでPants for Birds LLCが公開したペット用品「ADSBee Winglet!」です。本国クラウドファンディングでの実績は目標比9%・支援者21人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.kickstarter.com/profile/pantsforbirds",
+        "ownership_class": "crowdfunding_platform",
+        "evidence": [
+          "platform:kickstarter.com"
+        ],
+        "checked_at": "2026-07-20T18:00:00.066213+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 21,
+        "raised_amount": 8070.0,
+        "achievement_rate": 9,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ09",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 122,
+    "source_site": "kickstarter",
+    "project_name": "HercShirt V5.0: First Tee That Stays Smell-Free for 30+ Days",
+    "maker_name": "HercLéon America",
+    "category": "Product Design",
+    "canonical_maker_key": "name:hercléonamerica",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "HercShirt V5.0: First Tee That Stays Smell-Free for 30+ Days",
+      "source_site": "kickstarter",
+      "category": "Product Design",
+      "maker_name": "HercLéon America",
+      "campaign_url": "https://www.kickstarter.com/projects/techkonic/hercshirt-5",
+      "end_date": "2026-08-20",
+      "backers_count": 880
+    },
+    "signals_snapshot": {
+      "project_id": 122,
+      "title": "HercShirt V5.0: First Tee That Stays Smell-Free for 30+ Days",
+      "description": "Travel for a day, week or month, with just one shirt that smells great, always!",
+      "category": "Product Design",
+      "source_site": "kickstarter",
+      "maker_name": "HercLéon America",
+      "end_date": "2026-08-20",
+      "campaign_url": "https://www.kickstarter.com/projects/techkonic/hercshirt-5",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "KickstarterでHercLéon Americaが公開したトラベル用品「HercShirt V5.0: First Tee That Stays Smell-Free for 30+ Days」です。本国クラウドファンディングでの実績は目標比3,915%・支援者880人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 880,
+        "raised_amount": 130488.0,
+        "achievement_rate": 3915,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ10",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 25,
+    "source_site": "indiegogo",
+    "project_name": "MIRA Dial - The Focus Tool You Can't Cheat",
+    "maker_name": "MIRA Labs",
+    "category": "Tech & Innovation",
+    "canonical_maker_key": "host:relycars.com",
+    "key_source": "official_site_host",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "MIRA Dial - The Focus Tool You Can't Cheat",
+      "source_site": "indiegogo",
+      "category": "Tech & Innovation",
+      "maker_name": "MIRA Labs",
+      "campaign_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+      "end_date": "2026-07-30",
+      "backers_count": 45
+    },
+    "signals_snapshot": {
+      "project_id": 25,
+      "title": "MIRA Dial - The Focus Tool You Can't Cheat",
+      "description": null,
+      "category": "Tech & Innovation",
+      "source_site": "indiegogo",
+      "maker_name": "MIRA Labs",
+      "end_date": "2026-07-30",
+      "campaign_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "IndiegogoでMIRA Labsが公開したTech & Innovation「MIRA Dial - The Focus Tool You Can't Cheat」です。本国クラウドファンディングでの実績は支援者45人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://www.relycars.com",
+        "verified": true,
+        "source": "project_website",
+        "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+        "checked_at": "2026-07-23T08:23:03.892011+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "info@miradial.com",
+          "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+          "checked_at": "2026-07-23T08:23:03.892011+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "mathias@miradial.com",
+          "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+          "checked_at": "2026-07-23T08:23:03.892011+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "support@miradial.com",
+          "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+          "checked_at": "2026-07-23T08:23:03.892011+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "u003Emathias@miradial.com",
+          "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+          "checked_at": "2026-07-23T08:23:03.892011+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://www.indiegogo.com/en/projects/miradial/miradial",
+        "checked_at": "2026-07-23T08:23:03.892011+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://www.relycars.com",
+        "ownership_class": "unknown",
+        "evidence": [],
+        "checked_at": "2026-07-23T08:23:03.892011+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 45,
+        "raised_amount": 6210.0,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ11",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 20,
+    "source_site": "indiegogo",
+    "project_name": "ZhongYi Zone T1 : The Dreamy FF Cine Kit",
+    "maker_name": "ZhongYi_Optics",
+    "category": "Tech & Innovation",
+    "canonical_maker_key": "host:zyoptics.net",
+    "key_source": "official_site_host",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "ZhongYi Zone T1 : The Dreamy FF Cine Kit",
+      "source_site": "indiegogo",
+      "category": "Tech & Innovation",
+      "maker_name": "ZhongYi_Optics",
+      "campaign_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+      "end_date": "2026-08-12",
+      "backers_count": 14
+    },
+    "signals_snapshot": {
+      "project_id": 20,
+      "title": "ZhongYi Zone T1 : The Dreamy FF Cine Kit",
+      "description": null,
+      "category": "Tech & Innovation",
+      "source_site": "indiegogo",
+      "maker_name": "ZhongYi_Optics",
+      "end_date": "2026-08-12",
+      "campaign_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "IndiegogoでZhongYi_Opticsが公開したTech & Innovation「ZhongYi Zone T1 : The Dreamy FF Cine Kit」です。本国クラウドファンディングでの実績は支援者14人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://zyoptics.net",
+        "verified": true,
+        "source": "search",
+        "source_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+        "checked_at": "2026-07-22T08:00:42.994642+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "u003E@zhongyi.optics",
+          "source_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+          "checked_at": "2026-07-22T08:00:42.994642+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "u003E@mofage.official",
+          "source_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+          "checked_at": "2026-07-22T08:00:42.994642+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://www.indiegogo.com/en/projects/zhongyi_optics/zhongyi-zone-t1",
+        "checked_at": "2026-07-22T08:00:42.994642+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://zyoptics.net",
+        "ownership_class": "maker_official",
+        "evidence": [
+          "domain_name_match:zyoptics"
+        ],
+        "checked_at": "2026-07-22T08:00:42.994642+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 14,
+        "raised_amount": 45241.0,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ12",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 21,
+    "source_site": "indiegogo",
+    "project_name": "GPD G2 eGPU: The World's First Mini PC Featuring MCIO 8i and USB4 v2.0 Connectivity",
+    "maker_name": "GPD HK",
+    "category": "Tech & Innovation",
+    "canonical_maker_key": "name:gpdhk",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "review",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "GPD G2 eGPU: The World's First Mini PC Featuring MCIO 8i and USB4 v2.0 Connectivity",
+      "source_site": "indiegogo",
+      "category": "Tech & Innovation",
+      "maker_name": "GPD HK",
+      "campaign_url": "https://www.indiegogo.com/en/projects/gpdhk/gpdg2",
+      "end_date": "2026-07-30",
+      "backers_count": 79
+    },
+    "signals_snapshot": {
+      "project_id": 21,
+      "title": "GPD G2 eGPU: The World's First Mini PC Featuring MCIO 8i and USB4 v2.0 Connectivity",
+      "description": null,
+      "category": "Tech & Innovation",
+      "source_site": "indiegogo",
+      "maker_name": "GPD HK",
+      "end_date": "2026-07-30",
+      "campaign_url": "https://www.indiegogo.com/en/projects/gpdhk/gpdg2",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "IndiegogoでGPD HKが公開した小型ガジェット「GPD G2 eGPU: The World's First Mini PC Featuring MCIO 8i and USB4 v2.0 Connectivity」です。本国クラウドファンディングでの実績は支援者79人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [
+        {
+          "email": "Sales03@gpd.hk",
+          "source_url": null,
+          "checked_at": null,
+          "method": "contact_discovery",
+          "role": null,
+          "confidence_label": null
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 79,
+        "raised_amount": 299456.0,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ13",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 157,
+    "source_site": "indiegogo",
+    "project_name": "COINAX:Coin-Sized Magnetic Ti EDC Knife & Fidget Tool",
+    "maker_name": "Coinax Tools Limited",
+    "category": "Tech & Innovation",
+    "canonical_maker_key": "name:coinaxtoolslimited",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "review",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "COINAX:Coin-Sized Magnetic Ti EDC Knife & Fidget Tool",
+      "source_site": "indiegogo",
+      "category": "Tech & Innovation",
+      "maker_name": "Coinax Tools Limited",
+      "campaign_url": "https://www.indiegogo.com/en/projects/coinax/coinax",
+      "end_date": "2026-08-09",
+      "backers_count": 21
+    },
+    "signals_snapshot": {
+      "project_id": 157,
+      "title": "COINAX:Coin-Sized Magnetic Ti EDC Knife & Fidget Tool",
+      "description": null,
+      "category": "Tech & Innovation",
+      "source_site": "indiegogo",
+      "maker_name": "Coinax Tools Limited",
+      "end_date": "2026-08-09",
+      "campaign_url": "https://www.indiegogo.com/en/projects/coinax/coinax",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "IndiegogoでCoinax Tools Limitedが公開したTech & Innovation「COINAX:Coin-Sized Magnetic Ti EDC Knife & Fidget Tool」です。本国クラウドファンディングでの実績は支援者21人です。輸入・販売時は刃物の確認が必要です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 21,
+        "raised_amount": 15260.0,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ14",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 225,
+    "source_site": "indiegogo",
+    "project_name": "Solar Energy system",
+    "maker_name": "RGSolar",
+    "category": "Tech & Innovation",
+    "canonical_maker_key": "name:rgsolar",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "Solar Energy system",
+      "source_site": "indiegogo",
+      "category": "Tech & Innovation",
+      "maker_name": "RGSolar",
+      "campaign_url": "https://www.indiegogo.com/en/projects/rgsolar/solar-energy-system",
+      "end_date": "2026-08-17",
+      "backers_count": 13
+    },
+    "signals_snapshot": {
+      "project_id": 225,
+      "title": "Solar Energy system",
+      "description": null,
+      "category": "Tech & Innovation",
+      "source_site": "indiegogo",
+      "maker_name": "RGSolar",
+      "end_date": "2026-08-17",
+      "campaign_url": "https://www.indiegogo.com/en/projects/rgsolar/solar-energy-system",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "IndiegogoでRGSolarが公開したTech & Innovation「Solar Energy system」です。本国クラウドファンディングでの実績は支援者13人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 13,
+        "raised_amount": 11071.0,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ15",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 98,
+    "source_site": "wadiz",
+    "project_name": "[글로벌4억] 완전 무선의 자유, 한국인에게 딱 맞는 역대급 스플릿키보드",
+    "maker_name": "녹프리유한회사",
+    "category": "주변기기",
+    "canonical_maker_key": "host:nocfree.kr",
+    "key_source": "official_site_host",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "[글로벌4억] 완전 무선의 자유, 한국인에게 딱 맞는 역대급 스플릿키보드",
+      "source_site": "wadiz",
+      "category": "주변기기",
+      "maker_name": "녹프리유한회사",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/401355",
+      "end_date": "2026-07-06",
+      "backers_count": 778
+    },
+    "signals_snapshot": {
+      "project_id": 98,
+      "title": "[글로벌4억] 완전 무선의 자유, 한국인에게 딱 맞는 역대급 스플릿키보드",
+      "description": "[Wadiz] Country: South Korea · Status: Funded (Pre-order) · Funded: 22820% (raised KRW 114,101,000 / goal KRW 500,004) · Backers: 778 · Category: 주변기기",
+      "category": "주변기기",
+      "source_site": "wadiz",
+      "maker_name": "녹프리유한회사",
+      "end_date": "2026-07-06",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/401355",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで녹프리유한회사が公開したペット用品「[글로벌4억] 완전 무선의 자유, 한국인에게 딱 맞는 역대급 스플릿키보드」です。本国クラウドファンディングでの実績は目標比22,820%・支援者778人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://nocfree.kr",
+        "verified": true,
+        "source": "project_website",
+        "source_url": "https://nocfree.kr",
+        "checked_at": "2026-07-15T09:33:49.402644+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "help.kr@nocfree.com",
+          "source_url": "https://nocfree.kr",
+          "checked_at": "2026-07-15T09:33:49.402644+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://nocfree.kr",
+        "checked_at": "2026-07-15T09:33:49.402644+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "completed",
+        "result": "not_found_in_japan",
+        "confidence": 65,
+        "source_urls": [
+          "https://search.rakuten.co.jp/search/mall/%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D%20%EC%99%84%EC%A0%84%20%EB%AC%B4%EC%84%A0%EC%9D%98%20%EC%9E%90%EC%9C%A0%2C%20%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C%20%EB%94%B1%20%EB%A7%9E%EB%8A%94%20%EC%97%AD%EB%8C%80%EA%B8%89%20%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C/",
+          "https://shopping.yahoo.co.jp/search?p=%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+          "https://www.amazon.co.jp/s?k=%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+          "https://www.google.com/search?q=%EB%85%B9%ED%94%84%EB%A6%AC%EC%9C%A0%ED%95%9C%ED%9A%8C%EC%82%AC+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+          "https://www.google.com/search?q=%EB%85%B9%ED%94%84%EB%A6%AC%EC%9C%A0%ED%95%9C%ED%9A%8C%EC%82%AC+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+          "https://www.google.com/search?q=site%3Agreenfunding.jp+%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+          "https://www.google.com/search?q=site%3Amakuake.com+%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C"
+        ],
+        "evidence": [
+          "7 チャネルを検索し販売を確認できず（不在の確証ではない）"
+        ],
+        "checked_at": "2026-07-11T01:22:02.713291+00:00",
+        "channels": [
+          {
+            "channel": "amazon",
+            "label": "Amazon.co.jp",
+            "status": "not_found",
+            "search_url": "https://www.amazon.co.jp/s?k=%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+            "note": ""
+          },
+          {
+            "channel": "rakuten",
+            "label": "楽天市場",
+            "status": "not_found",
+            "search_url": "https://search.rakuten.co.jp/search/mall/%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D%20%EC%99%84%EC%A0%84%20%EB%AC%B4%EC%84%A0%EC%9D%98%20%EC%9E%90%EC%9C%A0%2C%20%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C%20%EB%94%B1%20%EB%A7%9E%EB%8A%94%20%EC%97%AD%EB%8C%80%EA%B8%89%20%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C/",
+            "note": ""
+          },
+          {
+            "channel": "yahoo",
+            "label": "Yahoo!ショッピング",
+            "status": "not_found",
+            "search_url": "https://shopping.yahoo.co.jp/search?p=%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+            "note": ""
+          },
+          {
+            "channel": "distributor",
+            "label": "日本代理店",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%EB%85%B9%ED%94%84%EB%A6%AC%EC%9C%A0%ED%95%9C%ED%9A%8C%EC%82%AC+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+            "note": ""
+          },
+          {
+            "channel": "subsidiary",
+            "label": "日本法人",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%EB%85%B9%ED%94%84%EB%A6%AC%EC%9C%A0%ED%95%9C%ED%9A%8C%EC%82%AC+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+            "note": ""
+          },
+          {
+            "channel": "makuake",
+            "label": "Makuake掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Amakuake.com+%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+            "note": ""
+          },
+          {
+            "channel": "greenfunding",
+            "label": "GREEN FUNDING掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Agreenfunding.jp+%5B%EA%B8%80%EB%A1%9C%EB%B2%8C4%EC%96%B5%5D+%EC%99%84%EC%A0%84+%EB%AC%B4%EC%84%A0%EC%9D%98+%EC%9E%90%EC%9C%A0%2C+%ED%95%9C%EA%B5%AD%EC%9D%B8%EC%97%90%EA%B2%8C+%EB%94%B1+%EB%A7%9E%EB%8A%94+%EC%97%AD%EB%8C%80%EA%B8%89+%EC%8A%A4%ED%94%8C%EB%A6%BF%ED%82%A4%EB%B3%B4%EB%93%9C",
+            "note": ""
+          }
+        ]
+      },
+      "creator_domain": {
+        "url": "https://nocfree.kr",
+        "ownership_class": "unknown",
+        "evidence": [],
+        "checked_at": "2026-07-15T09:33:49.402644+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 778,
+        "raised_amount": 114101000.0,
+        "achievement_rate": 22820,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ16",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 136,
+    "source_site": "wadiz",
+    "project_name": "[누적 3.5억] 양대면 상태로 접히는 세상에 없던 절충형 유모차의 등장",
+    "maker_name": "하이브리드유모차",
+    "category": "출산·육아용품",
+    "canonical_maker_key": "host:nextbaby.co.kr",
+    "key_source": "official_site_host",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "[누적 3.5억] 양대면 상태로 접히는 세상에 없던 절충형 유모차의 등장",
+      "source_site": "wadiz",
+      "category": "출산·육아용품",
+      "maker_name": "하이브리드유모차",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/404761",
+      "end_date": "2026-07-17",
+      "backers_count": 355
+    },
+    "signals_snapshot": {
+      "project_id": 136,
+      "title": "[누적 3.5억] 양대면 상태로 접히는 세상에 없던 절충형 유모차의 등장",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 9296% (raised KRW 92,968,000 / goal KRW 1,000,086) · Backers: 355 · Category: 출산·육아용품",
+      "category": "출산·육아용품",
+      "source_site": "wadiz",
+      "maker_name": "하이브리드유모차",
+      "end_date": "2026-07-17",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/404761",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで하이브리드유모차が公開したペット用品「[누적 3.5억] 양대면 상태로 접히는 세상에 없던 절충형 유모차의 등장」です。本国クラウドファンディングでの実績は目標比9,296%・支援者355人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://nextbaby.co.kr",
+        "verified": true,
+        "source": "search",
+        "source_url": "https://nextbaby.co.kr/service/company",
+        "checked_at": "2026-07-14T03:27:00.444437+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "kskim@nextbaby.co.kr",
+          "source_url": "https://nextbaby.co.kr/service/company",
+          "checked_at": "2026-07-14T03:27:00.444437+00:00",
+          "method": "contact_discovery_v2",
+          "role": "maker",
+          "confidence_label": "high"
+        },
+        {
+          "email": "momtobabydj@naver.com",
+          "source_url": "https://nextbaby.co.kr",
+          "checked_at": "2026-07-14T03:27:00.444437+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "cjshin@nextbaby.co.kr",
+          "source_url": "https://nextbaby.co.kr/service/company",
+          "checked_at": "2026-07-14T03:27:00.444437+00:00",
+          "method": "contact_discovery_v2",
+          "role": "maker",
+          "confidence_label": "high"
+        },
+        {
+          "email": "ccico1004@nextbaby.co.kr",
+          "source_url": "https://nextbaby.co.kr/service/company",
+          "checked_at": "2026-07-14T03:27:00.444437+00:00",
+          "method": "contact_discovery_v2",
+          "role": "maker",
+          "confidence_label": "high"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://nextbaby.co.kr/service/company",
+        "checked_at": "2026-07-14T03:27:00.444437+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {
+        "url": "https://nextbaby.co.kr",
+        "ownership_class": "unknown",
+        "evidence": [],
+        "checked_at": "2026-07-14T03:27:00.444437+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 355,
+        "raised_amount": 92968000.0,
+        "achievement_rate": 9296,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ17",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 232,
+    "source_site": "wadiz",
+    "project_name": "보냉칸+노트북 수납까지 '뭘 담아도 예쁜' 포모드 남녀공용 백팩",
+    "maker_name": "포모드 주식회사",
+    "category": "가방",
+    "canonical_maker_key": "name:포모드주식회사",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "보냉칸+노트북 수납까지 '뭘 담아도 예쁜' 포모드 남녀공용 백팩",
+      "source_site": "wadiz",
+      "category": "가방",
+      "maker_name": "포모드 주식회사",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/410527",
+      "end_date": "2026-08-24",
+      "backers_count": 910
+    },
+    "signals_snapshot": {
+      "project_id": 232,
+      "title": "보냉칸+노트북 수납까지 '뭘 담아도 예쁜' 포모드 남녀공용 백팩",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 13495% (raised KRW 67,478,000 / goal KRW 500,022) · Backers: 910 · Category: 가방",
+      "category": "가방",
+      "source_site": "wadiz",
+      "maker_name": "포모드 주식회사",
+      "end_date": "2026-08-24",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/410527",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで포모드 주식회사が公開したペット用品「보냉칸+노트북 수납까지 '뭘 담아도 예쁜' 포모드 남녀공용 백팩」です。本国クラウドファンディングでの実績は目標比13,495%・支援者910人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 910,
+        "raised_amount": 67478000.0,
+        "achievement_rate": 13495,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ18",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 234,
+    "source_site": "wadiz",
+    "project_name": "700개 기업 매출 성장 노하우! 지니어스 숫자경영 시스템",
+    "maker_name": "지니어스 컴퍼니",
+    "category": "경제·경영",
+    "canonical_maker_key": "name:지니어스컴퍼니",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "700개 기업 매출 성장 노하우! 지니어스 숫자경영 시스템",
+      "source_site": "wadiz",
+      "category": "경제·경영",
+      "maker_name": "지니어스 컴퍼니",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/411754",
+      "end_date": "2026-08-21",
+      "backers_count": 59
+    },
+    "signals_snapshot": {
+      "project_id": 234,
+      "title": "700개 기업 매출 성장 노하우! 지니어스 숫자경영 시스템",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 1236% (raised KRW 6,180,000 / goal KRW 500,000) · Backers: 59 · Category: 경제·경영",
+      "category": "경제·경영",
+      "source_site": "wadiz",
+      "maker_name": "지니어스 컴퍼니",
+      "end_date": "2026-08-21",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/411754",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで지니어스 컴퍼니が公開したペット用品「700개 기업 매출 성장 노하우! 지니어스 숫자경영 시스템」です。本国クラウドファンディングでの実績は目標比1,236%・支援者59人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 59,
+        "raised_amount": 6180000.0,
+        "achievement_rate": 1236,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ19",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 227,
+    "source_site": "wadiz",
+    "project_name": "해외 대란템ㅣ3초면 충분해요. 24시간 지속 혁신적 립타투 ‘티슈오프‘",
+    "maker_name": "얼리언스",
+    "category": "메이크업",
+    "canonical_maker_key": "name:얼리언스",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "해외 대란템ㅣ3초면 충분해요. 24시간 지속 혁신적 립타투 ‘티슈오프‘",
+      "source_site": "wadiz",
+      "category": "메이크업",
+      "maker_name": "얼리언스",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/403479",
+      "end_date": "2026-08-10",
+      "backers_count": 2980
+    },
+    "signals_snapshot": {
+      "project_id": 227,
+      "title": "해외 대란템ㅣ3초면 충분해요. 24시간 지속 혁신적 립타투 ‘티슈오프‘",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 23387% (raised KRW 116,937,400 / goal KRW 500,010) · Backers: 2980 · Category: 메이크업",
+      "category": "메이크업",
+      "source_site": "wadiz",
+      "maker_name": "얼리언스",
+      "end_date": "2026-08-10",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/403479",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで얼리언스が公開したペット用品「해외 대란템ㅣ3초면 충분해요. 24시간 지속 혁신적 립타투 ‘티슈오프‘」です。本国クラウドファンディングでの実績は目標比23,387%・支援者2,980人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 2980,
+        "raised_amount": 116937400.0,
+        "achievement_rate": 23387,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ20",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 304,
+    "source_site": "wadiz",
+    "project_name": "8월배송ㅣ완벽방수 스티커/3초 완성! 각인한듯 깔끔하게 디자인만 쏘~옥!",
+    "maker_name": "디자인느낌",
+    "category": "문구",
+    "canonical_maker_key": "name:디자인느낌",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "8월배송ㅣ완벽방수 스티커/3초 완성! 각인한듯 깔끔하게 디자인만 쏘~옥!",
+      "source_site": "wadiz",
+      "category": "문구",
+      "maker_name": "디자인느낌",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/413240",
+      "end_date": "2026-08-10",
+      "backers_count": 1001
+    },
+    "signals_snapshot": {
+      "project_id": 304,
+      "title": "8월배송ㅣ완벽방수 스티커/3초 완성! 각인한듯 깔끔하게 디자인만 쏘~옥!",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Pre-order) · Funded: 4435% (raised KRW 22,177,200 / goal KRW 500,050) · Backers: 1001 · Category: 문구",
+      "category": "문구",
+      "source_site": "wadiz",
+      "maker_name": "디자인느낌",
+      "end_date": "2026-08-10",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/413240",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで디자인느낌が公開したペット用品「8월배송ㅣ완벽방수 스티커/3초 완성! 각인한듯 깔끔하게 디자인만 쏘~옥!」です。本国クラウドファンディングでの実績は目標比4,434%・支援者1,001人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 1001,
+        "raised_amount": 22177200.0,
+        "achievement_rate": 4434,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ21",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 237,
+    "source_site": "wadiz",
+    "project_name": "[6in1] 헤드만 톡! 바꾸면 피부 고민 끝, 차세대 커스텀 디바이스",
+    "maker_name": "ADAM V",
+    "category": "뷰티디바이스",
+    "canonical_maker_key": "name:adamv",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "[6in1] 헤드만 톡! 바꾸면 피부 고민 끝, 차세대 커스텀 디바이스",
+      "source_site": "wadiz",
+      "category": "뷰티디바이스",
+      "maker_name": "ADAM V",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/398784",
+      "end_date": "2026-08-14",
+      "backers_count": 159
+    },
+    "signals_snapshot": {
+      "project_id": 237,
+      "title": "[6in1] 헤드만 톡! 바꾸면 피부 고민 끝, 차세대 커스텀 디바이스",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 857% (raised KRW 4,288,000 / goal KRW 500,350) · Backers: 159 · Category: 뷰티디바이스",
+      "category": "뷰티디바이스",
+      "source_site": "wadiz",
+      "maker_name": "ADAM V",
+      "end_date": "2026-08-14",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/398784",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "WadizでADAM Vが公開したペット用品「[6in1] 헤드만 톡! 바꾸면 피부 고민 끝, 차세대 커스텀 디바이스」です。本国クラウドファンディングでの実績は目標比857%・支援者159人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 159,
+        "raised_amount": 4288000.0,
+        "achievement_rate": 857,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ22",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 291,
+    "source_site": "wadiz",
+    "project_name": "[신제품] 인바디 KOROT V1 출시! 집에서 관리하는 가정용 혈압계!",
+    "maker_name": "(주)인바디헬스케어",
+    "category": "생활가전",
+    "canonical_maker_key": "name:주인바디헬스케어",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "[신제품] 인바디 KOROT V1 출시! 집에서 관리하는 가정용 혈압계!",
+      "source_site": "wadiz",
+      "category": "생활가전",
+      "maker_name": "(주)인바디헬스케어",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/404129",
+      "end_date": "2026-08-07",
+      "backers_count": 497
+    },
+    "signals_snapshot": {
+      "project_id": 291,
+      "title": "[신제품] 인바디 KOROT V1 출시! 집에서 관리하는 가정용 혈압계!",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 5650% (raised KRW 28,252,000 / goal KRW 500,035) · Backers: 497 · Category: 생활가전",
+      "category": "생활가전",
+      "source_site": "wadiz",
+      "maker_name": "(주)인바디헬스케어",
+      "end_date": "2026-08-07",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/404129",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで(주)인바디헬스케어が公開したペット用品「[신제품] 인바디 KOROT V1 출시! 집에서 관리하는 가정용 혈압계!」です。本国クラウドファンディングでの実績は目標比5,650%・支援者497人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 497,
+        "raised_amount": 28252000.0,
+        "achievement_rate": 5650,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ23",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 294,
+    "source_site": "wadiz",
+    "project_name": "[카드지갑 전원증정!]스마트AI녹음기: 미팅·회의·수업 내용 기록&요약!",
+    "maker_name": "맥파이테크",
+    "category": "스마트가전",
+    "canonical_maker_key": "name:맥파이테크",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "[카드지갑 전원증정!]스마트AI녹음기: 미팅·회의·수업 내용 기록&요약!",
+      "source_site": "wadiz",
+      "category": "스마트가전",
+      "maker_name": "맥파이테크",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/407869",
+      "end_date": "2026-08-10",
+      "backers_count": 900
+    },
+    "signals_snapshot": {
+      "project_id": 294,
+      "title": "[카드지갑 전원증정!]스마트AI녹음기: 미팅·회의·수업 내용 기록&요약!",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Reward) · Funded: 14038% (raised KRW 70,191,400 / goal KRW 500,010) · Backers: 900 · Category: 스마트가전",
+      "category": "스마트가전",
+      "source_site": "wadiz",
+      "maker_name": "맥파이테크",
+      "end_date": "2026-08-10",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/407869",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "Wadizで맥파이테크が公開したペット用品「[카드지갑 전원증정!]스마트AI녹음기: 미팅·회의·수업 내용 기록&요약!」です。本国クラウドファンディングでの実績は目標比14,037%・支援者900人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 900,
+        "raised_amount": 70191400.0,
+        "achievement_rate": 14037,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ24",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 286,
+    "source_site": "wadiz",
+    "project_name": "미피 덕후 심장 저격! 붙이고 노는 <미피 패브릭 자석 블럭&키링>",
+    "maker_name": "Many a Little",
+    "category": "애니메이션",
+    "canonical_maker_key": "name:manyalittle",
+    "key_source": "maker_name",
+    "campaign_age_bucket": "live",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "미피 덕후 심장 저격! 붙이고 노는 <미피 패브릭 자석 블럭&키링>",
+      "source_site": "wadiz",
+      "category": "애니메이션",
+      "maker_name": "Many a Little",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/412525",
+      "end_date": "2026-08-09",
+      "backers_count": 31
+    },
+    "signals_snapshot": {
+      "project_id": 286,
+      "title": "미피 덕후 심장 저격! 붙이고 노는 <미피 패브릭 자석 블럭&키링>",
+      "description": "[Wadiz] Country: South Korea · Status: Live (Pre-order) · Funded: 94% (raised KRW 472,600 / goal KRW 502,766) · Backers: 31 · Category: 애니메이션",
+      "category": "애니메이션",
+      "source_site": "wadiz",
+      "maker_name": "Many a Little",
+      "end_date": "2026-08-09",
+      "campaign_url": "https://www.wadiz.kr/web/campaign/detail/412525",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "WadizでMany a Littleが公開したペット用品「미피 덕후 심장 저격! 붙이고 노는 <미피 패브릭 자석 블럭&키링>」です。本国クラウドファンディングでの実績は目標比93%・支援者31人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 31,
+        "raised_amount": 472600.0,
+        "achievement_rate": 93,
+        "campaign_state": "live"
+      }
+    },
+    "case_id": "LQ25",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 105,
+    "source_site": "zeczec",
+    "project_name": "兩週有感見證 🦷 INOPRO 牙齒淨白貼片｜牙醫師好評推薦 .ᐟ.ᐟ 敏感牙齒也能天天淨白",
+    "maker_name": "MORESIE",
+    "category": "挺好店",
+    "canonical_maker_key": "url:moresie.com",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "兩週有感見證 🦷 INOPRO 牙齒淨白貼片｜牙醫師好評推薦 .ᐟ.ᐟ 敏感牙齒也能天天淨白",
+      "source_site": "zeczec",
+      "category": "挺好店",
+      "maker_name": "MORESIE",
+      "campaign_url": "https://www.zeczec.com/projects/inopro",
+      "end_date": null,
+      "backers_count": 70
+    },
+    "signals_snapshot": {
+      "project_id": 105,
+      "title": "兩週有感見證 🦷 INOPRO 牙齒淨白貼片｜牙醫師好評推薦 .ᐟ.ᐟ 敏感牙齒也能天天淨白",
+      "description": "[Zeczec] Country: Taiwan · Status: Live · Funded: 1144% (raised TWD 114,406 / goal TWD 10,001) · Backers: 70 · Remaining: 25 days",
+      "category": "挺好店",
+      "source_site": "zeczec",
+      "maker_name": "MORESIE",
+      "end_date": null,
+      "campaign_url": "https://www.zeczec.com/projects/inopro",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "zeczecでMORESIEが公開した挺好店「兩週有感見證 🦷 INOPRO 牙齒淨白貼片｜牙醫師好評推薦 .ᐟ.ᐟ 敏感牙齒也能天天淨白」です。本国クラウドファンディングでの実績は目標比1,143%・支援者70人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [
+        {
+          "email": "moreshop07@gmail.com",
+          "source_url": null,
+          "checked_at": "2026-07-10T10:46:18.624993+00:00",
+          "method": "contact_discovery",
+          "role": null,
+          "confidence_label": null
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": "https://moresie.com/contact",
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "completed",
+        "result": "not_found_in_japan",
+        "confidence": 65,
+        "source_urls": [
+          "https://search.rakuten.co.jp/search/mall/%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89%20%F0%9F%A6%B7%20INOPRO%20%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6%20.%E1%90%9F.%E1%90%9F%20%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD/",
+          "https://shopping.yahoo.co.jp/search?p=%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+          "https://www.amazon.co.jp/s?k=%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+          "https://www.google.com/search?q=MORESIE+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+          "https://www.google.com/search?q=MORESIE+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+          "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+          "https://www.google.com/search?q=site%3Amakuake.com+%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD"
+        ],
+        "evidence": [
+          "7 チャネルを検索し販売を確認できず（不在の確証ではない）"
+        ],
+        "checked_at": "2026-07-10T14:52:49.316783+00:00",
+        "channels": [
+          {
+            "channel": "amazon",
+            "label": "Amazon.co.jp",
+            "status": "not_found",
+            "search_url": "https://www.amazon.co.jp/s?k=%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+            "note": ""
+          },
+          {
+            "channel": "rakuten",
+            "label": "楽天市場",
+            "status": "not_found",
+            "search_url": "https://search.rakuten.co.jp/search/mall/%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89%20%F0%9F%A6%B7%20INOPRO%20%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6%20.%E1%90%9F.%E1%90%9F%20%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD/",
+            "note": ""
+          },
+          {
+            "channel": "yahoo",
+            "label": "Yahoo!ショッピング",
+            "status": "not_found",
+            "search_url": "https://shopping.yahoo.co.jp/search?p=%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+            "note": ""
+          },
+          {
+            "channel": "distributor",
+            "label": "日本代理店",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=MORESIE+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+            "note": ""
+          },
+          {
+            "channel": "subsidiary",
+            "label": "日本法人",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=MORESIE+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+            "note": ""
+          },
+          {
+            "channel": "makuake",
+            "label": "Makuake掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Amakuake.com+%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+            "note": ""
+          },
+          {
+            "channel": "greenfunding",
+            "label": "GREEN FUNDING掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%85%A9%E9%80%B1%E6%9C%89%E6%84%9F%E8%A6%8B%E8%AD%89+%F0%9F%A6%B7+INOPRO+%E7%89%99%E9%BD%92%E6%B7%A8%E7%99%BD%E8%B2%BC%E7%89%87%EF%BD%9C%E7%89%99%E9%86%AB%E5%B8%AB%E5%A5%BD%E8%A9%95%E6%8E%A8%E8%96%A6+.%E1%90%9F.%E1%90%9F+%E6%95%8F%E6%84%9F%E7%89%99%E9%BD%92%E4%B9%9F%E8%83%BD%E5%A4%A9%E5%A4%A9%E6%B7%A8%E7%99%BD",
+            "note": ""
+          }
+        ]
+      },
+      "creator_domain": {
+        "url": "https://moresie.com",
+        "ownership_class": "maker_official",
+        "evidence": [
+          "domain_name_match:moresie"
+        ],
+        "checked_at": "2026-07-10T10:46:18.624993+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 70,
+        "raised_amount": 114406.0,
+        "achievement_rate": 1143
+      }
+    },
+    "case_id": "LQ26",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 104,
+    "source_site": "zeczec",
+    "project_name": "再登場《那個夏天的風，又回來了》巧福寶島電風｜40週年紀念・復刻阿嬤家的經典電風扇",
+    "maker_name": "巧福健康家電",
+    "category": "科技",
+    "canonical_maker_key": "url:shop.unionchen.com.tw",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "再登場《那個夏天的風，又回來了》巧福寶島電風｜40週年紀念・復刻阿嬤家的經典電風扇",
+      "source_site": "zeczec",
+      "category": "科技",
+      "maker_name": "巧福健康家電",
+      "campaign_url": "https://www.zeczec.com/projects/UC614V1",
+      "end_date": null,
+      "backers_count": 185
+    },
+    "signals_snapshot": {
+      "project_id": 104,
+      "title": "再登場《那個夏天的風，又回來了》巧福寶島電風｜40週年紀念・復刻阿嬤家的經典電風扇",
+      "description": "[Zeczec] Country: Taiwan · Status: Live · Raised: TWD 543,319 · Backers: 185",
+      "category": "科技",
+      "source_site": "zeczec",
+      "maker_name": "巧福健康家電",
+      "end_date": null,
+      "campaign_url": "https://www.zeczec.com/projects/UC614V1",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "zeczecで巧福健康家電が公開した科技「再登場《那個夏天的風，又回來了》巧福寶島電風｜40週年紀念・復刻阿嬤家的經典電風扇」です。本国クラウドファンディングでの実績は支援者185人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://shop.unionchen.com.tw",
+        "verified": true,
+        "source": "project_website",
+        "source_url": "https://shop.unionchen.com.tw/contact.php?type=2",
+        "checked_at": "2026-07-10T10:45:27.016848+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "chiaofu@unionchen.com.tw",
+          "source_url": "https://shop.unionchen.com.tw/contact.php?type=2",
+          "checked_at": "2026-07-10T10:45:27.016848+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "high"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": "https://shop.unionchen.com.tw/contact.php?type=2",
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://shop.unionchen.com.tw/contact.php?type=2",
+        "checked_at": "2026-07-10T10:45:27.016848+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "completed",
+        "result": "not_found_in_japan",
+        "confidence": 65,
+        "source_urls": [
+          "https://search.rakuten.co.jp/search/mall/%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87/",
+          "https://shopping.yahoo.co.jp/search?p=%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+          "https://www.amazon.co.jp/s?k=%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+          "https://www.google.com/search?q=%E5%B7%A7%E7%A6%8F%E5%81%A5%E5%BA%B7%E5%AE%B6%E9%9B%BB+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+          "https://www.google.com/search?q=%E5%B7%A7%E7%A6%8F%E5%81%A5%E5%BA%B7%E5%AE%B6%E9%9B%BB+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+          "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+          "https://www.google.com/search?q=site%3Amakuake.com+%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87"
+        ],
+        "evidence": [
+          "7 チャネルを検索し販売を確認できず（不在の確証ではない）"
+        ],
+        "checked_at": "2026-07-10T14:52:49.123476+00:00",
+        "channels": [
+          {
+            "channel": "amazon",
+            "label": "Amazon.co.jp",
+            "status": "not_found",
+            "search_url": "https://www.amazon.co.jp/s?k=%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+            "note": ""
+          },
+          {
+            "channel": "rakuten",
+            "label": "楽天市場",
+            "status": "not_found",
+            "search_url": "https://search.rakuten.co.jp/search/mall/%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87/",
+            "note": ""
+          },
+          {
+            "channel": "yahoo",
+            "label": "Yahoo!ショッピング",
+            "status": "not_found",
+            "search_url": "https://shopping.yahoo.co.jp/search?p=%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+            "note": ""
+          },
+          {
+            "channel": "distributor",
+            "label": "日本代理店",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%E5%B7%A7%E7%A6%8F%E5%81%A5%E5%BA%B7%E5%AE%B6%E9%9B%BB+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+            "note": ""
+          },
+          {
+            "channel": "subsidiary",
+            "label": "日本法人",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%E5%B7%A7%E7%A6%8F%E5%81%A5%E5%BA%B7%E5%AE%B6%E9%9B%BB+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+            "note": ""
+          },
+          {
+            "channel": "makuake",
+            "label": "Makuake掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Amakuake.com+%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+            "note": ""
+          },
+          {
+            "channel": "greenfunding",
+            "label": "GREEN FUNDING掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%86%8D%E7%99%BB%E5%A0%B4%E3%80%8A%E9%82%A3%E5%80%8B%E5%A4%8F%E5%A4%A9%E7%9A%84%E9%A2%A8%EF%BC%8C%E5%8F%88%E5%9B%9E%E4%BE%86%E4%BA%86%E3%80%8B%E5%B7%A7%E7%A6%8F%E5%AF%B6%E5%B3%B6%E9%9B%BB%E9%A2%A8%EF%BD%9C40%E9%80%B1%E5%B9%B4%E7%B4%80%E5%BF%B5%E3%83%BB%E5%BE%A9%E5%88%BB%E9%98%BF%E5%AC%A4%E5%AE%B6%E7%9A%84%E7%B6%93%E5%85%B8%E9%9B%BB%E9%A2%A8%E6%89%87",
+            "note": ""
+          }
+        ]
+      },
+      "creator_domain": {
+        "url": "https://shop.unionchen.com.tw",
+        "ownership_class": "unknown",
+        "evidence": [],
+        "checked_at": "2026-07-10T10:45:27.016848+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 185,
+        "raised_amount": 543319.0
+      }
+    },
+    "case_id": "LQ27",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 111,
+    "source_site": "zeczec",
+    "project_name": "再登場✨親子天下【史上最強經絡疏通棒】居家必備，獨家磁珠導熱加速代謝，按摩／刮痧 輕盈時尚易上手！",
+    "maker_name": "親子天下Shopping",
+    "category": "設計",
+    "canonical_maker_key": "url:shopping.parenting.com.tw",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "clear",
+    "pre_outreach_decision": "clear",
+    "project_snapshot": {
+      "title": "再登場✨親子天下【史上最強經絡疏通棒】居家必備，獨家磁珠導熱加速代謝，按摩／刮痧 輕盈時尚易上手！",
+      "source_site": "zeczec",
+      "category": "設計",
+      "maker_name": "親子天下Shopping",
+      "campaign_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+      "end_date": null,
+      "backers_count": 509
+    },
+    "signals_snapshot": {
+      "project_id": 111,
+      "title": "再登場✨親子天下【史上最強經絡疏通棒】居家必備，獨家磁珠導熱加速代謝，按摩／刮痧 輕盈時尚易上手！",
+      "description": "[Zeczec] Country: Taiwan · Status: Live · Raised: TWD 3,154,225 · Backers: 509",
+      "category": "設計",
+      "source_site": "zeczec",
+      "maker_name": "親子天下Shopping",
+      "end_date": null,
+      "campaign_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "zeczecで親子天下Shoppingが公開した設計「再登場✨親子天下【史上最強經絡疏通棒】居家必備，獨家磁珠導熱加速代謝，按摩／刮痧 輕盈時尚易上手！」です。本国クラウドファンディングでの実績は支援者509人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {
+        "url": "https://shopping.parenting.com.tw",
+        "verified": true,
+        "source": "project_website",
+        "source_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+        "checked_at": "2026-07-11T03:40:44.955949+00:00",
+        "method": "contact_discovery_v2"
+      },
+      "business_emails": [
+        {
+          "email": "support@zeczec.com",
+          "source_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+          "checked_at": "2026-07-11T03:40:44.955949+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        },
+        {
+          "email": "parenting@cw.com.tw",
+          "source_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+          "checked_at": "2026-07-11T03:40:44.955949+00:00",
+          "method": "contact_discovery_v2",
+          "role": "unknown",
+          "confidence_label": "medium"
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": true,
+        "source_url": "https://www.zeczec.com/projects/parentingshopping_beauty",
+        "checked_at": "2026-07-11T03:40:44.955949+00:00",
+        "method": "contact_discovery_v2",
+        "basis": "official_site"
+      },
+      "japan_sales": {
+        "status": "completed",
+        "result": "not_found_in_japan",
+        "confidence": 65,
+        "source_urls": [
+          "https://search.rakuten.co.jp/search/mall/%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7%20%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81/",
+          "https://shopping.yahoo.co.jp/search?p=%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+          "https://www.amazon.co.jp/s?k=%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+          "https://www.google.com/search?q=%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8BShopping+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+          "https://www.google.com/search?q=%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8BShopping+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+          "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+          "https://www.google.com/search?q=site%3Amakuake.com+%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81"
+        ],
+        "evidence": [
+          "7 チャネルを検索し販売を確認できず（不在の確証ではない）"
+        ],
+        "checked_at": "2026-07-10T14:52:49.906737+00:00",
+        "channels": [
+          {
+            "channel": "amazon",
+            "label": "Amazon.co.jp",
+            "status": "not_found",
+            "search_url": "https://www.amazon.co.jp/s?k=%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+            "note": ""
+          },
+          {
+            "channel": "rakuten",
+            "label": "楽天市場",
+            "status": "not_found",
+            "search_url": "https://search.rakuten.co.jp/search/mall/%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7%20%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81/",
+            "note": ""
+          },
+          {
+            "channel": "yahoo",
+            "label": "Yahoo!ショッピング",
+            "status": "not_found",
+            "search_url": "https://shopping.yahoo.co.jp/search?p=%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+            "note": ""
+          },
+          {
+            "channel": "distributor",
+            "label": "日本代理店",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8BShopping+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+            "note": ""
+          },
+          {
+            "channel": "subsidiary",
+            "label": "日本法人",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8BShopping+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+            "note": ""
+          },
+          {
+            "channel": "makuake",
+            "label": "Makuake掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Amakuake.com+%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+            "note": ""
+          },
+          {
+            "channel": "greenfunding",
+            "label": "GREEN FUNDING掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%86%8D%E7%99%BB%E5%A0%B4%E2%9C%A8%E8%A6%AA%E5%AD%90%E5%A4%A9%E4%B8%8B%E3%80%90%E5%8F%B2%E4%B8%8A%E6%9C%80%E5%BC%B7%E7%B6%93%E7%B5%A1%E7%96%8F%E9%80%9A%E6%A3%92%E3%80%91%E5%B1%85%E5%AE%B6%E5%BF%85%E5%82%99%EF%BC%8C%E7%8D%A8%E5%AE%B6%E7%A3%81%E7%8F%A0%E5%B0%8E%E7%86%B1%E5%8A%A0%E9%80%9F%E4%BB%A3%E8%AC%9D%EF%BC%8C%E6%8C%89%E6%91%A9%EF%BC%8F%E5%88%AE%E7%97%A7+%E8%BC%95%E7%9B%88%E6%99%82%E5%B0%9A%E6%98%93%E4%B8%8A%E6%89%8B%EF%BC%81",
+            "note": ""
+          }
+        ]
+      },
+      "creator_domain": {
+        "url": "https://shopping.parenting.com.tw",
+        "ownership_class": "unknown",
+        "evidence": [],
+        "checked_at": "2026-07-11T03:40:44.955949+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 509,
+        "raised_amount": 3154225.0
+      }
+    },
+    "case_id": "LQ28",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 110,
+    "source_site": "zeczec",
+    "project_name": "全數完售🙌 LG MoodMate小暮光｜最百變的氣氛夥伴，是投影機，也是藍牙喇叭和氛圍燈",
+    "maker_name": "LG",
+    "category": "科技",
+    "canonical_maker_key": "url:lg.com/tw/projectors/cinebeam/pf600u",
+    "key_source": "maker_url_or_creator_url",
+    "campaign_age_bucket": "ended",
+    "pre_research_decision": "review",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "全數完售🙌 LG MoodMate小暮光｜最百變的氣氛夥伴，是投影機，也是藍牙喇叭和氛圍燈",
+      "source_site": "zeczec",
+      "category": "科技",
+      "maker_name": "LG",
+      "campaign_url": "https://www.zeczec.com/projects/lg-moodmate",
+      "end_date": "2026-07-07",
+      "backers_count": 147
+    },
+    "signals_snapshot": {
+      "project_id": 110,
+      "title": "全數完售🙌 LG MoodMate小暮光｜最百變的氣氛夥伴，是投影機，也是藍牙喇叭和氛圍燈",
+      "description": "[Zeczec] Country: Taiwan · Status: Live · Funded: 27783% (raised TWD 2,778,400 / goal TWD 10,000) · Backers: 147 · Remaining: 13 days",
+      "category": "科技",
+      "source_site": "zeczec",
+      "maker_name": "LG",
+      "end_date": "2026-07-07",
+      "campaign_url": "https://www.zeczec.com/projects/lg-moodmate",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "zeczecでLGが公開した科技「全數完售🙌 LG MoodMate小暮光｜最百變的氣氛夥伴，是投影機，也是藍牙喇叭和氛圍燈」です。本国クラウドファンディングでの実績は目標比27,783%・支援者147人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [
+        {
+          "email": "it@LG.com",
+          "source_url": null,
+          "checked_at": "2026-07-10T11:56:07.937251+00:00",
+          "method": "contact_discovery",
+          "role": null,
+          "confidence_label": null
+        }
+      ],
+      "decision_makers": [],
+      "contact_form_url": "https://www.lg.com/_ncms/asia/packages/support-shared.f4e034a2512875c063de.js",
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "completed",
+        "result": "not_found_in_japan",
+        "confidence": 65,
+        "source_urls": [
+          "https://search.rakuten.co.jp/search/mall/%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C%20LG%20MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88/",
+          "https://shopping.yahoo.co.jp/search?p=%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+          "https://www.amazon.co.jp/s?k=%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+          "https://www.google.com/search?q=LG+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+          "https://www.google.com/search?q=LG+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+          "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+          "https://www.google.com/search?q=site%3Amakuake.com+%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88"
+        ],
+        "evidence": [
+          "7 チャネルを検索し販売を確認できず（不在の確証ではない）"
+        ],
+        "checked_at": "2026-07-10T14:52:49.809125+00:00",
+        "channels": [
+          {
+            "channel": "amazon",
+            "label": "Amazon.co.jp",
+            "status": "not_found",
+            "search_url": "https://www.amazon.co.jp/s?k=%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+            "note": ""
+          },
+          {
+            "channel": "rakuten",
+            "label": "楽天市場",
+            "status": "not_found",
+            "search_url": "https://search.rakuten.co.jp/search/mall/%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C%20LG%20MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88/",
+            "note": ""
+          },
+          {
+            "channel": "yahoo",
+            "label": "Yahoo!ショッピング",
+            "status": "not_found",
+            "search_url": "https://shopping.yahoo.co.jp/search?p=%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+            "note": ""
+          },
+          {
+            "channel": "distributor",
+            "label": "日本代理店",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=LG+%E6%97%A5%E6%9C%AC+%E4%BB%A3%E7%90%86%E5%BA%97",
+            "note": ""
+          },
+          {
+            "channel": "subsidiary",
+            "label": "日本法人",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=LG+%E6%97%A5%E6%9C%AC%E6%B3%95%E4%BA%BA",
+            "note": ""
+          },
+          {
+            "channel": "makuake",
+            "label": "Makuake掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Amakuake.com+%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+            "note": ""
+          },
+          {
+            "channel": "greenfunding",
+            "label": "GREEN FUNDING掲載歴",
+            "status": "not_found",
+            "search_url": "https://www.google.com/search?q=site%3Agreenfunding.jp+%E5%85%A8%E6%95%B8%E5%AE%8C%E5%94%AE%F0%9F%99%8C+LG+MoodMate%E5%B0%8F%E6%9A%AE%E5%85%89%EF%BD%9C%E6%9C%80%E7%99%BE%E8%AE%8A%E7%9A%84%E6%B0%A3%E6%B0%9B%E5%A4%A5%E4%BC%B4%EF%BC%8C%E6%98%AF%E6%8A%95%E5%BD%B1%E6%A9%9F%EF%BC%8C%E4%B9%9F%E6%98%AF%E8%97%8D%E7%89%99%E5%96%87%E5%8F%AD%E5%92%8C%E6%B0%9B%E5%9C%8D%E7%87%88",
+            "note": ""
+          }
+        ]
+      },
+      "creator_domain": {
+        "url": "https://www.lg.com/tw/projectors/cinebeam/pf600u/",
+        "ownership_class": "unrelated_company",
+        "evidence": [
+          "major_brand:lg.com"
+        ],
+        "checked_at": "2026-07-10T11:56:07.937251+00:00",
+        "method": "classify_domain"
+      },
+      "business_facts": {
+        "backers_count": 147,
+        "raised_amount": 2778400.0,
+        "achievement_rate": 27783,
+        "campaign_state": "ended"
+      }
+    },
+    "case_id": "LQ29",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  },
+  {
+    "source_project_id": 247,
+    "source_site": "zeczec",
+    "project_name": "最好的翻譯是無痕的！【 Globitalks｜AI 智慧翻譯耳機 】每天陪你聽世界！",
+    "maker_name": null,
+    "category": null,
+    "canonical_maker_key": "campaign:zeczec.com/projects/globitalks-ai-pods",
+    "key_source": "campaign_url",
+    "campaign_age_bucket": "unknown",
+    "pre_research_decision": "review",
+    "pre_outreach_decision": "blocked",
+    "project_snapshot": {
+      "title": "最好的翻譯是無痕的！【 Globitalks｜AI 智慧翻譯耳機 】每天陪你聽世界！",
+      "source_site": "zeczec",
+      "category": null,
+      "maker_name": null,
+      "campaign_url": "https://www.zeczec.com/projects/Globitalks-AI-pods",
+      "end_date": null,
+      "backers_count": 15
+    },
+    "signals_snapshot": {
+      "project_id": 247,
+      "title": "最好的翻譯是無痕的！【 Globitalks｜AI 智慧翻譯耳機 】每天陪你聽世界！",
+      "description": "[Zeczec] Country: Taiwan · Status: Live · Funded: 480% (raised TWD 48,019 / goal TWD 10,004) · Backers: 15 · Remaining: 28 days",
+      "category": null,
+      "source_site": "zeczec",
+      "maker_name": null,
+      "end_date": null,
+      "campaign_url": "https://www.zeczec.com/projects/Globitalks-AI-pods",
+      "campaign_url_missing_reason": null,
+      "japanese_summary": "zeczecで公開された一般消費者向け商品「最好的翻譯是無痕的！【 Globitalks｜AI 智慧翻譯耳機 】每天陪你聽世界！」です。本国クラウドファンディングでの実績は目標比479%・支援者15人です。",
+      "regulatory_checks": {
+        "items": [],
+        "note": "該当の断定ではなく、輸入・販売前に確認すべき項目です。根拠は商品ページ上の記載語です。"
+      },
+      "official_site": {},
+      "business_emails": [],
+      "decision_makers": [],
+      "contact_form_url": null,
+      "maker_identity": {
+        "verified": false
+      },
+      "japan_sales": {
+        "status": "not_checked",
+        "result": null,
+        "confidence": 0,
+        "source_urls": [],
+        "evidence": [],
+        "checked_at": null,
+        "channels": []
+      },
+      "creator_domain": {},
+      "business_facts": {
+        "backers_count": 15,
+        "raised_amount": 48019.0,
+        "achievement_rate": 479
+      }
+    },
+    "case_id": "LQ30",
+    "selected_at": "2026-08-06T00:36:17.635266+00:00",
+    "selector_version": "lqe-eval-selector-v1"
+  }
+]
