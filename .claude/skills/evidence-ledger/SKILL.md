@@ -51,7 +51,32 @@ description: 根拠URL・確認日時の記録規約。営業判断に関わる�
 | 手法別の確認日時 | `contact_discoveries.*_researched_at`（`ai_` / `web_` / `doc_reader_` / `search_agent_` / `recursive_crawled_at` / `v2_`） |
 | 日本市場適性の根拠 | `japan_opportunity_analyses.evidence_json` / `.opportunity_reasoning` / `.confidence_score` |
 | 除外ゲートの理由 | `projects.contact_search_gate_reason` / `.gate_checked_at` |
+| 営業対象判定の履歴 | `lead_qualifications`（**append-only**。下記参照） |
+| 営業対象判定の最新（一覧用） | `projects.lead_qualification_decision` / `.lead_qualification_at`（**pre_research 専用**） |
 | 営業対象外アーカイブ | `projects.archived_at` / `.archive_reason` |
+
+### `lead_qualifications`（追記専用の判定履歴）
+
+| カラム | 内容 |
+|---|---|
+| `stage` | `pre_research` / `pre_outreach` |
+| `decision` | `blocked` / `review` / `clear`（人の上書きを含む**実効判定**） |
+| `blocker_codes` / `review_codes` | カテゴリ記号（**機械判定のまま**。上書きで書き換えない） |
+| `findings_json` | 全 20 カテゴリの Finding。末尾に予約メタ `_qualification_meta` |
+| `positive_facts_json` | 確認できた事実（営業する根拠） |
+| `evidence_count` | 4 点セットが揃った証跡の総数 |
+| `engine` | 判定ルールのバージョン（`lqe-v1`） |
+| `override_reason` / `override_evidence_url` | 人が覆した場合のみ |
+| `created_at` | 判定日時 |
+
+**UPDATE / DELETE しません。** 再判定も上書きも「新しい 1 行の追加」で表します。
+ルールを変えたときに旧判定と比較できることが、この設計の目的です。
+
+`_qualification_meta` には `machine_decision` / `effective_decision` / `overridden` /
+`signals_digest` が入ります。**通常の Finding と混同しないでください**
+（Finding は必ず `code` を持つ）。読み出しは
+`lead_qualification_service.qualification_meta()` / `.findings_of()` を使います。
+**メタは `evidence_count` に加算しません。**
 
 **手法ごとに `*_researched_at` が分かれている点が重要です。** どの手法がいつ何を見つけたかを混ぜないでください。
 
@@ -81,6 +106,32 @@ description: 根拠URL・確認日時の記録規約。営業判断に関わる�
 | `invalid` | 無効 | ダミー / no-reply |
 
 **推測は `unverified` です。`low` に格上げしないでください。**
+
+**`confidence` は「Evidence の確からしさ」を表すラベルです。営業の成功可能性ではありません。**
+画面に出すのは `high` / `medium` / `low` / `unverified` のラベルだけで、
+数値・パーセント・星には**変換しません**。
+
+## 内部ロケータ（`db://`）の契約
+
+DB の状態そのものが根拠になる場合（campaign_url が保存されていない、maker identity が
+未確定 など）に限り、内部ロケータを使います。
+
+- **`db://` を使えるのは `method="db_state"` のときだけ**
+- その `source_kind` は必ず **`internal_db`**
+- 形式は **`db://projects/<project_id>#<anchor>`** のみ（組み立てて増やさない）
+- **外部 URL の代用にしない**（外部で確認すべき事実を `db://` で置き換えない）
+- **UI でリンク化しない。** 画面には「保存済みデータ（内部参照）」と表示し、
+  `db://` の文字列そのものを露出させない
+- 外部リンクにしてよいのは **http(s) だけ**（`is_external_link=true` のとき）
+- `source_url` は監査用途で保持してよいが、**画面へ `db://` を出さない**
+
+## override（人が判定を覆す）の契約
+
+- **人の明示操作のみ。** AI / Copilot が自動で override してはいけません
+- `reason` 必須（空白のみ不可）
+- `evidence_url` 必須。**http(s) のみ**（`db://` / `file://` / ローカルパスは不可）
+- 機械判定と同じ decision への override も**監査履歴として許可**する
+- **機械判定を削除しない。** `machine_decision` と `effective_decision` を区別して残す
 
 ## 確認日時の鮮度
 
