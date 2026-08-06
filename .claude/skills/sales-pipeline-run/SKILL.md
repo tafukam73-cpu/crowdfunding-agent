@@ -11,8 +11,8 @@ description: 1案件を「発見→除外判定→商品把握→maker同定→�
 ## 依存関係（前工程が未確定なら進まない）
 
 ```
-[1] lead-disqualify          除外判定           ← まずここ。無駄な調査を止める
-      ↓ eligible のみ通過
+[1] lead-disqualify (pre_research)  除外判定    ← まずここ。無駄な調査を止める
+      ↓ clear のみ通過（blocked は停止 / review は人が判断）
 [2] product-page-capture     商品ページ取得
       ↓
 [3] product-facts-extract    事実抽出
@@ -28,15 +28,29 @@ description: 1案件を「発見→除外判定→商品把握→maker同定→�
 [6b] manufacturer-reputation メーカー信頼性・発送実績 ← maker 同定後にのみ実行
 [7] official-site-verify     公式サイト確定     ← ここが確定しないと [8] は不可能
       ↓
+[7b] oem-brand-owner-verify  ブランド所有者・商流上の立場（entity_role）
+      ↓
+[7c] japan-distribution-check 日本での正規販売・代理店の有無
+      ↓
+[7d] regulatory-risk-check   規制・認証の確認材料（断定しない）
+      ↓
 [8] email-ownership-verify   メール所有者検証
       ↓
 [9] email-role-classify      役割・正当性
       ↓
-[10] decision-maker-hunt     意思決定者探索     （任意だが返信率に最も効く）
+[10] decision-maker-hunt     意思決定者探索     （任意）
       ↓
-[11] outreach-gate           送信前最終関門     ← 全チェック通過で初めて承認を求める
+[11] evidence-ledger         4点セットの充足を確認 ← 記録できない結論は進めない
+      ↓
+[12] lead-disqualify (pre_outreach) 送信前判定  ← clear または有効 override のみ
+      ↓
+[13] outreach-gate           最終関門           ← 全チェック通過で初めて承認を求める
       ↓  （ユーザーの明示承認）
-     送信 → [12] reply-rate-analytics で計測
+[14] Gmail 下書き作成 / Compose URL   ※このシステムは**直接送信しない**
+      ↓  （ユーザーが Gmail 上で送信）
+[15] mark_sent               送信済みの事実記録（止めない・監査記録つき）
+      ↓
+[16] followup / reply-rate-analytics  フォローと計測
 ```
 
 ## 工程を飛ばしてはいけない箇所
@@ -46,7 +60,8 @@ description: 1案件を「発見→除外判定→商品把握→maker同定→�
 | [3] → [4] | 仕様表が無いと技適/PSE/薬機を**推測で判定**することになる |
 | [7] → [8] | 公式ドメインが未確定だとメール所有者判定が成立しない |
 | [8] → [9] | 所有者が maker でないアドレスの役割を論じても無意味 |
-| 全て → [11] | 1つでも未確定なら送らない |
+| [7] → [7b] | 公式サイトが確定しないと商流上の立場を裏づけられない |
+| 全て → [12][13] | 1つでも未確定なら下書きを作らない |
 
 **「急ぎだから [7] を飛ばす」は許容しません。** 誤送信のコストの方が高いためです。
 
@@ -71,6 +86,30 @@ description: 1案件を「発見→除外判定→商品把握→maker同定→�
 | 13 | **OEM / デジタル商品 / 非物理商品** | `is_non_physical()` が真 |
 | 14 | **既に日本流通済み** | 販売ページ URL を取得できた |
 | 15 | **根拠URL または checked_at の欠落** | [evidence-ledger](../evidence-ledger/SKILL.md) の4点セット未充足 |
+| 16 | **pre_outreach が `blocked`** | `lead_qualification_service.qualify(..., STAGE_PRE_OUTREACH)` |
+| 17 | **pre_outreach が `review`** | 同上（**review も進めない**） |
+| 18 | **判定不能（LQE 障害）** | enforce では fail closed で停止 |
+| 19 | **判定が 24 時間より古い / override が 72 時間より古い** | `DECISION_MAX_AGE_HOURS` / `OVERRIDE_MAX_AGE_HOURS` |
+| 20 | **`stale` 判定が残る** | Finding の `verdict == "stale"` |
+
+### override で進めてよい条件（1つでも欠ければ無効）
+
+`persisted` ／ `stage=pre_outreach` ／ **最新履歴** ／ `overridden=true` ／
+`effective_decision=clear` ／ `reason` あり ／ `evidence_url` が **http(s)** ／
+**72 時間以内** ／ **`signals_digest` 一致** ／ **`stale` Finding なし**
+
+**AI / Copilot が自動で override してはいけません。** 人の明示操作だけです。
+
+### 適用モード（observe / enforce）
+
+| | observe（**初期値**） | enforce |
+|---|---|---|
+| 判定・履歴保存 | する | する |
+| Gmail 下書き / Compose URL | **止めない** | `clear` または有効 override のみ |
+| 不合格時 | WARNING ＋ 監査 payload | **409 で停止** |
+
+**observe で下書きが作れることは「判定が通った」という意味ではありません。**
+詳細は [outreach-gate](../outreach-gate/SKILL.md)。
 
 ### site_role は maker_official と厳密に区別する
 
@@ -163,7 +202,10 @@ WHERE p.id = :id;
 | 9 | [email-ownership-verify](../email-ownership-verify/SKILL.md) | メール所有者検証 |
 | 10 | [email-role-classify](../email-role-classify/SKILL.md) | 役割・正当性 |
 | 11 | [decision-maker-hunt](../decision-maker-hunt/SKILL.md) | 意思決定者探索 |
-| 12 | [outreach-gate](../outreach-gate/SKILL.md) | 送信前最終関門 |
+| 11b | [oem-brand-owner-verify](../oem-brand-owner-verify/SKILL.md) | ブランド所有者・商流上の立場 |
+| 11c | [japan-distribution-check](../japan-distribution-check/SKILL.md) | 日本での正規販売・代理店 |
+| 11d | [regulatory-risk-check](../regulatory-risk-check/SKILL.md) | 規制・認証の確認材料 |
+| 12 | [outreach-gate](../outreach-gate/SKILL.md) | アウトリーチ前最終関門 |
 | 13 | [reply-rate-analytics](../reply-rate-analytics/SKILL.md) | 返信率の計測と改善 |
 | 14 | [ground-truth-audit](../ground-truth-audit/SKILL.md) | GT 監査 |
 | 15 | [safe-dev-pr](../safe-dev-pr/SKILL.md) / [db-safe-ops](../db-safe-ops/SKILL.md) | 開発・DB 運用 |
