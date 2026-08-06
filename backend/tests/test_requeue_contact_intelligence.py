@@ -79,12 +79,31 @@ def reset_db() -> None:
     db.close()
 
 
-def make_project(db, pid: int, *, title="P", archived=False) -> Project:
+#: 純粋関数テスト用の実 campaign_url（`projects.source_url` は unique なので、
+#: DB へ入れるときは project ごとに別 URL を使う）。
+REAL_CAMPAIGN = "https://www.kickstarter.com/projects/acme-lab/real-widget"
+
+_UNSET = object()
+
+
+def make_project(
+    db,
+    pid: int,
+    *,
+    title="P",
+    archived=False,
+    source_url=_UNSET,
+    maker_url=None,
+) -> Project:
+    if source_url is _UNSET:
+        source_url = f"https://www.kickstarter.com/projects/acme-lab/widget-{pid}"
     p = Project(
         id=pid,
         title=title,
         source_site="kickstarter",
         currency="USD",
+        source_url=source_url,
+        maker_url=maker_url,
         archived_at=_now() if archived else None,
     )
     db.add(p)
@@ -97,11 +116,13 @@ def make_outreach(db, pid: int, status="draft") -> None:
     db.commit()
 
 
-def make_discovery(db, pid: int, v2_status=None, email=None) -> None:
+def make_discovery(db, pid: int, v2_status=None, email=None, official_site=None) -> None:
     """`primary_email` は Project ではなく ContactDiscovery が持つ（実スキーマ準拠）。"""
     disc = ContactDiscovery(project_id=pid, v2_status=v2_status)
     if email is not None:
         disc.primary_email = email
+    if official_site is not None:
+        disc.official_site_url = official_site
     db.add(disc)
     db.commit()
 
@@ -491,7 +512,17 @@ def test_no_forbidden_calls() -> None:
 
     check("16. 実 Playwright を呼ばない", "playwright" not in low)
     check("16b. Chromium を直接起動しない", "chromium" not in low)
-    check("16c. 探索サービスを import しない", "contact_discovery_service" not in low)
+    # 探索サービスからは **判定ヘルパだけ** を借りる（探索の実行関数は呼ばない）。
+    check(
+        "16c. 探索の実行関数を呼ばない",
+        not re.search(r"run_discovery|run_contact_discovery|run_ai_research|run_web_research",
+                      code),
+    )
+    check(
+        "16d. contact_discovery_service から借りるのは判定ヘルパのみ",
+        re.findall(r"from app\.services\.contact_discovery_service import (\w+)", SCRIPT_SRC)
+        == ["is_dummy_domain"],
+    )
     check("17. 実 Brave API を呼ばない", "brave" not in low)
     check(
         "18. 外部 HTTP を行わない",
@@ -778,6 +809,256 @@ def test_documentation() -> None:
         check(f"help: --help に「{phrase}」", phrase in helptext)
 
 
+# --------------------------------------------------------------------------- #
+#  ダミー/テストデータの除外（純粋関数）
+# --------------------------------------------------------------------------- #
+def test_dummy_signals_pure() -> None:
+    def sig(**kw):
+        base = {"campaign_url": None, "official_site_url": None, "email_domain": None}
+        base.update(kw)
+        return rq.dummy_or_test_signals(**base)
+
+    check("d1. example.com の公式サイト＋campaign_urlなし → ダミー",
+          sig(official_site_url="https://example.com") != [])
+    check("d2. example.com のメール＋campaign_urlなし → ダミー",
+          sig(email_domain="example.com") != [])
+    check("d3. maker.example.com を除外",
+          sig(official_site_url="https://maker.example.com") != [])
+    check("d4. example.org を除外", sig(official_site_url="https://example.org") != [])
+    check("d4b. example.net を除外", sig(official_site_url="https://example.net") != [])
+    check("d4c. example.net メールを除外", sig(email_domain="example.net") != [])
+    check("d5. localhost を除外", sig(official_site_url="http://localhost:3000") != [])
+    check("d5b. .invalid を除外", sig(official_site_url="https://acme.invalid") != [])
+    check("d5c. localhost メールを除外", sig(email_domain="localhost") != [])
+
+    # 単独条件では除外しない（安全側）
+    check("d6. campaign_url があれば example.com でもダミー扱いしない",
+          sig(campaign_url=REAL_CAMPAIGN, official_site_url="https://example.com") == [])
+    check("d6b. campaign_url があればダミーメールでも除外しない",
+          sig(campaign_url=REAL_CAMPAIGN, email_domain="example.com") == [])
+    check("d7. campaign_url が無いだけでは除外しない（他情報なし）", sig() == [])
+    check("d7b. 実ドメインの公式サイトなら除外しない",
+          sig(official_site_url="https://acme-lab.co.jp") == [])
+    check("d7c. 実ドメインのメールなら除外しない", sig(email_domain="acme-lab.co.jp") == [])
+    check("d7d. example-brand.com のような正規ドメインを巻き込まない",
+          sig(official_site_url="https://example-brand.com") == [])
+
+    check("d8. 根拠ラベルを返す（属性名つき）",
+          "official_site:" in sig(official_site_url="https://example.com")[0])
+    check("d8b. メール由来の根拠はドメイン種別のみ",
+          sig(email_domain="example.com") == ["email_domain:reserved"])
+
+
+def test_research_seed_pure() -> None:
+    def seed(**kw):
+        base = {"campaign_url": None, "maker_url": None, "official_site_url": None}
+        base.update(kw)
+        return rq.research_seed(**base)
+
+    check("s1. campaign_url が最優先", seed(campaign_url=REAL_CAMPAIGN,
+          maker_url="https://acme-lab.co.jp") == "campaign_url")
+    check("s2. campaign_url が無ければ maker_url",
+          seed(maker_url="https://acme-lab.co.jp") == "maker_url")
+    check("s3. 次に検証済み公式サイト",
+          seed(official_site_url="https://acme-lab.co.jp") == "official_site")
+    check("s4. すべて無ければ None", seed() is None)
+    check("s5. プレースホルダー URL は起点にしない",
+          seed(official_site_url="https://maker.example.com") is None)
+    check("s5b. localhost は起点にしない", seed(maker_url="http://localhost") is None)
+    check("s6. ダミー公式サイトでも実 maker_url があれば起点になる",
+          seed(maker_url="https://acme-lab.co.jp",
+               official_site_url="https://example.com") == "maker_url")
+
+
+def test_dummy_exclusion_in_collect() -> None:
+    reset_db()
+    db = SessionLocal()
+
+    # ダミー: campaign_url なし + example.com 公式サイト + example.com メール
+    make_project(db, 200, title="Editable Gadget", source_url=None)
+    make_outreach(db, 200)
+    make_discovery(db, 200, email="a@example.com",
+                   official_site="https://maker.example.com")
+
+    # ダミー: campaign_url なし + example.org 公式サイトのみ
+    make_project(db, 201, title="Send Gadget", source_url=None)
+    make_outreach(db, 201)
+    make_discovery(db, 201, official_site="https://example.org")
+
+    # 実案件: campaign_url あり（example.com のメールを持っていても除外しない）
+    make_project(db, 202, title="実案件")
+    make_outreach(db, 202)
+    make_discovery(db, 202, email="a@example.com")
+
+    # 実案件: campaign_url なしだが maker_url あり
+    make_project(db, 203, title="maker_url あり", source_url=None,
+                 maker_url="https://acme-lab.co.jp")
+    make_outreach(db, 203)
+
+    # 実案件: campaign_url なしだが検証済み公式サイトあり
+    make_project(db, 204, title="official site あり", source_url=None)
+    make_outreach(db, 204)
+    make_discovery(db, 204, official_site="https://acme-lab.co.jp")
+
+    # 起点なし: campaign_url も maker_url も公式サイトも無い（メールだけある）
+    make_project(db, 205, title="起点なし", source_url=None)
+    make_outreach(db, 205)
+    make_discovery(db, 205, email="a@acme-lab.co.jp")
+
+    # 起点なし: maker_name だけ（メールも無い）
+    p = make_project(db, 206, title="名前だけ", source_url=None)
+    p.maker_name = "EditCo"
+    db.commit()
+    make_outreach(db, 206)
+
+    targets, excluded = rq.collect_candidates(db, active_heavy=no_active)
+    tids = [c.project_id for c in targets]
+    ex = {c.project_id: c.excluded_reason for c in excluded}
+
+    check("1. example.com 公式サイト＋campaign_urlなしを除外",
+          ex.get(200) == rq.R_DUMMY)
+    check("2. example.com メール＋campaign_urlなしを除外（同一案件で検出）",
+          "email_domain:reserved" in
+          next(c for c in excluded if c.project_id == 200).dummy_signals)
+    check("3. maker.example.com を除外",
+          "official_site:" in
+          next(c for c in excluded if c.project_id == 200).dummy_signals[0])
+    check("4. example.org を除外", ex.get(201) == rq.R_DUMMY)
+    check("7. campaign_url ありの実案件は除外しない", 202 in tids)
+    check("7b. campaign_url ありなら seed=campaign_url",
+          next(c for c in targets if c.project_id == 202).seed_kind == "campaign_url")
+    check("8. maker_url ありの正当案件は対象にする", 203 in tids)
+    check("8b. その seed は maker_url",
+          next(c for c in targets if c.project_id == 203).seed_kind == "maker_url")
+    check("9. 検証済み公式サイトありの正当案件は対象にする", 204 in tids)
+    check("9b. その seed は official_site",
+          next(c for c in targets if c.project_id == 204).seed_kind == "official_site")
+    check("6. campaign_urlなし＋起点なしを除外", ex.get(205) == rq.R_NO_SEED)
+    check("10. maker_name だけでは実行対象にしない", ex.get(206) == rq.R_NO_SEED)
+    check("10b. primary_email は起点として認めない",
+          205 not in tids and next(c for c in excluded
+                                   if c.project_id == 205).seed_kind is None)
+    check("12. タイトル名だけでは除外しない（実案件 202 の名前は無関係）", 202 in tids)
+
+    summary = rq.summarize([], excluded)
+    check("13. skipped_dummy_or_test_data を集計", summary["dummy_or_test_skipped"] == 2)
+    check("13b. skipped_no_research_seed を集計",
+          summary["no_research_seed_skipped"] == 2)
+
+    # 12b. タイトル・maker 名がダミーでも campaign_url があれば対象
+    make_project(db, 207, title="Overdue Gadget")
+    p2 = db.get(Project, 207)
+    p2.maker_name = "OverdueCo"
+    db.commit()
+    make_outreach(db, 207)
+    t2, _ = rq.collect_candidates(db, project_id=207, active_heavy=no_active)
+    check("12b. テスト風のタイトル/メーカー名でも campaign_url があれば対象",
+          [c.project_id for c in t2] == [207])
+    db.close()
+
+
+def test_dummy_no_hardcoded_ids() -> None:
+    code = _code_only()
+    check("11. project ID のハードコードがない",
+          not re.search(r"\b(13[7-9]|14[0-3])\b", code))
+    check("11b. タイトル名で判定しない",
+          "Gadget" not in SCRIPT_SRC and "Editable" not in SCRIPT_SRC)
+    check("11c. メーカー名で判定しない",
+          "EditCo" not in SCRIPT_SRC and "SendCo" not in SCRIPT_SRC)
+    check("11d. 既存ヘルパを再利用（判定を再実装しない）",
+          "is_dummy_domain" in code and "business_url_reason" in code)
+    check("11e. 予約ドメイン一覧を自前で持たない",
+          "example.com" not in code and "example.org" not in code)
+
+
+def test_dummy_json_output() -> None:
+    reset_db()
+    db = SessionLocal()
+    make_project(db, 210, title="ダミー", source_url=None)
+    make_outreach(db, 210)
+    make_discovery(db, 210, email="secret-owner@example.com",
+                   official_site="https://maker.example.com")
+    make_project(db, 211, title="実案件")
+    make_outreach(db, 211)
+    db.close()
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = rq.main(["--json", "--limit", "99"])
+    out = buf.getvalue()
+    payload = json.loads(out)
+    ex = {e["project_id"]: e for e in payload["excluded"]}
+
+    check("14. JSON に除外理由が入る",
+          ex[210]["excluded_reason"] == rq.R_DUMMY)
+    check("14b. JSON に判定根拠が入る",
+          "official_site:" in " ".join(ex[210]["dummy_signals"]))
+    check("14c. JSON に exclusion_detail が入る",
+          "reserved_domain_and_no_campaign_url" in ex[210]["exclusion_detail"])
+    check("14d. JSON に campaign_url の有無が入る",
+          ex[210]["has_campaign_url"] is False)
+    check("14e. 対象には seed_kind が入る",
+          payload["targets"][0]["seed_kind"] == "campaign_url")
+    check("15. JSON にメールアドレスを出さない",
+          "secret-owner@example.com" not in out and not re.search(r"[\w.]+@[\w.]+", out))
+    check("15b. ドメイン全文もラベル化して出す",
+          "email_domain:reserved" in json.dumps(ex[210], ensure_ascii=False))
+    check("14f. 実案件は対象に残る", payload["target_project_ids"] == [211])
+    check("14g. exit 0", code == rq.EXIT_OK)
+
+    # 人が読む出力にもダミー区分が出る
+    buf2 = io.StringIO()
+    with redirect_stdout(buf2):
+        rq.main(["--limit", "99"])
+    out2 = buf2.getvalue()
+    check("14h. dry-run 表示にダミー除外の節がある",
+          "ダミー/テストデータ除外" in out2)
+    check("14i. 表示に project_id と reason が出る",
+          "project_id=210" in out2 and "reserved_domain_and_no_campaign_url" in out2)
+    check("15c. 表示にメールアドレスを出さない", "secret-owner@example.com" not in out2)
+
+
+def test_dummy_no_side_effects() -> None:
+    reset_db()
+    db = SessionLocal()
+    make_project(db, 220, title="ダミー", source_url=None)
+    make_outreach(db, 220)
+    make_discovery(db, 220, official_site="https://maker.example.com")
+    make_project(db, 221, title="実案件")
+    make_outreach(db, 221)
+    before = counts(db)
+    db.close()
+
+    fake = FakeCreateJob()
+    orig = ci.create_job
+    ci.create_job = fake
+    try:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rq.main(["--limit", "99"])
+    finally:
+        ci.create_job = orig
+
+    db = SessionLocal()
+    after = counts(db)
+    db.close()
+    check("16. dry-run で DB 書き込みなし", before == after)
+    check("17. create_job 呼び出しなし", fake.calls == [])
+
+    body = _code_only()
+    check("18. 外部 HTTP なし",
+          not re.search(r"\b(requests|httpx|urllib|aiohttp)\b", body))
+    check("19. Brave API なし", "brave" not in body.lower())
+    check("20. Playwright なし", "playwright" not in body.lower())
+    check("21. Gmail API なし", "gmail" not in body.lower())
+    check("22. LQE run なし",
+          "lead_qualification" not in body.lower() and not re.search(r"\brun\(", body))
+    check("23. contact_intel_eval に触れない",
+          "contact_intel_eval" not in SCRIPT_SRC)
+    check("23b. 再利用するのは判定ヘルパのみ（探索サービスを呼ばない）",
+          "run_discovery" not in body and "run_contact_discovery" not in body)
+
+
 def main() -> int:
     print("=== requeue_contact_intelligence ===")
     test_dry_run_default()
@@ -793,6 +1074,13 @@ def main() -> int:
     test_audit_counts()
     test_reason_recorded()
     test_documentation()
+    print("--- ダミー/テストデータ除外 ---")
+    test_dummy_signals_pure()
+    test_research_seed_pure()
+    test_dummy_exclusion_in_collect()
+    test_dummy_no_hardcoded_ids()
+    test_dummy_json_output()
+    test_dummy_no_side_effects()
     print(f"\n{_passed} passed / {_failed} failed")
     return _failed
 

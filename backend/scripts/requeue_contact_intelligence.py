@@ -12,6 +12,18 @@
 - **同時実行は常に 1 件**（全体で）。`--limit` を 2 以上にする場合は `--wait` が必須です。
 - 実行前に人の承認が必要です。まず dry-run で対象件数と project ID を提示してください。
 
+対象から外すもの
+----------------
+- **ダミー/テストデータ**（`skipped_dummy_or_test_data`）:
+  campaign_url が取れておらず、かつ保存済みの公式サイト / メールドメインが
+  予約・プレースホルダードメイン（example.com / localhost / .invalid など）のもの。
+  判定は既存の `url_validation` / `is_dummy_domain` に委ね、
+  **project ID・タイトル・メーカー名では判定しない。**
+- **探索の起点が無いもの**（`skipped_no_research_seed`）:
+  campaign_url / maker_url / 検証済み公式サイト のいずれも無い案件。
+  **primary_email と maker_name は起点として認めない**（誤候補を生み、
+  Brave のクォータを消費するだけで証拠が得られる見込みがないため）。
+
 やらないこと
 ------------
 - LQE の `run()` を呼ばない（`pre_research` / `pre_outreach` を再判定しない）
@@ -61,8 +73,12 @@ from app.models.contact_intelligence_job import (  # noqa: E402
 )
 from app.models.project import Project  # noqa: E402
 from app.models.sales_outreach import SalesOutreach  # noqa: E402
+from app.services import campaign_url as campaign_url_mod  # noqa: E402
 from app.services import contact_intelligence_service as ci  # noqa: E402
 from app.services import contact_search_gate  # noqa: E402
+# ダミー/プレースホルダー判定は既存の正本を再利用する（同じロジックを再実装しない）。
+from app.services.contact_discovery_service import is_dummy_domain  # noqa: E402
+from app.services.url_validation import business_url_reason  # noqa: E402
 
 logger = logging.getLogger("requeue_contact_intelligence")
 
@@ -97,6 +113,8 @@ R_ENQUEUED = "enqueued"
 R_NO_PROJECT = "skipped_no_project"
 R_ARCHIVED = "skipped_archived"
 R_V2_COMPLETED = "skipped_already_completed"
+R_DUMMY = "skipped_dummy_or_test_data"
+R_NO_SEED = "skipped_no_research_seed"
 R_ACTIVE_JOB = "skipped_active_job"
 R_OTHER_PROJECT_ACTIVE = "skipped_other_project_active"
 R_CACHE = "skipped_cache_reused"
@@ -125,6 +143,12 @@ class Candidate:
     active_job_id: int | None = None
     gate_decision: str | None = None
     excluded_reason: str | None = None
+    #: 探索の起点（"campaign_url" / "maker_url" / "official_site"）。無ければ None。
+    seed_kind: str | None = None
+    has_campaign_url: bool = False
+    #: ダミー判定の根拠（属性名とラベルのみ。値そのものは持たない）。
+    dummy_signals: list[str] = field(default_factory=list)
+    exclusion_detail: str | None = None
 
     def to_public(self) -> dict:
         """外部へ出す形。**メールアドレス・API キー・Cookie は含めない。**"""
@@ -136,9 +160,13 @@ class Candidate:
             "v2_status": self.v2_status,
             "has_discovery_row": self.has_discovery_row,
             "has_primary_email": self.has_primary_email,
+            "has_campaign_url": self.has_campaign_url,
+            "seed_kind": self.seed_kind,
+            "dummy_signals": self.dummy_signals,
             "latest_job": self.latest_job,
             "gate_decision": self.gate_decision,
             "excluded_reason": self.excluded_reason,
+            "exclusion_detail": self.exclusion_detail,
         }
 
 
@@ -218,6 +246,73 @@ def _gate_decision(db, project: Project) -> str | None:
         return None
 
 
+def _email_domain(addr: str | None) -> str | None:
+    """メールアドレスからドメインだけを取り出す（**ローカル部は捨てる**）。"""
+    if not addr or "@" not in addr:
+        return None
+    return addr.rsplit("@", 1)[1].strip().lower() or None
+
+
+def dummy_or_test_signals(
+    *,
+    campaign_url: str | None,
+    official_site_url: str | None,
+    email_domain: str | None,
+) -> list[str]:
+    """実案件として成立しないダミー/テストデータの根拠を返す（純粋関数）。
+
+    **単独条件では除外しない。** 商品ページ URL（campaign_url）が取れていない案件に
+    限り、保存済みの公式サイト / メールドメインが予約・プレースホルダードメイン
+    （example.com / localhost / .invalid など）かを見る。campaign_url がある案件は
+    実在の商品ページを持つので、ここでは絶対にダミー扱いしない。
+
+    判定そのものは既存の正本（``url_validation`` / ``is_dummy_domain``）に委ねる。
+    **project ID・タイトル・メーカー名では判定しない**（実案件を巻き込むため）。
+
+    Returns:
+        根拠のラベル列。空なら「ダミーとは言えない」。
+    """
+    if campaign_url:
+        return []
+    signals: list[str] = []
+    if official_site_url:
+        reason = business_url_reason(official_site_url)
+        if reason:
+            signals.append(f"official_site:{reason}")
+    if email_domain and is_dummy_domain(email_domain):
+        signals.append("email_domain:reserved")
+    return signals
+
+
+def research_seed(
+    *,
+    campaign_url: str | None,
+    maker_url: str | None,
+    official_site_url: str | None,
+) -> str | None:
+    """v2 探索の起点になりうる種別を優先順に返す。無ければ None。
+
+    優先順位は 1. campaign_url → 2. maker_url → 3. 検証済み公式サイト。
+    creator URL は campaign_url から派生するため、campaign_url が無い時点で
+    creator URL も存在しない（別枠では扱わない）。
+
+    **``primary_email`` と ``maker_name`` は起点として認めない。** メーカー名だけの
+    検索は誤候補を生みやすく（実測: 韓国語社名で候補 8 件すべて不採用）、
+    Brave のクォータを消費するだけで証拠が得られる合理的見込みがないため。
+
+    いずれも「営業に使える URL」であることを既存の ``business_url_reason`` で確認する
+    （プレースホルダー URL は起点として採用しない）。
+    """
+    for kind, url in (
+        ("campaign_url", campaign_url),
+        ("maker_url", maker_url),
+        ("official_site", official_site_url),
+    ):
+        if url and business_url_reason(url) is None:
+            return kind
+    return None
+
+
 def dedupe_rows(rows) -> dict[int, Candidate]:
     """`(project_id, outreach_status)` の行を project 単位へ畳む（純粋関数）。
 
@@ -286,14 +381,23 @@ def collect_candidates(
             .order_by(ContactDiscovery.id.desc())
             .limit(1)
         )
+        official_site: str | None = None
+        email_domain: str | None = None
         if disc is not None:
             cand.has_discovery_row = True
             cand.v2_status = disc.v2_status
-            # **アドレス自体は保持しない。** 有無だけを見る。
-            cand.has_primary_email = bool(
-                getattr(disc, "v2_primary_email", None)
-                or getattr(disc, "primary_email", None)
+            # **アドレス自体は保持しない。** 有無とドメインだけを見る。
+            primary = getattr(disc, "v2_primary_email", None) or getattr(
+                disc, "primary_email", None
             )
+            cand.has_primary_email = bool(primary)
+            email_domain = _email_domain(primary)
+            official_site = getattr(disc, "v2_official_site_url", None) or getattr(
+                disc, "official_site_url", None
+            )
+
+        campaign = campaign_url_mod.campaign_url_of(project)
+        cand.has_campaign_url = bool(campaign)
 
         if project.archived_at is not None:
             cand.excluded_reason = R_ARCHIVED
@@ -301,6 +405,34 @@ def collect_candidates(
             continue
         if cand.v2_status == V2_COMPLETED:
             cand.excluded_reason = R_V2_COMPLETED
+            excluded.append(cand)
+            continue
+
+        # 実案件として成立しないダミー/テストデータを除外する。
+        cand.dummy_signals = dummy_or_test_signals(
+            campaign_url=campaign,
+            official_site_url=official_site,
+            email_domain=email_domain,
+        )
+        if cand.dummy_signals:
+            cand.excluded_reason = R_DUMMY
+            cand.exclusion_detail = "reserved_domain_and_no_campaign_url: " + ",".join(
+                cand.dummy_signals
+            )
+            excluded.append(cand)
+            continue
+
+        # 探索の起点が無ければ再調査しても証拠を得られる見込みがない。
+        cand.seed_kind = research_seed(
+            campaign_url=campaign,
+            maker_url=getattr(project, "maker_url", None),
+            official_site_url=official_site,
+        )
+        if cand.seed_kind is None:
+            cand.excluded_reason = R_NO_SEED
+            cand.exclusion_detail = (
+                "campaign_url / maker_url / 検証済み公式サイト のいずれも無い"
+            )
             excluded.append(cand)
             continue
 
@@ -513,6 +645,15 @@ def summarize(results: list[dict], excluded: list[Candidate]) -> dict:
         "already_completed_skipped": sum(
             1 for c in excluded if c.excluded_reason == R_V2_COMPLETED
         ),
+        "dummy_or_test_skipped": sum(
+            1 for c in excluded if c.excluded_reason == R_DUMMY
+        ),
+        "no_research_seed_skipped": sum(
+            1 for c in excluded if c.excluded_reason == R_NO_SEED
+        ),
+        "archived_skipped": sum(
+            1 for c in excluded if c.excluded_reason == R_ARCHIVED
+        ),
         "cache_reused": sum(1 for r in results if r["result"] == R_CACHE),
         "gate_blocked": sum(1 for r in results if r["result"] == R_GATE_BLOCKED),
     }
@@ -603,14 +744,15 @@ def _print_targets(targets: list[Candidate], excluded: list[Candidate]) -> None:
         print("=== 対象 ===")
         print(
             f"{'pid':>5}  {'outreach':<16} {'v2_status':<12} {'gate':<14} "
-            f"{'email':<6} {'latest_job':<38} name"
+            f"{'seed':<14} {'email':<6} {'latest_job':<34} name"
         )
         for c in targets:
             print(
                 f"{c.project_id:>5}  {','.join(c.outreach_statuses)[:16]:<16} "
                 f"{str(c.v2_status):<12} {str(c.gate_decision):<14} "
+                f"{str(c.seed_kind):<14} "
                 f"{'有' if c.has_primary_email else '無':<6} "
-                f"{str(c.latest_job)[:38]:<38} {str(c.project_name)[:40]}"
+                f"{str(c.latest_job)[:34]:<34} {str(c.project_name)[:36]}"
             )
         print("")
         print("対象 project ID: " + ", ".join(str(c.project_id) for c in targets))
@@ -618,12 +760,24 @@ def _print_targets(targets: list[Candidate], excluded: list[Candidate]) -> None:
     if excluded:
         print("=== 除外 ===")
         for c in excluded:
+            detail = f" | {c.exclusion_detail}" if c.exclusion_detail else ""
             print(
                 f"{c.project_id:>5}  {c.excluded_reason:<28} "
-                f"v2_status={c.v2_status} {str(c.project_name)[:36]}"
+                f"campaign_url={'有' if c.has_campaign_url else '無'} "
+                f"v2_status={c.v2_status} {str(c.project_name)[:30]}{detail}"
             )
         print("")
-    print("※ メールアドレスは表示しません（有無のみ）")
+        dummies = [c for c in excluded if c.excluded_reason == R_DUMMY]
+        if dummies:
+            print(f"=== ダミー/テストデータ除外: {len(dummies)} 件 ===")
+            for c in dummies:
+                print(
+                    f"  project_id={c.project_id} "
+                    f"reason=reserved_domain_and_no_campaign_url "
+                    f"signals={','.join(c.dummy_signals)}"
+                )
+            print("")
+    print("※ メールアドレスは表示しません（有無とドメイン種別のみ）")
 
 
 def main(argv: list[str] | None = None) -> int:
