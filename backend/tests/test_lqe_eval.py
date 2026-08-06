@@ -177,10 +177,23 @@ def test_ground_truth():
           all(r["should_research"] in (True, False, None) for r in GT))
     check("should_allow_outreach は True/False/None のみ",
           all(r["should_allow_outreach"] in (True, False, None) for r in GT))
-    check("**人の承認前は verified にしない**",
-          not any(r["verification_status"] == "verified" for r in GT))
-    check("unresolved が存在する（不明を丸めていない）",
-          any(r["verification_status"] == "unresolved" for r in GT))
+    # **verified は人の承認があるときだけ。** AI 単独で verified にしない。
+    ai_verified = [r for r in GT
+                   if r["verification_status"] == "verified"
+                   and "AI proposal" in str(r["reviewer"])]
+    check("AI 単独で verified にしていない", ai_verified == [])
+    check("verified には人のレビュアーが記録されている",
+          all(str(r["reviewer"]).strip() and "AI proposal" not in str(r["reviewer"])
+              for r in GT if r["verification_status"] == "verified"))
+    # 承認の履歴（どの状態から verified になったか）を残す。
+    approved = [r for r in GT if r.get("approval_source") == "user_approval"]
+    check("承認元が記録されている", len(approved) == len(GT))
+    check("承認前の状態が記録されている",
+          all(r.get("previous_verification_status") in run_eval.VALID_STATUS
+              for r in approved))
+    check("不明ラベル（null）は丸めずに残っている",
+          any(r["should_research"] is None or r["should_allow_outreach"] is None
+              for r in GT))
 
 
 # --------------------------------------------------------------------------- #
@@ -269,15 +282,21 @@ def test_reproducible():
           == json.dumps(b, ensure_ascii=False, sort_keys=True))
 
 
-def test_incomplete_ground_truth_fails():
-    """人手レビュー未完了なら run_eval は成功終了しない。"""
-    print("test_incomplete_ground_truth_fails")
+def test_ground_truth_completion_gate():
+    """人手レビューの完了状況を数え、未完了なら run_eval が成功終了しないこと。"""
+    print("test_ground_truth_completion_gate")
     verified, reviewed = run_eval.gt_progress({r["case_id"]: r for r in GT})
     check("verified 件数を数えられる", isinstance(verified, int))
-    check("現在は未完了（verified < 30）", verified < 30)
+    check("現在は 30/30 verified（人の承認済み）", verified == 30)
+    check("reviewed も 30/30", reviewed == 30)
     src = (EVAL_DIR / "run_eval.py").read_text(encoding="utf-8")
     check("未完了時に非0終了する分岐がある", "Ground Truth incomplete" in src)
     check("非0終了コードを返す", "return 2" in src)
+    # 未完了に戻した場合はゲートが働くことを、実データを壊さず確認する。
+    fake = {r["case_id"]: dict(r) for r in GT}
+    fake["LQ01"]["verification_status"] = "unresolved"
+    v2, _ = run_eval.gt_progress(fake)
+    check("1件でも未 verified なら verified 件数が減る", v2 == 29)
 
 
 def test_report_generation():
@@ -338,7 +357,7 @@ def main():
     test_metrics()
     test_tri_state_not_folded()
     test_reproducible()
-    test_incomplete_ground_truth_fails()
+    test_ground_truth_completion_gate()
     test_report_generation()
     test_scope_untouched()
     print(f"\n{_passed} passed / {_failed} failed")
