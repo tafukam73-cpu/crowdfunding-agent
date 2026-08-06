@@ -1,6 +1,6 @@
 ---
 name: ground-truth-audit
-description: Contact Intelligence の評価用 Ground Truth を人手検証ベースで健全に保ち、gold 汚染（実装の出力を正解として取り込む）を防ぐ。「精度を測って」「評価して」「gold set」「ground truth」「eval を回して」「本当に改善した？」と言われたときに使う。backend/tests/contact_intel_eval/ の既存ハーネスを正本とし、未追跡9ファイルには触れない。
+description: 評価用 Ground Truth を人手検証ベースで健全に保ち、gold 汚染（実装の出力を正解として取り込む）を防ぐ。「精度を測って」「評価して」「gold set」「ground truth」「eval を回して」「本当に改善した？」「過剰除外してない？」と言われたときに使う。連絡先探索の評価（contact_intel_eval）と営業対象判定の評価（lqe_eval）は目的が違うため混ぜない。未追跡9ファイルには触れない。
 ---
 
 # Ground Truth 監査（Ground Truth Audit）
@@ -18,6 +18,67 @@ _report_phase2.py            _report_v2.py         _select_eval30.py
 ```
 
 **`git add -A` / `git add .` / `git commit -a` は使用禁止**です。パスを明示して stage してください。
+
+## 2 つの評価セットを混ぜない
+
+目的が違うため、**サンプルも指標も別**です。片方の結果でもう片方を語らないでください。
+
+| | `backend/tests/contact_intel_eval/` | `backend/tests/lqe_eval/` |
+|---|---|---|
+| 測るもの | **連絡先探索の精度**（official site / email の precision・recall） | **営業対象判定の精度**（除外の正しさ） |
+| サンプル | 「公式サイトも連絡先も取れなかった困難ケース」に意図的に偏らせた 30 件 | 営業対象母集団からの**層化サンプル** 30 件（KS10 / IGG5 / Wadiz10 / Zeczec5） |
+| 最重要指標 | precision / recall | **過剰除外率** |
+| 実行 | `python tests/contact_intel_eval/eval_v2.py` | `python tests/lqe_eval/run_eval.py` |
+| 保護9ファイル | **ここにある**（触らない） | 無関係（完全に分離） |
+
+`contact_intel_eval` の 30 件は探索が難しいケースに偏っており、**除外判定の評価には
+使えません**（営業可能な案件がほとんど含まれず、最大リスクである過剰除外率を測れない）。
+
+## lqe_eval の指標（営業対象判定）
+
+**最重要は「過剰除外率」**です。営業できる案件を止める誤りは画面に出ず気付けません。
+
+| # | 指標 | 見方 |
+|---|---|---|
+| 1 | **過剰除外率** | 人手で「調査すべき」なのに `pre_research=blocked` にした割合 |
+| 2 | 誤送信許可率 | 人手で「送るべきでない」なのに `pre_outreach=clear` にした割合 |
+| 6 | Evidence 充足率 | blocker/review の Finding に 4 点セットが揃っている割合 |
+| 8 | **サイト別集計** | 層化サンプルなのでサイト差を必ず見る |
+| 10 | 調査削減量 | blocked 件数 − 過剰除外 = 純削減件数 |
+
+**率は必ず `分子/分母` を先に**読みます（N=30 と小さいため、小数だけで判断しない）。
+分母 0 は `N/A` とし、0% と書きません。
+
+**返信率・成功率・可能性予測は算出しません**（CLAUDE.md §1）。
+「調査削減量」の時間換算は、同一環境での実測（件数・日時・平均・中央値）が無い限り
+出さず、主指標にもしません。
+
+## Ground Truth の変更手順（両セット共通）
+
+**変更は人の明示レビューのみ。AI が確定してはいけません。**
+
+1. 対象ケースの根拠を実際に取得して確認する（推測で確定しない）
+2. `reviewer` / `reviewed_at` / `reviewer_reason` を**必ず**書く
+3. `verification_status` を `verified` / `partially_verified` / `unresolved` から選ぶ
+4. `evidence_urls` が空なら `evidence_notes` に理由を書く
+5. 変更理由を PR 本文へ残す
+
+- **`unresolved` を率の分母に混ぜない。** 件数は別掲する
+- **不明を成功・失敗へ丸めない。** `should_research` / `should_allow_outreach` は
+  True / False / `null`（不明）の 3 値で、`null` は分母から除外する
+- **自動修正禁止。** スクリプトが Ground Truth を書き換えてはいけない
+- AI はラベル**案**を出してよいが、`verified` にするのは人だけ
+
+## 評価 PR ではルールを修正しない
+
+評価で問題（過剰除外・Evidence 不足など）を見つけても、**同じ PR でルールを直しません。**
+
+- 評価 PR は「測る」だけ
+- 問題は**別 Issue / 別 PR**として起票する
+- 修正は明示承認のうえ別 PR で行う
+
+理由: 測定と修正を同じ PR に混ぜると、「その修正で本当に良くなったのか」を
+同じ物差しで確かめられなくなるためです。
 
 ## 既存ハーネス（追跡済み・これを使う）
 
